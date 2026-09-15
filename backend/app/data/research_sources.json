@@ -1,0 +1,64 @@
+{
+  "meta": {
+    "description": "由《资料数据搜集地汇聚.pdf》与《信息网站整理.xlsx》整理；用于补全行业/行研信息入口。",
+    "updated": "2026-03-24"
+  },
+  "priority_tech_vc": [
+    {
+      "id": "36kr",
+      "name": "36氪",
+      "role": "创投媒体 + 行业资讯；行研见「36氪研究院」",
+      "rss": "https://36kr.com/feed",
+      "news_home": "https://36kr.com/",
+      "research_portal": "https://research.36kr.com/report.html",
+      "notes": "主站 RSS 聚合最新文章；完整行业报告一般在研究院页面浏览或按站内需登录下载。"
+    },
+    {
+      "id": "huxiu",
+      "name": "虎嗅",
+      "role": "创投/TMT 深度观点与原创",
+      "rss_all": "https://www.huxiu.com/rss/0.xml",
+      "rss_channel": "https://www.huxiu.com/rss/1.xml",
+      "news_home": "https://www.huxiu.com/",
+      "notes": "RSS 为公开摘要与链接；站内「深度」栏目需在浏览器打开原文。"
+    }
+  ],
+  "research_and_data_portals": [
+    {"category": "综合行研/报告聚合", "items": [
+      {"name": "萝卜投研", "url": "https://robo.datayes.com/"},
+      {"name": "发现报告", "url": "https://www.fxbaogao.com/"},
+      {"name": "199IT", "url": "http://www.199it.com/"},
+      {"name": "前沿报告库 (前瞻)", "url": "https://wk.askci.com/"},
+      {"name": "艾瑞咨询", "url": "https://www.iresearch.com.cn/"},
+      {"name": "易观", "url": "https://www.analysys.cn/"},
+      {"name": "艾媒报告", "url": "http://report.iimedia.cn/search.jsp"},
+      {"name": "前瞻产业研究院", "url": "https://bg.qianzhan.com/report/free"},
+      {"name": "麦肯锡 Insights 中国", "url": "https://www.mckinsey.com.cn/insights/"},
+      {"name": "CBNData", "url": "https://www.cbndata.com/report"}
+    ]},
+    {"category": "移动/互联网数据", "items": [
+      {"name": "极光大数据报告", "url": "https://www.jiguang.cn/reports"},
+      {"name": "QuestMobile", "url": "http://www.questmobile.com.cn/"},
+      {"name": "七麦数据", "url": "https://www.qimai.cn/"},
+      {"name": "友盟+", "url": "https://info.umeng.com/"}
+    ]},
+    {"category": "垂直智库/研究院", "items": [
+      {"name": "阿里研究院", "url": "http://www.aliresearch.com/"},
+      {"name": "企鹅智酷", "url": "http://tech.qq.com/biznext/list.html"},
+      {"name": "亿欧智库", "url": "https://www.iyiou.com/intelligence/report/"},
+      {"name": "钛媒体报告", "url": "http://www.tmtpost.com/base/data/report"}
+    ]},
+    {"category": "创投与投融资数据", "items": [
+      {"name": "IT桔子", "url": "https://www.itjuzi.com/"},
+      {"name": "烯牛数据", "url": "http://www.xiniudata.com/"},
+      {"name": "鲸准", "url": "https://rong.jingdata.com/"},
+      {"name": "企名片", "url": "https://www.qimingpian.cn/finosda/project/pquery"}
+    ]},
+    {"category": "证券与披露", "items": [
+      {"name": "巨潮资讯", "url": "http://www.cninfo.com.cn/new/index"},
+      {"name": "SEC EDGAR", "url": "https://www.sec.gov/edgar/searchedgar/companysearch.html"},
+      {"name": "披露易 (港股)", "url": "https://www.hkexnews.hk/index_c.htm"}
+    ]}
+  ],
+  "download_policy": "本应用仅聚合公开 RSS 与官方入口链接。行业报告 PDF 多受版权与登录限制，请在各平台站内合规下载；勿对付费内容做未授权批量抓取。"
+}

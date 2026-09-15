@@ -1,0 +1,46 @@
+# Secrets — never commit
+backend/.env
+frontend/.env
+.env
+.envrc
+
+# Local runtime data (credentials, SQLite, caches)
+backend/data/**
+!backend/data/.gitkeep
+
+backend/.venv/
+backend/.venv.invalid.*/
+backend/.venv.broken.*/
+backend/.venv-test/
+__pycache__/
+*.py[cod]
+*.pyo
+backend/app/data/*
+!backend/app/data/research_sources.json
+.DS_Store
+frontend/node_modules
+frontend/node_modules/
+frontend/node_modules.invalid.*/
+frontend/dist/
+
+# User uploads
+kline_learning/
+issuer_uploads/
+
+.venv/
+venv/
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.cursorignore
+.cursorindexingignore
+
+logs/
+pids/
+*.csv

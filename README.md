@@ -1,0 +1,75 @@
+# StockViewAgent
+
+本地运行的 **A 股单股多策略走势观点 Agent**：选一只股票、一个时间节点，在同一页查看 K 线、多策略观点、相关新闻解读和公司信息。
+
+默认 **不必登录**（`AUTH_REQUIRED=false`），适合克隆到本机自托管。所有结论仅供研究参考，**不构成投资建议**。
+
+## 快速开始
+
+需要 **Python 3.11–3.13** 与 **Node.js 20+**（不要用 Python 3.14）。
+
+```bash
+git clone https://github.com/fxfxfx99/StockViewAgent.git
+cd StockViewAgent
+./start.sh
+```
+
+打开 <http://127.0.0.1:5175/>，按提示进入 **配置台**（或 `/setup`）：
+
+1. 大模型 API（OpenAI 兼容的 Key / Base / Model）
+2. 行情接口：推荐 [KlineShare](https://data.klineshare.cn/docs)，或 Tushare / 仅公开源
+
+更完整的步骤、端口、Docker 与排错见 **[docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md)**。
+
+```bash
+./scripts/check-env.sh   # 检查本机环境
+./scripts/setup.sh       # 只安装依赖
+./scripts/dev.sh         # 只启动
+```
+
+健康检查：<http://127.0.0.1:8001/api/health>  
+OpenAPI：<http://127.0.0.1:8001/docs>
+
+默认端口：后端 `8001`，前端 `5175`。占用时可 `BACKEND_PORT=8010 FRONTEND_PORT=5180 ./start.sh`。
+
+## 界面做什么
+
+单页纵向浏览，URL 深链 `?chart=600519.SS&as_of=2026-09-01`：
+
+- 股票列表（可检索、导入）
+- K 线
+- 多策略观点（Transaction Agent）
+- 相关新闻解读（更新新闻 / 补充分析）
+- 公司信息
+
+量化、宏观、信号复盘等 **后端 API 仍保留**，供脚本与后续扩展使用，见 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)。
+
+## 配置与密钥
+
+优先在浏览器 **配置台** 填写（写入 `backend/data/`，已忽略出版本库）。也可以编辑 `backend/.env`（从 `backend/.env.example` 复制）。
+
+公网部署请设置 `AUTH_REQUIRED=true`，并修改 JWT 密钥与初始密码。
+
+**不要提交** `backend/.env`、`frontend/.env`、`backend/data/`。`./scripts/setup.sh` 会生成随机 `AUTH_JWT_SECRET`。
+
+## Docker
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up -d --build
+```
+
+入口默认 <http://127.0.0.1:8080/>。详见 [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md#docker)。
+
+## 开发
+
+约定见 [AGENTS.md](AGENTS.md)。协作说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+```bash
+cd backend && .venv/bin/python -m pytest tests/ -q
+cd frontend && npm run build
+```
+
+## 许可
+
+见 [LICENSE](LICENSE)。

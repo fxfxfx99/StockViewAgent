@@ -1,0 +1,31 @@
+# 使用前：cp backend/.env.example backend/.env 并按 docs/LOCAL_SETUP.md 填写密钥。
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    env_file:
+      - backend/.env
+    environment:
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-false}
+    volumes:
+      - stockviewagent_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports:
+      - "${PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  stockviewagent_data:

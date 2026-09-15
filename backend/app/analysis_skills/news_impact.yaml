@@ -1,0 +1,7 @@
+name: news_impact
+display_name: 新闻舆情影响（默认）
+description: 证券新闻对用户股票列表标的的潜在影响分析
+
+instructions: |
+  输出须严谨：区分事实与推测；若信息不足，impact_direction 填「不确定」并降低 confidence。
+  涉及监管、诉讼、重大合同等须单独在 summary 中点明时间线不确定性。
