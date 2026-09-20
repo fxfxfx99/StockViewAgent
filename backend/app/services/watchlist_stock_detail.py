@@ -1,6 +1,6 @@
 """股票列表标的：详情（扩展行情 + 板块 + 本地公司简介）。
 
-日 K 线图统一由 ``kline_pipeline`` / ``GET /api/market/kline`` 提供，本模块不再重复拉取 K 线，避免与「K 线行情」重复请求东财接口。
+日 K 线图由 ``kline_pipeline`` / ``GET /api/market/kline`` 提供；本模块负责公司资料与行情摘要。
 """
 from __future__ import annotations
 

@@ -22,7 +22,7 @@
 | 1 | `eastmoney` | 东财分钟 K |
 | 2 | `tencent_mkline_fallback` | 腾讯 `ifzq` mkline |
 | 3 | `baostock_minute_fallback` | Baostock 仅支持 **5 / 15 / 30 / 60** 分钟；`1m`/`2m` 会跳过 |
-| 4 | `pytdx_minute_fallback` | Pytdx 分钟类 K 线（单次最多约 800 根，多根需扩展时可再迭代） |
+| 4 | `pytdx_minute_fallback` | Pytdx 分钟类 K 线（单次最多约 800 根） |
 
 ## Pytdx 与官方 API 对齐（`kline_pytdx.py`）
 
@@ -51,8 +51,8 @@ FREE_STOCKDB_BASE_URL=http://127.0.0.1:7899
 
 ## 与「股票详情」接口的关系
 
-- `GET /api/watchlist/stock-detail` **不再**单独拉取日 K 线；列表区迷你 K、长 K 线均以 **`GET /api/market/kline`**（上表调用链）为准，避免与「K 线行情」重复请求东财 `push2his`。
-- 详情接口仍使用东财 **push2**（扩展快照）、**slist**（板块）及本地 `watchlist_profiles`，与主 K 线同属东方财富公开链路，互为补充而非重复拉 K 线。
+- `GET /api/watchlist/stock-detail` 提供股票详情；列表区迷你 K、长 K 线均通过 **`GET /api/market/kline`**（上表调用链）获取。
+- 详情接口使用东财 **push2**（扩展快照）、**slist**（板块）及本地 `watchlist_profiles`，与主 K 线互为补充。
 
 ## 依赖
 

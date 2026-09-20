@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # 合并后返回的最大条数（多源聚合）
     news_feed_max_items: int = 250
 
-    # 新闻解读：仅分析 published_ts 在 N 天内的条目；0=不限制（与 daily_stock_analysis 新闻时效策略对齐）
+    # 新闻解读：仅分析 published_ts 在 N 天内的条目；0=不限制。
     news_max_age_days: int = 0
     news_relevance_threshold: int = 60
 
@@ -108,7 +108,7 @@ class Settings(BaseSettings):
 
     @property
     def effective_tushare_token(self) -> str:
-        """当前账户配置优先，其次旧版平台配置和环境变量。"""
+        """当前账户配置优先，其次平台配置和环境变量。"""
         from app.security.user_context import current_user_id
         from app.storage.integrations_store import load_integrations
         from app.storage.user_credentials_store import load_user_credentials

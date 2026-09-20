@@ -1,6 +1,6 @@
 # 本机配置与启动
 
-从 GitHub 克隆后，用这一份即可在本机跑起来。密钥不要写进仓库。
+本文说明本地依赖、配置与启动流程。密钥保存在本机，不提交版本库。
 
 ## 需要提前安装
 
@@ -30,7 +30,7 @@ cd StockViewAgent
 
 脚本会：检测 Python/Node → 创建 `backend/.venv` → 按依赖文件哈希安装或跳过依赖 → 从示例生成 `backend/.env` 并写入随机 `AUTH_JWT_SECRET` → 启动后端 **8001** 与前端 **5175**。更新代码后再次运行即可同步变更的依赖。
 
-前后端都通过就绪检查后才报告启动成功。端口冲突、启动失败或任一服务意外退出时，脚本会报错并清理本次启动的进程；按 `Ctrl+C` 同时停止两个服务。后端请求最多等待 10 秒收尾，整个停止流程等待 15 秒后会强制清理本次启动的进程组，避免新闻抓取等长任务阻塞重启。
+前后端都通过就绪检查后才报告启动成功。端口冲突、启动失败或任一服务意外退出时，脚本会报错并清理由该脚本启动的进程；按 `Ctrl+C` 同时停止两个服务。后端请求最多等待 10 秒收尾，整个停止流程等待 15 秒后会强制清理对应进程组，避免新闻抓取等长任务阻塞重启。
 
 浏览器打开 <http://127.0.0.1:5175/>。
 
@@ -73,7 +73,7 @@ FRONTEND_HOST=0.0.0.0 CORS_ALLOWED_ORIGINS=http://192.168.1.20:5175 ./start.sh
 
 浏览器默认仅允许 `http(s)://localhost`、`127.0.0.1`、`[::1]` 的任意端口。局域网或部署域名需要在 `CORS_ALLOWED_ORIGINS` 登记完整来源（协议、主机、非默认端口），多个来源用逗号分隔；例如 `https://stocks.example.com,http://192.168.1.20:5175`，不要包含路径、末尾 `/` 或 `*`。即使前端与 API 经代理部署于同一域名，也需要登记浏览器地址。
 
-请求 `Host` 仅允许 loopback 或上述明确登记的主机，不信任 `X-Forwarded-Host`；自定义反向代理应保留已登记的外部 `Host`，或使用 loopback 后端地址。现有 Vite 代理与 Docker Nginx 配置已兼容。未登记的来源或请求主机均返回 403，包括预检与无 `Origin` 请求；可信主机上的 CLI / Agent 无 `Origin` 请求保持可用。此校验不改变 `AUTH_REQUIRED=false` 的本地免登录行为。
+请求 `Host` 仅允许 loopback 或上述明确登记的主机，不信任 `X-Forwarded-Host`；自定义反向代理应保留已登记的外部 `Host`，或使用 loopback 后端地址。项目的 Vite 代理与 Docker Nginx 配置支持此校验。未登记的来源或请求主机均返回 403，包括预检与无 `Origin` 请求；可信主机上的 CLI / Agent 无 `Origin` 请求保持可用。`AUTH_REQUIRED=false` 时本地免登录。
 
 健康检查：<http://127.0.0.1:8001/api/health>  
 配置状态：<http://127.0.0.1:8001/api/settings/setup-status>  
@@ -137,7 +137,7 @@ docker compose up -d --build
 (cd frontend && npm test && npm run build)
 ```
 
-前端依赖审计使用 `cd frontend && npm audit`。当前采用 Vite 6.4.3 与 ECharts 6.1.0：Vite 6.4 分支仍接收[官方安全更新](https://vite.dev/releases)，保留现有 Node 20 / 22 / 24 环境；ECharts 6 的[升级指南](https://echarts.apache.org/handbook/zh/basics/release-note/v6-upgrade-guide/)说明了默认主题和轴标签避让的变化。升级依赖时同时检查 K 线、指标切换、缩放与小图布局，并提交 `package-lock.json`。
+前端依赖审计使用 `cd frontend && npm audit`。依赖版本以 `frontend/package.json` 和 `package-lock.json` 为准。升级前查阅 [Vite 发行说明](https://vite.dev/releases)和 [ECharts 升级指南](https://echarts.apache.org/handbook/zh/basics/release-note/v6-upgrade-guide/)，升级后检查 K 线、指标切换、缩放与小图布局，并提交 `package-lock.json`。
 
 ## 不要提交
 
@@ -162,6 +162,6 @@ docker compose up -d --build
 | 局域网/部署域名请求返回 403「不允许的浏览器来源 / 请求主机」 | 将浏览器实际协议、主机与端口加入 `CORS_ALLOWED_ORIGINS`；自定义反代保留该 Host，重启后端 |
 | 新闻补充分析失败 / LLM HTTP 404 | 配置台核对 API Base、模型名与 Key 权限 |
 | 「更新新闻」很久或超时 | 多源抓取可能超过 3 分钟；可稍后刷新「待解读」 |
-| 首次启动很慢 | 本地已有较大 `news.db` 时会做一次结构迁移 |
+| 首次启动很慢 | 启动时会检查并更新数据库结构，较大的 `news.db` 可能需要更长时间 |
 
 所有输出仅供研究参考，不构成投资建议。

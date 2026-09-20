@@ -1,5 +1,5 @@
 """
-统一大模型调用：默认 OpenAI 兼容 HTTP；可选 LiteLLM（多模型/路由与 daily_stock_analysis 同类能力对齐）。
+统一大模型调用：默认 OpenAI 兼容 HTTP；可选 LiteLLM 多模型路由。
 """
 from __future__ import annotations
 

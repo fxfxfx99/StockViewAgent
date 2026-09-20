@@ -63,7 +63,7 @@ def _merge_result(
         value = fresh.get(field)
         failed = bool(errors.get(field))
         if not has_section_errors and fresh.get("errors") and not value:
-            # 兼容没有逐部分错误信息的旧流水线结果。
+            # 没有逐部分错误信息时，使用聚合错误判断空结果是否失败。
             failed = True
         older_fallback = (
             field in stale_fields

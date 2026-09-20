@@ -2,9 +2,9 @@
 
 本机安装与配置台步骤见 [LOCAL_SETUP.md](./LOCAL_SETUP.md)。
 
-本文档说明 **单页 UI 之外仍保留的后端数据能力**：供 Transaction Agent、Research Agent、启动预热与后续扩展使用。
+本文档说明后端数据能力，供 Transaction Agent、Research Agent、启动预热与脚本调用。
 
-前端单页仅调用子集 API（见 `frontend/src/api.js`）；其余路由仍可通过 OpenAPI / 脚本直接访问。
+前端单页调用部分 API（见 `frontend/src/api.js`）；完整路由可通过 OpenAPI / 脚本访问。
 
 ## 配置优先级（通用）
 
@@ -55,7 +55,7 @@
 
 单页 UI 在 K 线与策略观点下方提供 **相关新闻解读**：`GET /api/news/archive`（`scope=analysis|pending`）、`POST /api/news/sync-archive-feeds`、`POST /api/news/analyze-symbol-archive`。
 
-新闻同步与补充分析是长请求，前端超时均为 600 秒，开发代理超时为 900 秒。2026-09-16 本地实测一次新闻同步耗时约 185 秒，单条大模型分析约 120 秒（仅为当次观测，实际取决于新闻源和模型）。因此 UI 每次补充分析最多处理 3 条，完成后可再次点击继续；前端 API 包装的默认批次同为 3 条，显式传入数量及后端 API 的扩展能力仍保留。
+新闻同步与补充分析是长请求，耗时取决于新闻源和模型；前端超时均为 600 秒，开发代理超时为 900 秒。UI 每次补充分析最多处理 3 条，完成后可再次点击继续；前端 API 包装的默认批次同为 3 条，也支持显式指定数量。
 
 路由前缀：`/api/news/*`。
 
@@ -67,11 +67,11 @@
 | Kimi / OpenAI 兼容 | `KIMI_*`, `KLINE_ASSISTANT_*`, `OPENAI_*` | `config.py` 多级回退 |
 | 收盘后 K 线批解读 | `kline_insight_scheduler` | 需 `ENABLE_SCHEDULER=true` 与 LLM Key |
 
-路由：`/api/kline-learning/*`（UI 已移除，scheduler 仍可用）。
+路由：`/api/kline-learning/*`，供脚本与后台调度使用。
 
 ## 宏观 / 量化 / 信号（扩展 API）
 
-以下模块 **无单页 UI**，后端保留供脚本或后续面板：
+以下后端 API 供脚本与 Agent 调用，单页不提供对应面板：
 
 - `/api/macro/*` — Tushare 宏观、申万行业（`macro_tushare_service.py`）
 - `/api/quant/*` — 回测与策略草案（`quant_backtest.py`）
@@ -86,7 +86,7 @@
 - `issuer_rag_service` + 本地上传 `issuer_uploads/`
 - 静态入口目录 `app/data/research_sources.json`
 
-调用方式：Python `run_research(...)` 或后续挂载 API。
+调用方式：Python `run_research(...)`。
 
 ## 雪球（可选）
 

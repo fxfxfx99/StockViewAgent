@@ -1,7 +1,6 @@
 """统一数据资产管理：原子写入、轻量备份与目录索引。
 
-现有业务文件仍保留在 backend/data 原位置；本模块只新增 backend/data/_managed
-作为索引与备份目录，避免一次性迁移造成路径兼容风险。
+业务文件保存在 backend/data，索引与备份保存在 backend/data/_managed。
 """
 from __future__ import annotations
 

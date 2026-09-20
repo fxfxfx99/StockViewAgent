@@ -1,7 +1,6 @@
 """TransactionAgent 融合层：用本系统数据接口生成多策略交易观点。
 
-第一版采用可解释的规则化评分，保证无需 LLM/RAG 索引也能稳定运行；
-后续可在同一输入 bundle 上接入 TransactionAgent 的 YAML prompt 与 LLM 生成。
+采用可解释的规则化评分，无需 LLM 或 RAG 索引。
 """
 from __future__ import annotations
 

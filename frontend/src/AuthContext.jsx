@@ -49,7 +49,7 @@ export function AuthProvider({ children }) {
       isAdmin: user?.role === "admin",
       refreshMe,
       setUser,
-      /** @deprecated 开放本地部署已取消登录 */
+      /** 本地开放模式不提供登录操作。 */
       login: async () => {
         throw new Error("本产品为本地开放部署，无需登录");
       },

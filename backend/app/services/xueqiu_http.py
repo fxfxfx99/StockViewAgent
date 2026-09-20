@@ -33,7 +33,7 @@ _UA = (
 
 
 class XueqiuSessionError(str):
-    """保持旧的字符串错误接口，同时让调用方可靠区分缺失和失效会话。"""
+    """字符串错误附带会话状态，供调用方区分缺失和失效会话。"""
 
     auth_status: str
 

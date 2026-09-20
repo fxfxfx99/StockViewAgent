@@ -40,7 +40,7 @@ def fetch_company_survey(
 ) -> tuple[dict[str, Any], str | None]:
     """
     返回 (auto 字段字典, 错误信息)。
-    成功时错误为 None；默认使用原有超时与 3 次重试，可为公司面板缩短等待。
+    成功时错误为 None；默认超时 40 秒、连接超时 18 秒、重试 3 次，可由调用方调整。
     """
     em_code = yahoo_symbol_to_em_code(symbol)
     if not em_code:

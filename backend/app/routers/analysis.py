@@ -1,4 +1,4 @@
-"""分析技能（YAML）清单，便于与 daily_stock_analysis 的 strategies 概念对齐。"""
+"""提供 YAML 分析技能清单。"""
 from fastapi import APIRouter
 
 from app.services import analysis_skill_loader

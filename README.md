@@ -43,7 +43,7 @@ OpenAPI：<http://127.0.0.1:8001/docs>
 - 相关新闻解读（更新新闻 / 补充分析）
 - 公司信息
 
-量化、宏观、信号复盘等 **后端 API 仍保留**，供脚本与后续扩展使用，见 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)。
+后端还提供量化、宏观、信号复盘等 API，供脚本与 Agent 调用，见 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md)。
 
 ## 配置与密钥
 
@@ -66,7 +66,7 @@ docker compose up -d --build
 
 ## 开发
 
-约定见 [AGENTS.md](AGENTS.md)。协作说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+开发约定与贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```bash
 (cd backend && .venv/bin/python -m pytest tests/ -q)

@@ -136,7 +136,7 @@ PY
 done
 
 if [[ "$ready" -ne 1 ]]; then
-  sva_die "前后端未能在等待期内就绪，请检查上方日志（首次打开较大新闻库可能需要先完成迁移）"
+  sva_die "前后端未能在等待期内就绪，请检查上方日志"
 fi
 echo "前端  http://${FRONTEND_HOST}:${FRONTEND_PORT}/"
 echo "后端  http://127.0.0.1:${BACKEND_PORT}/api/health"
