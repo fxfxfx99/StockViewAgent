@@ -18,6 +18,8 @@ from typing import Any
 
 import httpx
 
+from app.services.market_time import market_timestamp
+
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -181,7 +183,7 @@ def _parse_kline_lines(klines: list[str], shares: int | None) -> list[dict[str, 
                 dt = datetime.strptime(ds[:16], "%Y-%m-%d %H:%M")
             else:
                 dt = datetime.strptime(ds[:10], "%Y-%m-%d")
-            ts = int(time.mktime(dt.timetuple()))
+            ts = market_timestamp(dt)
         except ValueError:
             continue
         v_shares = int(round(vol_lots * 100.0))

@@ -3,9 +3,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.middlewares.error_handler import ErrorHandlerMiddleware, register_exception_handlers
+from app.middlewares.trusted_origin import TrustedOriginMiddleware
 from app.routers import (
     admin,
     analysis,
@@ -31,19 +32,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from app.services import kline_insight_scheduler, startup_data_check
-    from app.config import settings
+    from app.services import company_updates, kline_insight_scheduler, startup_data_check
     from app.storage import data_asset_manager
 
     scheduler_task: asyncio.Task | None = None
     startup_check_task: asyncio.Task | None = None
+    company_updates_task: asyncio.Task | None = None
     data_asset_manager.refresh_catalog_from_disk()
     if settings.enable_scheduler:
         scheduler_task = asyncio.create_task(kline_insight_scheduler.kline_insight_scheduler_loop())
     if settings.enable_startup_data_check:
         startup_check_task = asyncio.create_task(startup_data_check.delayed_startup_data_check())
+    if settings.company_auto_refresh_enabled:
+        company_updates_task = asyncio.create_task(company_updates.company_updates_loop())
     yield
-    for task in (scheduler_task, startup_check_task):
+    for task in (scheduler_task, startup_check_task, company_updates_task):
         if task is not None:
             task.cancel()
     if scheduler_task is not None:
@@ -58,6 +61,13 @@ async def lifespan(app: FastAPI):
             pass
         except asyncio.TimeoutError:
             logger.warning("启动数据源检查取消超时，跳过等待以便服务快速退出")
+    if company_updates_task is not None:
+        try:
+            await asyncio.wait_for(company_updates_task, timeout=3.0)
+        except asyncio.CancelledError:
+            pass
+        except asyncio.TimeoutError:
+            logger.warning("公司资料更新取消超时，跳过等待以便服务快速退出")
 
 
 app = FastAPI(
@@ -87,11 +97,8 @@ app = FastAPI(
 )
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    TrustedOriginMiddleware,
+    allowed_origins=settings.cors_allowed_origins,
 )
 app.add_middleware(ErrorHandlerMiddleware)
 

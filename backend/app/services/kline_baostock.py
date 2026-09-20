@@ -9,11 +9,11 @@ from __future__ import annotations
 import atexit
 import re
 import threading
-import time
 from datetime import datetime
 from typing import Any
 
 from app.services.market_extra_http import _want_bar_cap, _start_date_str
+from app.services.market_time import SHANGHAI_TZ, market_timestamp
 
 _A_SHARE_RE = re.compile(r"^(\d{6})\.(SS|SH|SZ|BJ)$", re.I)
 
@@ -76,7 +76,7 @@ def _rows_to_daily_candles(rows: list[list[str]]) -> list[dict[str, Any]]:
             vol = float(row[5])
             amt = float(row[6]) if len(row) > 6 else 0.0
             dt = datetime.strptime(ds[:10], "%Y-%m-%d")
-            ts = int(time.mktime(dt.timetuple()))
+            ts = market_timestamp(dt)
         except (ValueError, TypeError, IndexError):
             continue
         v = int(round(vol * 100.0))
@@ -103,13 +103,13 @@ def _parse_minute_datetime(date_s: str, time_s: str) -> int | None:
         hh, mm = int(t[8:10]), int(t[10:12])
         try:
             dt = datetime(y, mo, d, hh, mm, 0)
-            return int(time.mktime(dt.timetuple()))
+            return market_timestamp(dt)
         except ValueError:
             return None
     try:
         ds = (date_s or "").strip()[:10]
         dt = datetime.strptime(ds, "%Y-%m-%d")
-        return int(time.mktime(dt.timetuple()))
+        return market_timestamp(dt)
     except ValueError:
         return None
 
@@ -220,7 +220,7 @@ def fetch_kline_bundle_baostock_sync(symbol: str, range_param: str, interval: st
     code = _yahoo_to_bs_code(sym)
     bs = _ensure_baostock()
     start = _start_date_str(range_param)
-    end = datetime.now().strftime("%Y-%m-%d")
+    end = datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d")
     fq = _bs_frequency_daily(interval)
     fields = "date,open,high,low,close,volume,amount,adjustflag"
     rs = bs.query_history_k_data_plus(
@@ -252,7 +252,7 @@ def fetch_kline_bundle_baostock_minute_sync(symbol: str, range_param: str, inter
     code = _yahoo_to_bs_code(sym)
     bs = _ensure_baostock()
     start = _start_date_str(range_param)
-    end = datetime.now().strftime("%Y-%m-%d")
+    end = datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d")
     fields = "date,time,open,high,low,close,volume,amount"
     rs = bs.query_history_k_data_plus(code, fields, start_date=start, end_date=end, frequency=fq)
     rows = _query_all(rs)

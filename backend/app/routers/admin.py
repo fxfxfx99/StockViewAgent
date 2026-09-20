@@ -49,16 +49,16 @@ class CompanyUniverseRefreshBody(BaseModel):
         le=3650,
         description="若某代码缓存未过期则跳过；0=每次都拉",
     )
+    symbols: list[str] | None = Field(
+        default=None,
+        description="若提供则只刷新这些代码（忽略 offset/limit 切片）",
+    )
 
 
 class FundamentalsImportBody(BaseModel):
     """导入根目录三份 2025 CSV；force=false 时相同源文件会跳过。"""
 
     force: bool = False
-    symbols: list[str] | None = Field(
-        default=None,
-        description="若提供则只刷新这些代码（忽略 offset/limit 切片）",
-    )
 
 
 @router.get("/users")

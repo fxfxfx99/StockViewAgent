@@ -22,7 +22,7 @@ sva_python_ok() {
 sva_resolve_python() {
   if [[ -n "${PYTHON_BIN:-}" ]]; then
     command -v "$PYTHON_BIN" >/dev/null 2>&1 || sva_die "PYTHON_BIN=$PYTHON_BIN 不存在"
-    sva_python_ok "$PYTHON_BIN" || sva_die "需要 Python 3.11–3.13（当前 $($PYTHON_BIN -V 2>&1)）。可安装 3.12 后重试，或设置 PYTHON_BIN。"
+    sva_python_ok "$PYTHON_BIN" || sva_die "需要 Python 3.11–3.13（当前 $("$PYTHON_BIN" -V 2>&1)）。可安装 3.12 后重试，或设置 PYTHON_BIN。"
     command -v "$PYTHON_BIN"
     return
   fi
@@ -66,8 +66,8 @@ sva_venv_ok() {
 
 sva_frontend_ok() {
   local root="$1"
-  [[ -d "$root/frontend/node_modules" ]] || return 1
-  (cd "$root/frontend" && node -e "require('rollup/dist/native.js')" >/dev/null 2>&1)
+  [[ -f "$root/frontend/node_modules/vite/bin/vite.js" ]] || return 1
+  (cd "$root/frontend" && node -e "require('rollup/dist/native.js'); require.resolve('react'); require.resolve('@vitejs/plugin-react')" >/dev/null 2>&1)
 }
 
 sva_ensure_env_files() {

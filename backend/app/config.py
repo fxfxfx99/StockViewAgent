@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # false（默认）：本地开放模式，无 Token 时自动使用本地用户，便于 GitHub 自托管部署
     # true：强制登录，接口需 Bearer Token
     auth_required: bool = False
+    # 浏览器默认仅允许 loopback 来源；局域网前端/部署域名填写完整来源，逗号分隔。
+    # 对应主机也加入 Host 白名单；无 Origin 的可信主机 CLI/Agent 调用保持可用。
+    cors_allowed_origins: str = ""
     # 首次启动且库中无用户时，用以下密码创建 admin / user（留空则分别为 admin123 / user123）
     auth_bootstrap_admin_password: str = ""
     auth_bootstrap_user_password: str = ""
@@ -99,6 +102,9 @@ class Settings(BaseSettings):
     xueqiu_min_interval_sec: float = 1.2
     xueqiu_max_retries: int = 2
     xueqiu_timeout_sec: float = 25.0
+    # 服务运行期间刷新所有账户股票列表的公共公司资料；多实例只开启一个。
+    company_auto_refresh_enabled: bool = True
+    company_refresh_interval_sec: int = 900
 
     @property
     def effective_tushare_token(self) -> str:

@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 import math
 import re
-import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
 
 from app.config import settings
+from app.services.market_time import SHANGHAI_TZ, market_timestamp
 from app.storage.integrations_store import load_integrations
 
 UA = (
@@ -143,19 +143,19 @@ def _parse_tencent_mkline_time(cell: Any) -> int | None:
             y, mo, d = int(s[0:4]), int(s[4:6]), int(s[6:8])
             hh, mm = int(s[8:10]), int(s[10:12])
             dt = datetime(y, mo, d, hh, mm, 0)
-            return int(time.mktime(dt.timetuple()))
+            return market_timestamp(dt)
         except ValueError:
             pass
     if len(s) >= 19:
         try:
             dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
-            return int(time.mktime(dt.timetuple()))
+            return market_timestamp(dt)
         except ValueError:
             pass
     if len(s) >= 16:
         try:
             dt = datetime.strptime(s[:16], "%Y-%m-%d %H:%M")
-            return int(time.mktime(dt.timetuple()))
+            return market_timestamp(dt)
         except ValueError:
             pass
     return None
@@ -226,7 +226,7 @@ def _want_bar_cap(range_param: str, interval: str) -> int:
 
 def _start_date_str(range_param: str) -> str:
     days = _RANGE_LOOKBACK_DAYS.get((range_param or "1y").strip().lower(), 400)
-    d0 = date.today() - timedelta(days=days)
+    d0 = datetime.now(SHANGHAI_TZ).date() - timedelta(days=days)
     return d0.strftime("%Y-%m-%d")
 
 
@@ -268,7 +268,7 @@ def _tencent_rows_to_candles(rows: list, sym_upper: str) -> list[dict[str, Any]]
             vol_hand = float(row[5])
             v = int(round(vol_hand * 100.0))
             dt = datetime.strptime(ds[:10], "%Y-%m-%d")
-            ts = int(time.mktime(dt.timetuple()))
+            ts = market_timestamp(dt)
         except (ValueError, TypeError, IndexError):
             continue
         candles.append(
@@ -313,7 +313,7 @@ def _baidu_rows_to_candles(keys: list[Any], market_data: Any) -> list[dict[str, 
             continue
         candles.append(
             {
-                "t": int(time.mktime(dt.timetuple())),
+                "t": market_timestamp(dt),
                 "o": round(o, 4),
                 "h": round(h, 4),
                 "l": round(low, 4),
@@ -424,7 +424,7 @@ def fetch_kline_bundle_secondary_sync(
     tpre = (provider_symbol or _tencent_prefix(code)).strip().lower()
     kparam, arr_key = _tencent_k_type(interval)
     start = _start_date_str(range_param)
-    end = date.today().strftime("%Y-%m-%d")
+    end = datetime.now(SHANGHAI_TZ).date().strftime("%Y-%m-%d")
     n = min(_want_bar_cap(range_param, interval) + 80, 1200)
     url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
     params = {"param": f"{tpre},{kparam},{start},{end},{n},qfq"}
@@ -580,7 +580,7 @@ def _sina_rows_to_candles(rows: list[Any]) -> list[dict[str, Any]]:
             c = float(row["close"])
             v = int(round(float(row.get("volume") or 0)))
             dt = datetime.strptime(ds.replace("T", " ")[:10], "%Y-%m-%d")
-            ts = int(time.mktime(dt.timetuple()))
+            ts = market_timestamp(dt)
         except (ValueError, TypeError, KeyError):
             continue
         candles.append(
@@ -644,7 +644,7 @@ def fetch_kline_bundle_sina_sync(
 
     start = _start_date_str(range_param)
     start_dt = datetime.strptime(start, "%Y-%m-%d")
-    start_ts = int(time.mktime(start_dt.timetuple()))
+    start_ts = market_timestamp(start_dt)
     candles = [c for c in candles if c["t"] >= start_ts]
     candles.sort(key=lambda x: x["t"])
     if len(candles) > cap:
@@ -800,7 +800,7 @@ async def fetch_north_flow_current() -> list[dict[str, Any]]:
     elif "-" in dpart:
         ps = dpart.replace("/", "-").split("-")
         if len(ps) == 2 and all(p.strip().isdigit() for p in ps):
-            y = datetime.now().year
+            y = datetime.now(SHANGHAI_TZ).year
             trade_day = f"{y}-{int(ps[0]):02d}-{int(ps[1]):02d}"
     tp = last["trade_time"]
     trade_time = f"{trade_day} {tp}:00" if trade_day else tp

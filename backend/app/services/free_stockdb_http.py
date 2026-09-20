@@ -7,7 +7,6 @@ reachable Windows/VM/CrossOver service without making the app depend on it.
 from __future__ import annotations
 
 import math
-import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -15,6 +14,7 @@ import httpx
 
 from app.config import settings
 from app.services.eastmoney_market import _A_SHARE_RE, _build_metrics
+from app.services.market_time import SHANGHAI_TZ, market_timestamp
 
 _SOURCE_ID = "free_stockdb_local"
 _SOURCE_LABEL = "free-stockdb 本地 HTTP（可选）"
@@ -68,7 +68,7 @@ def _code_from_symbol(symbol: str) -> str:
 
 
 def _date_range(range_param: str) -> tuple[str, str]:
-    today = datetime.now()
+    today = datetime.now(SHANGHAI_TZ)
     if (range_param or "").strip().lower() == "ytd":
         start = datetime(today.year, 1, 1)
     else:
@@ -112,7 +112,7 @@ def _date_to_ts(value: Any) -> int | None:
     for fmt, width in (("%Y%m%d", 8), ("%Y-%m-%d", 10), ("%Y%m%d%H%M%S", 14), ("%Y-%m-%d %H:%M:%S", 19)):
         try:
             dt = datetime.strptime(s[:width], fmt)
-            return int(time.mktime(dt.timetuple()))
+            return market_timestamp(dt)
         except ValueError:
             continue
     return None

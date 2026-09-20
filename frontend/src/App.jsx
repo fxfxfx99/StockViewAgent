@@ -7,9 +7,10 @@ import {
   Card,
   Space,
   Alert,
-  message,
+  App as AntApp,
   Spin,
   DatePicker,
+  Button,
 } from "antd";
 import * as api from "./api";
 import { qk, watchlistProfileKey } from "./hooks/queryKeys.js";
@@ -21,7 +22,7 @@ import WatchlistSidebar from "./WatchlistSidebar.jsx";
 import { ConfigConsoleButton, SetupOnboardingBanner } from "./ConfigConsole.jsx";
 import { useSetupStatus } from "./hooks/useSetupStatus.js";
 import ThemeModeToggle from "./ThemeModeToggle.jsx";
-import { useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 const { Header, Content } = Layout;
 const { Text } = Typography;
 
@@ -38,7 +39,7 @@ function PanelSuspense({ children }) {
     <Suspense
       fallback={
         <div className="sva-panel-skeleton">
-          <Spin size="large" tip="加载模块…" />
+          <Spin size="large" aria-label="加载模块" />
         </div>
       }
     >
@@ -67,8 +68,9 @@ function normalizeSymbolCandidate(raw) {
 }
 
 export default function App() {
+  const { message } = AntApp.useApp();
   const qc = useQueryClient();
-  const { user, loading: bootLoading } = useAuth();
+  const { user, loading: bootLoading, error: authError, refreshMe } = useAuth();
   const { chartSymbol, setChartSymbol, asOf, setAsOf } = useAppUrlState();
 
   const {
@@ -76,6 +78,7 @@ export default function App() {
     watchProfiles,
     priceContext,
     loadingList,
+    savingList,
     profilesLoading,
     priceContextLoading,
     watchlistError,
@@ -91,9 +94,9 @@ export default function App() {
   const [stockIndexLoading, setStockIndexLoading] = useState(false);
   const [profilesRefreshing, setProfilesRefreshing] = useState(false);
   const [klineInterval, setKlineInterval] = useState("1d");
-  const [klineBusy, setKlineBusy] = useState(false);
   const klineRef = useRef(null);
   const stockSearchTimer = useRef(null);
+  const stockSearchVersion = useRef(0);
   const [siderCollapsed, setSiderCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_KEY) === "1";
@@ -104,6 +107,7 @@ export default function App() {
   const { data: setupStatus } = useSetupStatus();
 
   const focusSymbol = chartSymbol ?? symbols[0] ?? "";
+  const klineBusy = useIsFetching({ queryKey: qk.kline(focusSymbol, KLINE_RANGE, klineInterval) }) > 0;
   const focusSecurityLabel = useMemo(
     () => securityLabel(focusSymbol, watchProfiles[focusSymbol]),
     [focusSymbol, watchProfiles]
@@ -118,17 +122,8 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    if (chartSymbol || !symbols.length) return;
-    setChartSymbol(symbols[0]);
-  }, [chartSymbol, symbols, setChartSymbol]);
-
-  useEffect(() => {
-    if (!symbols.length || !chartSymbol) return;
-    if (!symbols.includes(chartSymbol)) setChartSymbol(symbols[0]);
-  }, [symbols, chartSymbol, setChartSymbol]);
-
-  const persistSymbols = (next) => persistWatchlistMutation(next, { setProfilesRefreshing, setError });
+  const persistSymbols = (next, onSaved) =>
+    persistWatchlistMutation(next, { setProfilesRefreshing, setError, onSaved });
 
   useEffect(() => {
     let cancelled = false;
@@ -167,6 +162,7 @@ export default function App() {
   }, []);
 
   const fetchStockOptions = useCallback((text) => {
+    const version = ++stockSearchVersion.current;
     if (stockSearchTimer.current) clearTimeout(stockSearchTimer.current);
     const q = (text || "").trim();
     if (q.length < 1) {
@@ -176,6 +172,7 @@ export default function App() {
     stockSearchTimer.current = setTimeout(async () => {
       try {
         const d = await api.searchStocks(q, 20);
+        if (version !== stockSearchVersion.current) return;
         let items = d.items || [];
         if (!items.length && q.length >= 2) {
           try {
@@ -186,6 +183,7 @@ export default function App() {
             /* ignore */
           }
         }
+        if (version !== stockSearchVersion.current) return;
         setStockOptions(
           items.map((s) => ({
             value: s.symbol,
@@ -199,7 +197,7 @@ export default function App() {
           }))
         );
       } catch {
-        setStockOptions([]);
+        if (version === stockSearchVersion.current) setStockOptions([]);
       }
     }, 220);
   }, []);
@@ -207,6 +205,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (stockSearchTimer.current) clearTimeout(stockSearchTimer.current);
+      stockSearchVersion.current += 1;
     };
   }, []);
 
@@ -238,21 +237,38 @@ export default function App() {
         message.warning("未匹配到股票");
         return;
       }
-      if (clearDraft) setDraft("");
-      setChartSymbol(sym);
+      const selectSaved = () => {
+        if (clearDraft) {
+          setDraft("");
+          fetchStockOptions("");
+        }
+        setChartSymbol(sym);
+      };
       if (!symbols.includes(sym)) {
-        persistSymbols([...symbols, sym]);
-        message.success(`已加入 ${sym}`);
+        await persistSymbols(
+          (previous) => previous.includes(sym) ? previous : [...previous, sym],
+          () => {
+            selectSaved();
+            message.success(`已加入 ${sym}`);
+          }
+        );
+      } else {
+        selectSaved();
       }
     },
-    [persistSymbols, setChartSymbol, symbols]
+    [fetchStockOptions, message, persistSymbols, setChartSymbol, symbols]
   );
 
   const removeSymbol = useCallback(
     (sym) => {
-      persistSymbols(symbols.filter((s) => s !== sym));
+      void persistSymbols(
+        (previous) => previous.filter((s) => s !== sym),
+        (saved) => {
+          if (focusSymbol === sym) setChartSymbol(saved[0] || null);
+        }
+      );
     },
-    [persistSymbols, symbols]
+    [persistSymbols, focusSymbol, setChartSymbol]
   );
 
   const rebuildStockUniverse = useCallback(async () => {
@@ -267,11 +283,11 @@ export default function App() {
         message.success("已更新 A 股检索库");
       }
     } catch (err) {
-      message.error(err?.response?.data?.detail || err?.message || "更新失败");
+      message.error(api.getApiErrorMessage(err));
     } finally {
       setStockIndexLoading(false);
     }
-  }, []);
+  }, [message]);
 
   const refreshWatchProfilesAll = async () => {
     if (!symbols.length) {
@@ -280,11 +296,25 @@ export default function App() {
     }
     setProfilesRefreshing(true);
     try {
-      const d = await api.refreshWatchlistProfiles();
-      qc.setQueryData(qk.watchlistProfiles(watchlistProfileKey(symbols)), d.profiles || {});
-      message.success("公司信息已刷新");
+      const [profilesResult, companyResult] = await Promise.allSettled([
+        api.refreshWatchlistProfiles(),
+        focusSymbol ? api.getXueqiuCompany(focusSymbol, { force: true }) : Promise.resolve(null),
+      ]);
+      if (profilesResult.status === "fulfilled") {
+        qc.setQueryData(qk.watchlistProfiles(watchlistProfileKey(symbols), user?.id), profilesResult.value.profiles || {});
+        void qc.invalidateQueries({ queryKey: ["watchlist", "stock-detail"] });
+      }
+      if (companyResult.status === "fulfilled" && companyResult.value) {
+        qc.setQueryData(qk.xueqiuCompany(focusSymbol), companyResult.value);
+      }
+      const failed = [profilesResult, companyResult].find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
+      if (Object.keys(profilesResult.value.errors || {}).length || ["partial", "stale", "unavailable"].includes(companyResult.value?.status)) {
+        message.warning("部分公司资料刷新失败，已保留可用资料");
+      }
+      else message.success("公司信息已刷新");
     } catch (e) {
-      message.error(e?.response?.data?.detail || e?.message || "刷新失败");
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setProfilesRefreshing(false);
     }
@@ -316,6 +346,8 @@ export default function App() {
             priceContext={priceContext}
             priceContextLoading={priceContextLoading}
             loadingList={loadingList}
+            savingList={savingList}
+            disabled={!user}
             stockIndexLoading={stockIndexLoading}
             draft={draft}
             setDraft={setDraft}
@@ -331,6 +363,15 @@ export default function App() {
           />
 
           <Content className="ex-app-content sva-main">
+            {authError ? (
+              <Alert
+                type="error"
+                showIcon
+                message={authError}
+                action={<Button size="small" onClick={() => void refreshMe()}>重新连接</Button>}
+                className="sva-alert"
+              />
+            ) : null}
             {error || watchlistError ? (
               <Alert
                 type="error"
@@ -352,7 +393,7 @@ export default function App() {
                   <span className="sva-field__label">节点</span>
                   <DatePicker
                     size="small"
-                    bordered={false}
+                    variant="borderless"
                     value={asOf ? dayjs(asOf) : null}
                     onChange={(d) => setAsOf(d ? d.format("YYYY-MM-DD") : null)}
                     allowClear
@@ -379,11 +420,7 @@ export default function App() {
                   type="button"
                   className="sva-pill"
                   disabled={!focusSymbol || klineBusy}
-                  onClick={() => {
-                    setKlineBusy(true);
-                    klineRef.current?.refresh?.();
-                    window.setTimeout(() => setKlineBusy(false), 500);
-                  }}
+                  onClick={() => klineRef.current?.refresh?.()}
                 >
                   查询
                 </button>
@@ -404,6 +441,7 @@ export default function App() {
                   <PanelSuspense>
                     <LazyPanels.StockKlinePanelLazy
                       ref={klineRef}
+                      symbol={focusSymbol}
                       embedded
                       hideChrome
                       chartHeight={456}
@@ -420,6 +458,7 @@ export default function App() {
               {focusSymbol ? (
                 <PanelSuspense>
                   <LazyPanels.TransactionAgentPanelLazy
+                    key={`${focusSymbol}:${asOf || ""}`}
                     symbol={focusSymbol}
                     displayName={focusSecurityLabel}
                     asOf={asOf}
@@ -430,6 +469,7 @@ export default function App() {
               {focusSymbol ? (
                 <PanelSuspense>
                   <LazyPanels.NewsInterpretationPanelLazy
+                    key={focusSymbol}
                     symbol={focusSymbol}
                     displayName={focusSecurityLabel}
                   />
@@ -440,7 +480,7 @@ export default function App() {
                 <Card
                   size="small"
                   title="公司信息"
-                  bordered={false}
+                  variant="borderless"
                   className="ex-section-card sva-panel"
                   extra={
                     <button
@@ -454,7 +494,8 @@ export default function App() {
                   }
                 >
                   <WatchlistProfilePanel
-                    symbols={symbols.length ? symbols : [focusSymbol]}
+                    key={focusSymbol}
+                    symbols={symbols}
                     profiles={watchProfiles}
                     loading={profilesLoading}
                     refreshing={profilesRefreshing}

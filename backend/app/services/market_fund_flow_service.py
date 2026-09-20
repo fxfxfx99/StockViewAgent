@@ -9,12 +9,13 @@ import asyncio
 import logging
 import math
 import time
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 import httpx
 
 from app.services import market_extra_http
+from app.services.market_time import SHANGHAI_TZ, market_date
 from app.storage import market_history_cache, market_source_cache
 
 logger = logging.getLogger(__name__)
@@ -142,10 +143,10 @@ def _dt_from_f124(value: Any) -> str:
     try:
         ts = int(float(value))
     except (TypeError, ValueError):
-        return date.today().isoformat()
+        return datetime.now(SHANGHAI_TZ).date().isoformat()
     if ts <= 0:
-        return date.today().isoformat()
-    return datetime.fromtimestamp(ts).date().isoformat()
+        return datetime.now(SHANGHAI_TZ).date().isoformat()
+    return market_date(ts).isoformat()
 
 
 async def fetch_eastmoney_sector_fund_flow_rank(indicator: str = "今日", limit: int = 80) -> list[dict[str, Any]]:

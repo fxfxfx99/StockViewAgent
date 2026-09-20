@@ -4,9 +4,10 @@ import io
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from app.deps.auth import get_current_user
 from app.services import (
     kline_pipeline,
     kline_sources_registry,
@@ -18,7 +19,8 @@ from app.services import (
 )
 from app.storage import kline_bundle_cache, market_history_cache
 
-router = APIRouter(prefix="/api/market", tags=["market"])
+# 同时建立请求用户上下文，供行情链读取该账户的付费凭证。
+router = APIRouter(prefix="/api/market", tags=["market"], dependencies=[Depends(get_current_user)])
 
 _A_SHARE_ONLY = re.compile(r"^\d{6}\.(SS|SH|SZ|BJ)$", re.I)
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from app.config import settings
 from app.services import llm_client
+from app.services.market_time import market_date
 
 INDEX_NAME, PROMPT_NAME, FILES_SUB = "materials.json", "prompt.json", "files"
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -516,7 +517,7 @@ def format_candles_summary(candles: list[dict[str, Any]], last_n: int = 35) -> s
     for c in tail:
         ts = c.get("t")
         try:
-            ds = datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d") if ts else "?"
+            ds = market_date(int(ts)).isoformat() if ts else "?"
         except Exception:
             ds = "?"
         lines.append(f"{ds} O:{c.get('o')} H:{c.get('h')} L:{c.get('l')} C:{c.get('c')} V:{c.get('v')}")

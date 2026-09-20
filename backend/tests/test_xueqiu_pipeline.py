@@ -1,3 +1,5 @@
+import pytest
+
 from app.services import xueqiu_pipeline
 
 
@@ -70,3 +72,44 @@ def test_run_company_bundle_invalid_symbol():
     assert out["ok"] is False
     assert out["xq_symbol"] is None
     assert out["errors"]
+
+
+@pytest.mark.parametrize("payload", [
+    {"data": {"items": []}},
+    {"data": {"list": []}},
+    {"items": []},
+    {"list": []},
+    {"data": {"items": [], "list": [{"title": "旧备用事件"}]}},
+])
+def test_major_events_explicit_empty_list_is_successful(monkeypatch, payload):
+    monkeypatch.setattr(xueqiu_pipeline.xueqiu_http, "request_json", lambda *args, **kwargs: (payload, None))
+    assert xueqiu_pipeline.stage_fetch_major_events("SH600519") == ([], None)
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"data": {}}, {"data": {"items": "invalid"}}, {"items": None},
+    {"items": "", "list": []}, {"list": {}},
+])
+def test_malformed_major_events_are_errors_not_successful_empty_updates(monkeypatch, payload):
+    monkeypatch.setattr(xueqiu_pipeline.xueqiu_http, "request_json", lambda *args, **kwargs: (payload, None))
+    items, error = xueqiu_pipeline.stage_fetch_major_events("SH600519")
+    assert items == []
+    assert error and "格式异常" in error
+
+
+@pytest.mark.parametrize("payload", [
+    {"list": []}, {"statuses": []}, {"list": [], "statuses": [{"title": "旧备用新闻"}]},
+])
+def test_timeline_explicit_empty_list_is_successful(monkeypatch, payload):
+    monkeypatch.setattr(xueqiu_pipeline.xueqiu_http, "request_json", lambda *args, **kwargs: (payload, None))
+    assert xueqiu_pipeline.stage_fetch_stock_timeline("SH600519", source="自选股新闻") == ([], None)
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"list": "invalid"}, {"list": None}, {"list": "", "statuses": []}, {"statuses": {}},
+])
+def test_malformed_timeline_is_error_not_successful_empty_update(monkeypatch, payload):
+    monkeypatch.setattr(xueqiu_pipeline.xueqiu_http, "request_json", lambda *args, **kwargs: (payload, None))
+    items, error = xueqiu_pipeline.stage_fetch_stock_timeline("SH600519", source="自选股新闻")
+    assert items == []
+    assert error and "格式异常" in error

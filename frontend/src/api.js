@@ -5,7 +5,7 @@ import axios from "axios";
  * 其余后端能力（量化、宏观等）仍保留在服务端，见 docs/DATA_SOURCES.md。
  */
 function normalizeApiRoot() {
-  const raw = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
+  const raw = (import.meta.env?.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
   if (!raw) return "/api";
   if (raw.endsWith("/api")) return raw;
   if (/^https?:\/\/[^/?#]+(:\d+)?$/i.test(raw)) return `${raw}/api`;
@@ -22,7 +22,12 @@ const client = axios.create({
 
 const TOKEN_KEY = "sva_token";
 
-let authToken = typeof localStorage !== "undefined" ? localStorage.getItem(TOKEN_KEY) || "" : "";
+let authToken = "";
+try {
+  authToken = localStorage.getItem(TOKEN_KEY) || "";
+} catch {
+  // 浏览器禁用持久存储时仍可使用当前页面内存中的凭据。
+}
 
 export function getAuthToken() {
   return authToken;
@@ -30,9 +35,11 @@ export function getAuthToken() {
 
 export function setAuthToken(token) {
   authToken = token ? String(token) : "";
-  if (typeof localStorage !== "undefined") {
+  try {
     if (authToken) localStorage.setItem(TOKEN_KEY, authToken);
     else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // 与初始化保持一致，存储受限不应阻止 API 请求。
   }
 }
 
@@ -207,9 +214,9 @@ export async function refreshDataCenter() {
   return data;
 }
 
-export async function getXueqiuCompany(symbol) {
+export async function getXueqiuCompany(symbol, { force = false } = {}) {
   const { data } = await client.get("/xueqiu/company", {
-    params: { symbol },
+    params: { symbol, ...(force ? { force: true } : {}) },
     timeout: 120000,
   });
   return data;
@@ -220,20 +227,24 @@ export async function getNewsArchive(params) {
   return data;
 }
 
+export const NEWS_ANALYSIS_BATCH_SIZE = 3;
+const NEWS_TASK_TIMEOUT_MS = 600_000;
+
 export async function syncArchiveFeeds(symbols = null) {
   const { data } = await client.post(
     "/news/sync-archive-feeds",
     symbols ? { symbols, lookback_days: 30 } : { lookback_days: 30 },
-    { timeout: 180000 }
+    { timeout: NEWS_TASK_TIMEOUT_MS }
   );
   return data;
 }
 
-export async function analyzeNewsForSymbol(symbol, limit = 20, persist = true) {
+/** UI 分批分析；单条可能耗时约两分钟，调用方仍可显式传入后端支持的数量。 */
+export async function analyzeNewsForSymbol(symbol, limit = NEWS_ANALYSIS_BATCH_SIZE, persist = true) {
   const { data } = await client.post(
     "/news/analyze-symbol-archive",
     { symbol, limit, persist, lookback_days: 30 },
-    { timeout: 180000 }
+    { timeout: NEWS_TASK_TIMEOUT_MS }
   );
   return data;
 }

@@ -12,6 +12,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.config import settings
+from app.security.user_context import current_user_id
 from app.services import kline_learning_service as kls
 from app.storage import kline_insight_store, watchlist_store
 
@@ -58,36 +59,40 @@ def _list_watchlist_user_ids() -> list[int]:
 
 async def run_daily_batch_if_configured() -> None:
     """执行一次批量解读（不检查时间窗口；供测试或手动触发）。"""
-    if not settings.any_llm_key_configured:
-        logger.info("跳过盘后 K 线批量解读：未配置 LLM Key")
-        return
-
     today = datetime.now(_SH).strftime("%Y-%m-%d")
     uids = _list_watchlist_user_ids()
     for uid in uids:
-        symbols = watchlist_store.load_symbols(uid)
-        for sym in symbols:
-            if not kline_insight_store.is_opt_in(uid, sym):
+        # 定时任务没有 HTTP 依赖，必须显式切换账户，才能使用其个人 LLM/行情凭证。
+        token = current_user_id.set(uid)
+        try:
+            if not settings.any_llm_key_configured:
+                logger.info("跳过盘后 K 线批量解读：user=%s 未配置 LLM Key", uid)
                 continue
-            try:
-                out = await kls.analyze_a_share_symbol(
-                    sym,
-                    range_param=_DEFAULT_RANGE,
-                    interval=_DEFAULT_INTERVAL,
-                    candle_rows=_DEFAULT_CANDLE_ROWS,
-                )
-                kline_insight_store.upsert_insight(
-                    uid,
-                    sym,
-                    kline_insight_store.shanghai_report_date_str(),
-                    out.get("interpretation") or "",
-                    source="scheduled",
-                    model=str(out.get("model") or ""),
-                )
-                logger.info("盘后解读已保存 user=%s symbol=%s date=%s", uid, sym, today)
-            except Exception:
-                logger.exception("盘后解读失败 user=%s symbol=%s", uid, sym)
-            await asyncio.sleep(2.0)
+            symbols = watchlist_store.load_symbols(uid)
+            for sym in symbols:
+                if not kline_insight_store.is_opt_in(uid, sym):
+                    continue
+                try:
+                    out = await kls.analyze_a_share_symbol(
+                        sym,
+                        range_param=_DEFAULT_RANGE,
+                        interval=_DEFAULT_INTERVAL,
+                        candle_rows=_DEFAULT_CANDLE_ROWS,
+                    )
+                    kline_insight_store.upsert_insight(
+                        uid,
+                        sym,
+                        kline_insight_store.shanghai_report_date_str(),
+                        out.get("interpretation") or "",
+                        source="scheduled",
+                        model=str(out.get("model") or ""),
+                    )
+                    logger.info("盘后解读已保存 user=%s symbol=%s date=%s", uid, sym, today)
+                except Exception:
+                    logger.exception("盘后解读失败 user=%s symbol=%s", uid, sym)
+                await asyncio.sleep(2.0)
+        finally:
+            current_user_id.reset(token)
 
 
 async def kline_insight_scheduler_loop() -> None:

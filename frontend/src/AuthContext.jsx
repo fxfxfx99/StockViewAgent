@@ -9,26 +9,29 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const refreshMe = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       await api.getHealth();
       try {
         const u = await api.getMe();
         setUser(u);
-      } catch {
+      } catch (e) {
         // 开放本地模式：清除过期 Token 后重试，避免股票列表等接口因 user=null 被禁用
-        if (api.getAuthToken()) {
+        if (api.getAuthToken() && e?.response?.status === 401) {
           api.setAuthToken("");
           const u = await api.getMe();
           setUser(u);
         } else {
-          setUser(null);
+          throw e;
         }
       }
-    } catch {
+    } catch (e) {
       setUser(null);
+      setError(api.getApiErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -42,6 +45,7 @@ export function AuthProvider({ children }) {
     () => ({
       user,
       loading,
+      error,
       isAdmin: user?.role === "admin",
       refreshMe,
       setUser,
@@ -54,7 +58,7 @@ export function AuthProvider({ children }) {
         setUser(null);
       },
     }),
-    [user, loading, refreshMe]
+    [user, loading, error, refreshMe]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

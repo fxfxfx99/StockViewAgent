@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.services.market_time import market_date
 from app.storage import data_asset_manager
 
 _DIR_NAME = "kline_bundle_cache"
@@ -33,7 +34,7 @@ def last_bar_date_str(candles: list[dict[str, Any]]) -> str | None:
         return None
     try:
         t = float(candles[-1].get("t") or 0)
-        return datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat()
+        return market_date(t).isoformat()
     except (TypeError, ValueError, OSError):
         return None
 

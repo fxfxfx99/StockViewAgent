@@ -362,7 +362,7 @@ export default function NewsImpactCard({ item }) {
     });
   }
   return (
-    <Card className="news-card" bordered={false}>
+    <Card className="news-card" variant="borderless">
       <div className="news-meta">
         <span>
           {formatTime(item.published_at || item.published_ts || item.published)}

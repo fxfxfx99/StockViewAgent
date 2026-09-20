@@ -430,11 +430,10 @@ a:hover {
   background: var(--sva-warning-bg) !important;
 }
 
-.sva-setup-hints {
-  margin: 4px 0 0;
-  padding-left: 18px;
-  font-size: 12px;
-  color: var(--sva-text-secondary);
+.sva-setup-banner .ant-alert-action {
+  align-self: center;
+  flex-shrink: 0;
+  margin-inline-start: 16px;
 }
 
 .sva-setup-page {

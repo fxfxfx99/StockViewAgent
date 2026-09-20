@@ -9,7 +9,7 @@ import {
   Tooltip,
   Typography,
   Upload,
-  message,
+  App as AntApp,
 } from "antd";
 import {
   DeleteOutlined,
@@ -53,6 +53,8 @@ export default function WatchlistSidebar({
   priceContext,
   priceContextLoading,
   loadingList,
+  savingList = false,
+  disabled = false,
   stockIndexLoading,
   draft,
   setDraft,
@@ -66,9 +68,11 @@ export default function WatchlistSidebar({
   onRebuildUniverse,
   reloadWatchlist,
 }) {
+  const { message } = AntApp.useApp();
   const [batchText, setBatchText] = useState("");
   const [importLoading, setImportLoading] = useState(false);
   const [xlsxLoading, setXlsxLoading] = useState(false);
+  const editingDisabled = disabled || loadingList || savingList || importLoading || xlsxLoading;
 
   const rows = useMemo(
     () =>
@@ -77,8 +81,7 @@ export default function WatchlistSidebar({
         const px = priceContext?.[sym] || {};
         const name = String(profile.name || px.name || "").trim() || shortCode(sym);
         const changePct = px.change_pct ?? px.pct_chg ?? px.change_1d_pct;
-        const price = px.latest_close ?? px.price ?? px.close;
-        return { sym, name, changePct, price };
+        return { sym, name, changePct };
       }),
     [symbols, watchProfiles, priceContext]
   );
@@ -97,7 +100,7 @@ export default function WatchlistSidebar({
       setBatchText("");
       if (reloadWatchlist) await reloadWatchlist();
     } catch (e) {
-      message.error(e?.response?.data?.detail || e?.message || "批量添加失败");
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setImportLoading(false);
     }
@@ -105,7 +108,7 @@ export default function WatchlistSidebar({
 
   const beforeUploadXlsx = (file) => {
     const name = (file.name || "").toLowerCase();
-    if (!name.endsWith(".xlsx")) {
+    if (!name.endsWith(".xlsx") || file.size > 2 * 1024 * 1024) {
       message.warning("请上传 .xlsx（≤2MB）");
       return Upload.LIST_IGNORE;
     }
@@ -117,8 +120,7 @@ export default function WatchlistSidebar({
         message.success(n ? `已从 Excel 加入 ${n} 只` : "没有新代码");
         if (reloadWatchlist) await reloadWatchlist();
       } catch (e) {
-        const d = e?.response?.data?.detail;
-        message.error(typeof d === "string" ? d : e?.message || "Excel 解析失败");
+        message.error(api.getApiErrorMessage(e));
       } finally {
         setXlsxLoading(false);
       }
@@ -138,7 +140,7 @@ export default function WatchlistSidebar({
           />
         </Tooltip>
         <div className="sva-watch-sider__rail-label">
-          <span>自选</span>
+          <span>股票列表</span>
           <span className="sva-watch-sider__rail-count">{symbols.length}</span>
         </div>
       </aside>
@@ -160,6 +162,7 @@ export default function WatchlistSidebar({
       <div className="sva-watch-sider__search">
         <AutoComplete
           value={draft}
+          disabled={editingDisabled}
           options={stockOptions}
           onSearch={fetchStockOptions}
           filterOption={false}
@@ -170,6 +173,8 @@ export default function WatchlistSidebar({
           allowClear
           onKeyDown={(e) => {
             if (e.key === "Enter") {
+              // 下拉选项存在键盘焦点时由 AutoComplete 的 onSelect 统一处理。
+              if (e.target.getAttribute("aria-activedescendant")) return;
               e.preventDefault();
               onAddFromSearch(draft, { clearDraft: true });
             }
@@ -178,7 +183,9 @@ export default function WatchlistSidebar({
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          loading={loadingList || stockIndexLoading}
+          aria-label="添加股票"
+          disabled={editingDisabled}
+          loading={savingList || stockIndexLoading}
           onClick={() => onAddFromSearch(draft, { clearDraft: true })}
         />
       </div>
@@ -188,12 +195,12 @@ export default function WatchlistSidebar({
           size="small"
           icon={<ReloadOutlined />}
           loading={priceContextLoading}
-          disabled={!symbols.length}
+          disabled={disabled || !symbols.length}
           onClick={() => void onRefreshQuotes?.()}
         >
           行情
         </Button>
-        <Button size="small" loading={stockIndexLoading} onClick={() => void onRebuildUniverse?.()}>
+        <Button size="small" disabled={disabled} loading={stockIndexLoading} onClick={() => void onRebuildUniverse?.()}>
           检索库
         </Button>
       </div>
@@ -202,7 +209,7 @@ export default function WatchlistSidebar({
         <div className="sva-watch-sider__list">
           {!rows.length ? (
             <Text type="secondary" className="sva-watch-sider__empty">
-              暂无自选
+              股票列表为空
             </Text>
           ) : (
             rows.map((row) => {
@@ -233,6 +240,8 @@ export default function WatchlistSidebar({
                       type="text"
                       size="small"
                       danger
+                      disabled={editingDisabled}
+                      aria-label={`移除 ${row.name}`}
                       className="sva-watch-sider__del"
                       icon={<DeleteOutlined />}
                       onClick={(e) => {
@@ -271,11 +280,12 @@ export default function WatchlistSidebar({
                     ghost
                     icon={<ImportOutlined />}
                     loading={importLoading}
+                    disabled={editingDisabled}
                     onClick={() => void runBatchImport()}
                   >
                     合并
                   </Button>
-                  <Upload accept=".xlsx" showUploadList={false} beforeUpload={beforeUploadXlsx}>
+                  <Upload accept=".xlsx" disabled={editingDisabled} showUploadList={false} beforeUpload={beforeUploadXlsx}>
                     <Button size="small" icon={<FileExcelOutlined />} loading={xlsxLoading}>
                       Excel
                     </Button>

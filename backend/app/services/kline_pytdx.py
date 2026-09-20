@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import re
-import time
 from datetime import datetime
 from typing import Any, Callable
 
 from app.services.market_extra_http import _tencent_minute_bar_count, _want_bar_cap
+from app.services.market_time import market_timestamp
 
 _A_SHARE_RE = re.compile(r"^(\d{6})\.(SS|SH|SZ|BJ)$", re.I)
 
@@ -71,13 +71,13 @@ def _bar_to_dict(bar: Any) -> dict[str, Any] | None:
     if dt_s:
         try:
             dt = datetime.strptime(str(dt_s)[:16], "%Y-%m-%d %H:%M")
-            ts = int(time.mktime(dt.timetuple()))
+            ts = market_timestamp(dt)
         except ValueError:
             return None
     else:
         try:
             dt = datetime(int(get("year")), int(get("month")), int(get("day")), int(get("hour", 15)), int(get("minute", 0)))
-            ts = int(time.mktime(dt.timetuple()))
+            ts = market_timestamp(dt)
         except (ValueError, TypeError):
             return None
     try:

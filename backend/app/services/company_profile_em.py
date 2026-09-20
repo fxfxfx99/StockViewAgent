@@ -32,10 +32,15 @@ def yahoo_symbol_to_em_code(symbol: str) -> str | None:
     return None
 
 
-def fetch_company_survey(symbol: str) -> tuple[dict[str, Any], str | None]:
+def fetch_company_survey(
+    symbol: str,
+    *,
+    timeout_sec: float | None = None,
+    max_retries: int | None = None,
+) -> tuple[dict[str, Any], str | None]:
     """
     返回 (auto 字段字典, 错误信息)。
-    成功时错误为 None。
+    成功时错误为 None；默认使用原有超时与 3 次重试，可为公司面板缩短等待。
     """
     em_code = yahoo_symbol_to_em_code(symbol)
     if not em_code:
@@ -51,9 +56,11 @@ def fetch_company_survey(symbol: str) -> tuple[dict[str, Any], str | None]:
         httpx.ReadTimeout,
         httpx.ConnectTimeout,
     )
+    timeout = httpx.Timeout(40.0, connect=18.0) if timeout_sec is None else httpx.Timeout(timeout_sec)
+    retries = 3 if max_retries is None else max(0, max_retries)
     try:
-        with httpx.Client(timeout=httpx.Timeout(40.0, connect=18.0), headers={"User-Agent": UA}) as client:
-            for attempt in range(4):
+        with httpx.Client(timeout=timeout, headers={"User-Agent": UA}) as client:
+            for attempt in range(retries + 1):
                 try:
                     r = client.get(_SURVEY, params={"code": em_code})
                     r.raise_for_status()
@@ -61,11 +68,11 @@ def fetch_company_survey(symbol: str) -> tuple[dict[str, Any], str | None]:
                     break
                 except retryable as e:
                     last_err = e
-                    if attempt < 3:
+                    if attempt < retries:
                         time.sleep(0.45 + random.random() * 0.55)
                 except httpx.HTTPStatusError as e:
                     last_err = e
-                    if e.response.status_code >= 500 and attempt < 3:
+                    if e.response.status_code >= 500 and attempt < retries:
                         time.sleep(0.45 + random.random() * 0.55)
                         continue
                     raise
@@ -84,13 +91,13 @@ def fetch_company_survey(symbol: str) -> tuple[dict[str, Any], str | None]:
             {"name": "", "org_name": "", "main_business": "", "industry": "", "intro": ""},
             "拉取失败：无响应",
         )
-    jbzl = data.get("jbzl") or []
-    if not jbzl:
+    jbzl = data.get("jbzl") if isinstance(data, dict) else None
+    if not isinstance(jbzl, list) or not jbzl or not isinstance(jbzl[0], dict):
         return (
             {"name": "", "org_name": "", "main_business": "", "industry": "", "intro": ""},
             "东方财富未返回公司基本资料（可能代码无效或已退市）",
         )
-    jb = jbzl[0] if isinstance(jbzl[0], dict) else {}
+    jb = jbzl[0]
     intro = (jb.get("ORG_PROFILE") or "").strip()
     scope = (jb.get("BUSINESS_SCOPE") or "").strip()
     industry = (jb.get("EM2016") or jb.get("INDUSTRYCSRC1") or "").strip()

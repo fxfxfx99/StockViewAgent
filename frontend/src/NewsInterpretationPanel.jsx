@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
@@ -11,7 +11,7 @@ import {
   Space,
   Spin,
   Typography,
-  message,
+  App as AntApp,
 } from "antd";
 import * as api from "./api.js";
 import { qk } from "./hooks/queryKeys.js";
@@ -22,13 +22,10 @@ const { Text } = Typography;
 const PAGE_SIZE = 8;
 
 export default function NewsInterpretationPanel({ symbol, displayName }) {
+  const { message } = AntApp.useApp();
   const [scope, setScope] = useState("analysis");
   const [sort, setSort] = useState("importance");
   const [page, setPage] = useState(1);
-  useEffect(() => {
-    setPage(1);
-    setScope("analysis");
-  }, [symbol]);
   const news = useQuery({
     queryKey: qk.newsArchive(symbol, page, sort, scope),
     queryFn: () =>
@@ -76,7 +73,7 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
   return (
     <Card
       size="small"
-      bordered={false}
+      variant="borderless"
       className="ex-section-card sva-panel sva-news-panel"
       title="相关新闻解读"
       extra={
@@ -87,7 +84,7 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
             loading={analyze.isPending}
             onClick={() => void run("analyze")}
           >
-            补充分析
+            补充分析（{api.NEWS_ANALYSIS_BATCH_SIZE}条/批）
           </Button>
           <Button
             size="small"
@@ -139,6 +136,10 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
           className="sva-news-sort"
         />
       </div>
+
+      <Text type="secondary" style={{ display: "block", marginBottom: 10 }}>
+        每批最多解读 {api.NEWS_ANALYSIS_BATCH_SIZE} 条新闻，可能需要数分钟；完成后可继续补充。
+      </Text>
 
       {news.error ? (
         <Alert

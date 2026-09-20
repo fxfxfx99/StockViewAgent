@@ -1,12 +1,11 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
-import { Card, Spin, Typography, Alert, message } from "antd";
+import { App as AntApp, Card, Spin, Typography, Alert } from "antd";
 import * as api from "./api";
 import { buildCandleVolumeChartOption } from "./klineChartOption.js";
 import { SUB_INDICATORS } from "./klineIndicators.js";
 import { qk } from "./hooks/queryKeys.js";
-import { useAppUrlState } from "./hooks/useAppUrlState.js";
 
 const { Text } = Typography;
 const SUB_IND_KEY = "sva_kline_sub_indicator";
@@ -84,14 +83,6 @@ function fmtWanLots(lots) {
   return `${(Number(lots) / 10000).toFixed(2)}万`;
 }
 
-function fmtHttpErr(e) {
-  if (!e) return "";
-  const d = e.response?.data?.detail;
-  if (typeof d === "string") return d;
-  if (d) return JSON.stringify(d);
-  return e.message || "加载失败";
-}
-
 /**
  * K 线面板。hideChrome 时不渲染代码/区间控件（由外层工具条托管）。
  * ref: { refresh, download, loading, canDownload }
@@ -99,6 +90,7 @@ function fmtHttpErr(e) {
 const StockKlinePanel = forwardRef(function StockKlinePanel(
   {
     embedded = false,
+    symbol = "",
     chartHeight = 520,
     displayName = "",
     hideChrome = false,
@@ -107,9 +99,8 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
   },
   ref
 ) {
+  const { message } = AntApp.useApp();
   const qc = useQueryClient();
-  const { chartSymbol } = useAppUrlState();
-  const [committedSymbol, setCommittedSymbol] = useState(() => chartSymbol || "");
   const [subIndicator, setSubIndicator] = useState(() => {
     try {
       const saved = localStorage.getItem(SUB_IND_KEY);
@@ -128,11 +119,7 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
       /* ignore */
     }
   };
-  useEffect(() => {
-    if (chartSymbol) setCommittedSymbol(chartSymbol);
-  }, [chartSymbol]);
-
-  const klineSymbol = chartSymbol ?? committedSymbol;
+  const klineSymbol = symbol.trim().toUpperCase();
 
   const klineQuery = useQuery({
     queryKey: qk.kline(klineSymbol, range, interval),
@@ -143,7 +130,7 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
 
   const bundle = klineQuery.data ?? null;
   const loading = klineQuery.isFetching;
-  const err = klineQuery.isError ? fmtHttpErr(klineQuery.error) : "";
+  const err = klineQuery.isError ? api.getApiErrorMessage(klineQuery.error) : "";
 
   useImperativeHandle(
     ref,
@@ -170,7 +157,7 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
         return Boolean(bundle?.candles?.length);
       },
     }),
-    [bundle, interval, klineSymbol, loading, qc, range]
+    [bundle, interval, klineSymbol, loading, message, qc, range]
   );
 
   const chartOption = useMemo(() => {
@@ -329,7 +316,7 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
   }
 
   return (
-    <Card bordered={false} title="K 线">
+    <Card variant="borderless" title="K 线">
       {body}
     </Card>
   );

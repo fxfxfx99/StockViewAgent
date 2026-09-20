@@ -72,7 +72,7 @@ def load_all_symbols_union() -> list[str]:
                 if t and _SYMBOL_RE.match(t) and t not in seen:
                     seen.add(t)
                     out.append(t)
-        except OSError:
+        except (OSError, json.JSONDecodeError, AttributeError):
             continue
     return out if out else load_symbols(1)
 
@@ -95,5 +95,6 @@ def save_symbols(user_id: int, symbols: list[str]) -> list[str]:
         source="user",
         item_count=len(cleaned),
     )
-    profile_store.prune_orphans(set(cleaned))
+    # 公司资料缓存由所有账户共享，不能因一个账户删除标的而清除其他账户的数据。
+    profile_store.prune_orphans(set(load_all_symbols_union()))
     return cleaned

@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.services import kline_pipeline, market_extra_http, strategy_knowledge_service
@@ -36,6 +37,7 @@ STRATEGIES: list[dict[str, str]] = [
 
 _STRATEGY_BY_ID = {s["id"]: s for s in STRATEGIES}
 _STRATEGY_BY_NAME = {s["name"]: s for s in STRATEGIES}
+_MARKET_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def transaction_agent_resource_root() -> Path:
@@ -141,18 +143,38 @@ def _latest_flow_summary(flow_items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _latest_market_institution_summary() -> dict[str, Any]:
+def _dated_rows(rows: list[dict[str, Any]], as_of: str | None) -> list[dict[str, Any]]:
+    """资金序列统一日期格式，历史节点排除缺少日期或晚于节点的记录。"""
+    dated = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = str(row.get("date") or row.get("trade_date") or "")[:10]
+        try:
+            day = date.fromisoformat(raw).isoformat()
+        except ValueError:
+            if not as_of:
+                dated.append(("", row))
+            continue
+        if not as_of or day <= as_of:
+            dated.append((day, row))
+    return [row for _, row in sorted(dated, key=lambda item: item[0], reverse=True)]
+
+
+def _latest_market_institution_summary(as_of: str | None = None) -> dict[str, Any]:
     north = market_history_cache.load_series("north_flow", "history") or {}
     margin = market_history_cache.load_series("margin", "market") or {}
-    latest_north = (north.get("items") or [{}])[0] if isinstance(north.get("items"), list) else {}
-    latest_margin = (margin.get("items") or [{}])[0] if isinstance(margin.get("items"), list) else {}
+    north_rows = _dated_rows(north.get("items") or [], as_of)
+    margin_rows = _dated_rows(margin.get("items") or [], as_of)
+    latest_north = north_rows[0] if north_rows else {}
+    latest_margin = margin_rows[0] if margin_rows else {}
     return {
-        "north_rows": len(north.get("items") or []),
+        "north_rows": len(north_rows),
         "north_latest_date": latest_north.get("trade_date"),
         "north_net_tgt": _num(latest_north.get("net_tgt")),
         "north_net_hgt": _num(latest_north.get("net_hgt")),
         "north_net_sgt": _num(latest_north.get("net_sgt")),
-        "margin_rows": len(margin.get("items") or []),
+        "margin_rows": len(margin_rows),
         "margin_latest_date": latest_margin.get("trade_date"),
         "margin_balance_change": _num(latest_margin.get("rzrqyecz")),
         "source_note": "来自市场行情资金流缓存；无缓存时仅作低置信度代理。",
@@ -161,10 +183,12 @@ def _latest_market_institution_summary() -> dict[str, Any]:
 
 async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[str, Any]:
     sym = symbol.strip().upper()
-    as_of_day = (as_of or "").strip()[:10] or None
+    as_of_day = (as_of or "").strip() or None
     if as_of_day:
         try:
-            as_of_dt = datetime.strptime(as_of_day, "%Y-%m-%d")
+            as_of_dt = datetime.strptime(as_of_day, "%Y-%m-%d").replace(tzinfo=_MARKET_TZ)
+            if as_of_dt.date().isoformat() != as_of_day:
+                raise ValueError("非标准日期")
         except ValueError as exc:
             raise ValueError("as_of 须为 YYYY-MM-DD") from exc
     else:
@@ -173,7 +197,7 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
     # 时间节点越早，需要越长的历史窗口，否则截断后会空窗
     range_param = "1y"
     if as_of_dt is not None:
-        days_ago = max(0, (datetime.now() - as_of_dt).days)
+        days_ago = max(0, (datetime.now(_MARKET_TZ) - as_of_dt).days)
         if days_ago > 1500:
             range_param = "max"
         elif days_ago > 700:
@@ -193,15 +217,18 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
         kline["kline_source"] = "local_cache"
     candles = list(kline.get("candles") or [])
     if as_of_day:
-        cutoff_ts = int(as_of_dt.timestamp()) + 24 * 3600 - 1
-        candles = [c for c in candles if int(c.get("t") or 0) <= cutoff_ts]
+        cutoff_ts = int((as_of_dt + timedelta(days=1)).timestamp())
+        candles = [c for c in candles if 0 < int(c.get("t") or 0) < cutoff_ts]
         if not candles:
             raise ValueError(f"在 {as_of_day} 及之前没有可用 K 线数据（已尝试 range={range_param}）")
         kline = dict(kline)
         kline["candles"] = candles
-        kline["data_as_of"] = as_of_day
+        kline["data_as_of"] = datetime.fromtimestamp(candles[-1]["t"], _MARKET_TZ).date().isoformat()
     metrics = dict(kline.get("metrics") or {})
-    fundamentals = company_fundamentals_store.latest_for_symbol(sym)
+    # 本地财务库只有报告期，没有可核验的公告日；历史观点不能把最新快照当作当时已知信息。
+    fundamentals = {} if as_of_day else company_fundamentals_store.latest_for_symbol(sym)
+    if as_of_day:
+        metrics = {key: metrics[key] for key in ("name", "currency") if key in metrics}
     flow_cached = market_history_cache.load_series("stock_capital_flow", sym)
     flow_items = list((flow_cached or {}).get("items") or [])
     if not flow_items:
@@ -211,12 +238,7 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
             flow_items = list(flow_cached.get("items") or [])
         except Exception:
             flow_items = []
-    if as_of_day and flow_items:
-        flow_items = [
-            row
-            for row in flow_items
-            if str(row.get("date") or row.get("trade_date") or "")[:10] <= as_of_day
-        ]
+    flow_items = _dated_rows(flow_items, as_of_day)
 
     closes = [_num(c.get("c")) for c in candles]
     volumes = [_num(c.get("v")) for c in candles]
@@ -269,7 +291,11 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
             "low60": low60,
         },
         "flow": _latest_flow_summary(flow_items),
-        "market_institution": _latest_market_institution_summary(),
+        "market_institution": _latest_market_institution_summary(as_of_day),
+        "data_limitations": ([
+            "历史节点仅使用该日及之前的 K 线和有日期的资金数据；最新估值、财务与经营讨论快照因缺少公告日期不参与评分。",
+            "历史 K 线可能使用当前前复权因子，策略知识库采用当前规则；此结果不等同于严格的时点回测。",
+        ] if as_of_day else []),
         "fundamentals": {
             "basic_info": basic,
             "financial": financial,
@@ -583,6 +609,8 @@ def _score_views(bundle: dict[str, Any]) -> list[dict[str, Any]]:
 async def generate_strategy_views(symbol: str, strategy: str | None = None, as_of: str | None = None) -> dict[str, Any]:
     bundle = await collect_signal_bundle(symbol, as_of=as_of)
     views = _score_views(bundle)
+    for view in views:
+        view["detailed_analysis"]["data_limitations"].extend(bundle.get("data_limitations") or [])
     if strategy:
         key = strategy.strip()
         want = _STRATEGY_BY_ID.get(key) or _STRATEGY_BY_NAME.get(key)

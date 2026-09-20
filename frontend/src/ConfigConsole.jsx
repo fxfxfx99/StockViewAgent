@@ -13,10 +13,10 @@ import {
   Table,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from "antd";
 import { ReloadOutlined, SettingOutlined } from "@ant-design/icons";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "./api.js";
 import { useAuth } from "./AuthContext.jsx";
@@ -44,14 +44,6 @@ const MARKET_OPTIONS = [
   },
 ];
 
-function describeRequestError(e) {
-  if (!e?.response) return e?.message || "请求失败";
-  const d = e.response.data;
-  if (typeof d?.detail === "string") return d.detail;
-  if (typeof d?.message === "string") return d.message;
-  return e.message || "请求失败";
-}
-
 export function SetupOnboardingBanner({ setupStatus }) {
   if (!setupStatus || setupStatus.ready) return null;
   return (
@@ -61,45 +53,40 @@ export function SetupOnboardingBanner({ setupStatus }) {
       banner
       className="sva-setup-banner"
       message={setupStatus.onboarding_title || "请先完成配置"}
-      description={
-        <Space direction="vertical" size={4} style={{ width: "100%" }}>
-          <Text>{setupStatus.onboarding_message}</Text>
-          {setupStatus.onboarding_hints?.length ? (
-            <ul className="sva-setup-hints">
-              {setupStatus.onboarding_hints.map((h) => (
-                <li key={h}>{h}</li>
-              ))}
-            </ul>
-          ) : null}
-          <Link to="/setup">
-            <Button type="primary" size="small">打开配置台</Button>
-          </Link>
-        </Space>
+      description={<Text>{setupStatus.onboarding_message}</Text>}
+      action={
+        <Link to="/setup">
+          <Button type="primary" size="small">打开配置台</Button>
+        </Link>
       }
     />
   );
 }
 
 export default function ConfigConsole({ open, onClose, isAdmin = false }) {
+  const { message } = AntApp.useApp();
   const qc = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [integrations, setIntegrations] = useState(null);
-  const [center, setCenter] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [testingKlineshare, setTestingKlineshare] = useState(false);
   const [testingTushare, setTestingTushare] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
+  const centerQuery = useQuery({
+    queryKey: ["settings", "data-center"],
+    queryFn: api.getDataCenter,
+    enabled: open && isAdmin,
+    // 仅轮询后台任务状态，避免重载配置表单覆盖尚未保存的输入。
+    refetchInterval: (query) => query.state.data?.refresh_running ? 2_000 : false,
+  });
+  const center = centerQuery.data;
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ig, dc] = await Promise.all([
-        api.getSettingsIntegrations(),
-        isAdmin ? api.getDataCenter() : Promise.resolve(null),
-      ]);
+      const ig = await api.getSettingsIntegrations();
       setIntegrations(ig);
-      setCenter(dc);
       const llm = ig?.llm || {};
       const market = ig?.market_data || {};
       form.setFieldsValue({
@@ -115,11 +102,11 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
         adata_proxy_url: "",
       });
     } catch (e) {
-      message.error(describeRequestError(e));
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [form, isAdmin]);
+  }, [form, message]);
 
   useEffect(() => {
     if (open) void load();
@@ -130,14 +117,14 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
     try {
       const state = await api.refreshDataCenter();
       message.success("已触发后台数据更新");
-      setCenter((prev) => ({
+      qc.setQueryData(["settings", "data-center"], (prev) => ({
         ...prev,
         refresh_running: true,
         last_startup_refresh: state,
       }));
-      window.setTimeout(() => void load(), 2000);
+      void centerQuery.refetch();
     } catch (e) {
-      message.error(describeRequestError(e));
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setRefreshing(false);
     }
@@ -149,7 +136,7 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
       const d = await api.testKlineshareIntegration();
       message.success(d.message || "KlineShare 连接成功");
     } catch (e) {
-      message.error(describeRequestError(e));
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setTestingKlineshare(false);
     }
@@ -161,16 +148,16 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
       const d = await api.testTushareIntegration();
       message.success(`Tushare 可用（${d.source}）${d.sample?.name || ""}`);
     } catch (e) {
-      message.error(describeRequestError(e));
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setTestingTushare(false);
     }
   };
 
   const save = async () => {
-    const v = await form.validateFields();
     setSaving(true);
     try {
+      const v = await form.validateFields();
       const body = {};
       if (v.market_data_provider) body.market_data_provider = v.market_data_provider;
       if (v.klineshare_api_key?.trim()) body.klineshare_api_key = v.klineshare_api_key.trim();
@@ -201,9 +188,18 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
       });
       message.success("配置已保存");
       await qc.invalidateQueries({ queryKey: ["settings", "setup-status"] });
+      for (const queryKey of [
+        ["market"],
+        ["transaction-agent"],
+        ["xueqiu"],
+        ["watchlist", "price-context"],
+        ["watchlist", "stock-detail"],
+      ]) {
+        void qc.invalidateQueries({ queryKey });
+      }
     } catch (e) {
       if (e?.errorFields) return;
-      message.error(describeRequestError(e));
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -230,9 +226,10 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
       open={open}
       onClose={onClose}
       className="sva-config-console"
-      destroyOnClose
+      destroyOnHidden
     >
       <Spin spinning={loading}>
+        <Form form={form} layout="vertical" size="small">
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Alert
             type="info"
@@ -255,7 +252,7 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
                 </Text>
               </Descriptions.Item>
             </Descriptions>
-            <Form form={form} layout="vertical" size="small" style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 10 }}>
               <Form.Item name="llm_api_key" label="API Key（留空不修改）">
                 <Input.Password placeholder="sk-..." autoComplete="off" />
               </Form.Item>
@@ -265,7 +262,7 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
               <Form.Item name="llm_model" label="Model">
                 <Input placeholder="gpt-4o-mini / moonshot-v1-32k" />
               </Form.Item>
-            </Form>
+            </div>
           </section>
 
           <section className="sva-admin-section">
@@ -297,7 +294,7 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
                 )}
               </Descriptions.Item>
             </Descriptions>
-            <Form form={form} layout="vertical" size="small" style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 10 }}>
               <Form.Item name="market_data_provider" label="行情提供商">
                 <Radio.Group>
                   <Space direction="vertical">
@@ -339,12 +336,13 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
                   </Button>
                 ) : null}
               </Space>
-            </Form>
+            </div>
           </section>
 
           {isAdmin ? (
             <>
               <section className="sva-admin-section">
+                {centerQuery.error ? <Alert type="warning" showIcon message={api.getApiErrorMessage(centerQuery.error)} /> : null}
                 <div className="sva-admin-section__head">
                   <Text strong>数据中心</Text>
                   <Button
@@ -391,8 +389,12 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
 
               <section className="sva-admin-section">
                 <Text strong>高级集成（管理员）</Text>
-                <Form form={form} layout="vertical" size="small" style={{ marginTop: 8 }}>
-                  <Form.Item name="xueqiu_cookies" label="雪球 Cookie（留空不修改）">
+                <div style={{ marginTop: 8 }}>
+                  <Form.Item
+                    name="xueqiu_cookies"
+                    label="雪球 Cookie（可选，留空不修改）"
+                    extra="用于连接雪球补充数据；登录失效后需重新登录雪球并更新 Cookie。未连接时仍会自动更新可用的公开资料。"
+                  >
                     <Input.TextArea rows={2} placeholder="公司信息/讨论补充" />
                   </Form.Item>
                   <Form.Item name="adata_proxy_enabled" label="行情 HTTP 代理" valuePropName="checked">
@@ -404,12 +406,12 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
                   <Form.Item name="adata_proxy_url" label="代理池 URL">
                     <Input />
                   </Form.Item>
-                </Form>
+                </div>
               </section>
             </>
           ) : null}
 
-          <Button type="primary" block loading={saving} onClick={() => void save()}>
+          <Button type="primary" block disabled={loading || !integrations} loading={saving} onClick={() => void save()}>
             保存全部配置
           </Button>
 
@@ -424,6 +426,7 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
             }
           />
         </Space>
+        </Form>
       </Spin>
     </Drawer>
   );

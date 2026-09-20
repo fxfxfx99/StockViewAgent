@@ -22,7 +22,7 @@ cd StockViewAgent
 更完整的步骤、端口、Docker 与排错见 **[docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md)**。
 
 ```bash
-./scripts/check-env.sh   # 检查本机环境
+./scripts/check-env.sh   # 检查本机环境；未就绪时返回非零状态
 ./scripts/setup.sh       # 只安装依赖
 ./scripts/dev.sh         # 只启动
 ```
@@ -31,6 +31,7 @@ cd StockViewAgent
 OpenAPI：<http://127.0.0.1:8001/docs>
 
 默认端口：后端 `8001`，前端 `5175`。占用时可 `BACKEND_PORT=8010 FRONTEND_PORT=5180 ./start.sh`。
+`start.sh` 会按依赖文件检查是否需要安装，更新代码后也可直接运行；前后端都通过就绪检查才报告启动成功，按 `Ctrl+C` 同时停止两个服务。
 
 ## 界面做什么
 
@@ -50,6 +51,8 @@ OpenAPI：<http://127.0.0.1:8001/docs>
 
 公网部署请设置 `AUTH_REQUIRED=true`，并修改 JWT 密钥与初始密码。
 
+浏览器默认只允许 localhost / loopback 来源。局域网或部署域名需设置 `CORS_ALLOWED_ORIGINS`，例如 `FRONTEND_HOST=0.0.0.0 CORS_ALLOWED_ORIGINS=http://192.168.1.20:5175 ./start.sh`（替换为本机实际 IP）；支持逗号分隔的多个完整来源，并将这些主机加入请求 Host 白名单。可信主机上的 CLI / Agent 无 `Origin` 请求保持可用，详见[本机配置](docs/LOCAL_SETUP.md)。股票列表刷新与重建需管理员权限，本地免登录模式仍使用默认管理员。
+
 **不要提交** `backend/.env`、`frontend/.env`、`backend/data/`。`./scripts/setup.sh` 会生成随机 `AUTH_JWT_SECRET`。
 
 ## Docker
@@ -66,8 +69,8 @@ docker compose up -d --build
 约定见 [AGENTS.md](AGENTS.md)。协作说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```bash
-cd backend && .venv/bin/python -m pytest tests/ -q
-cd frontend && npm run build
+(cd backend && .venv/bin/python -m pytest tests/ -q)
+(cd frontend && npm test && npm run build)
 ```
 
 ## 许可

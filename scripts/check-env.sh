@@ -30,23 +30,14 @@ echo "  Python: $PY ($("$PY" -V 2>&1))"
 sva_require_node
 echo "  Node:   $(node -v)  npm $(npm -v)"
 
-if sva_venv_ok "$ROOT"; then
-  echo "  [ok] 后端虚拟环境 backend/.venv"
-  ok=$((ok + 1))
-else
-  echo "  [..] 后端虚拟环境未就绪（运行 ./scripts/setup.sh）"
-fi
-if sva_frontend_ok "$ROOT"; then
-  echo "  [ok] 前端依赖 frontend/node_modules"
-  ok=$((ok + 1))
-else
-  echo "  [..] 前端依赖未就绪（运行 ./scripts/setup.sh）"
-fi
+check "后端虚拟环境 backend/.venv（未就绪时运行 ./scripts/setup.sh）" sva_venv_ok "$ROOT"
+check "前端依赖 frontend/node_modules（未就绪时运行 ./scripts/setup.sh）" sva_frontend_ok "$ROOT"
 
-[[ -f "$ROOT/backend/.env" ]] && echo "  [ok] backend/.env" || echo "  [..] 缺少 backend/.env（setup 会从 .env.example 复制）"
-[[ -f "$ROOT/backend/.env.example" ]] && echo "  [ok] backend/.env.example"
+check "backend/.env（缺少时运行 ./scripts/setup.sh）" test -f "$ROOT/backend/.env"
+check "backend/.env.example" test -f "$ROOT/backend/.env.example"
 
 echo ""
+echo "检查结果：${ok} 项通过，${fail} 项未就绪"
 echo "默认端口：后端 8001 · 前端 5175（可用 BACKEND_PORT / FRONTEND_PORT 覆盖）"
 echo "详细步骤见 docs/LOCAL_SETUP.md"
 echo ""

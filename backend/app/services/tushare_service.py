@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from app.config import settings
+from app.services.market_time import SHANGHAI_TZ, market_timestamp
 
 _pro_cache: tuple[str, str, object] | None = None
 
@@ -89,8 +90,8 @@ def fetch_daily_bars(ts_code: str, max_rows: int = 60) -> tuple[list[dict[str, A
     pro = _get_pro()
     if not pro:
         return [], "未配置 TUSHARE_TOKEN"
-    end = datetime.now().strftime("%Y%m%d")
-    start = (datetime.now() - timedelta(days=max(400, int(max_rows * 1.65)))).strftime("%Y%m%d")
+    end = datetime.now(SHANGHAI_TZ).strftime("%Y%m%d")
+    start = (datetime.now(SHANGHAI_TZ) - timedelta(days=max(400, int(max_rows * 1.65)))).strftime("%Y%m%d")
     try:
         df = pro.daily(ts_code=ts_code, start_date=start, end_date=end)
         if df is None or df.empty:
@@ -123,7 +124,7 @@ def fetch_kline_bundle(yahoo_symbol: str, range_param: str = "1y", interval: str
         date_text = str(row.get("trade_date") or "")
         if len(date_text) != 8:
             continue
-        ts = int(datetime.strptime(date_text, "%Y%m%d").timestamp())
+        ts = market_timestamp(datetime.strptime(date_text, "%Y%m%d"))
         candles.append({"t": ts, "o": _cell(row.get("open")), "h": _cell(row.get("high")), "l": _cell(row.get("low")), "c": _cell(row.get("close")), "v": _cell(row.get("vol")), "amount": _cell(row.get("amount"))})
     if len(candles) < 2:
         raise ValueError("Tushare 可用 K 线不足")

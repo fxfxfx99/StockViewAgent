@@ -31,6 +31,8 @@
 
 **Transaction Agent** 每次 `GET /api/transaction-agent/views/{symbol}` 拉取 K 线、资金流、基本面快照（优先缓存）。
 
+传入 `as_of=YYYY-MM-DD` 时按上海时区截取当日及之前的 K 线、个股和市场资金序列，`data_as_of` 返回实际最后一根 K 线日期。历史节点不使用当前估值、财务或经营讨论快照：本地财务库只有报告期，无法证明当时已公告。缺失项会在策略详情的数据限制中说明；当前前复权因子与策略规则仍可能影响结果，因此不等同于严格的时点回测。
+
 ## 股票列表与公司资料
 
 | 能力 | 路由 / 存储 | 说明 |
@@ -52,6 +54,8 @@
 | 启动同步 | `startup_data_check` → `sync_all_sources_to_archive` | — |
 
 单页 UI 在 K 线与策略观点下方提供 **相关新闻解读**：`GET /api/news/archive`（`scope=analysis|pending`）、`POST /api/news/sync-archive-feeds`、`POST /api/news/analyze-symbol-archive`。
+
+新闻同步与补充分析是长请求，前端超时均为 600 秒，开发代理超时为 900 秒。2026-09-16 本地实测一次新闻同步耗时约 185 秒，单条大模型分析约 120 秒（仅为当次观测，实际取决于新闻源和模型）。因此 UI 每次补充分析最多处理 3 条，完成后可再次点击继续；前端 API 包装的默认批次同为 3 条，显式传入数量及后端 API 的扩展能力仍保留。
 
 路由前缀：`/api/news/*`。
 
@@ -86,7 +90,9 @@
 
 ## 雪球（可选）
 
-`xueqiu_http.py` / `xueqiu_pipeline.py` 为可选补充源；配置 `XUEQIU_COOKIES` 或 integrations.json。当前 **无独立 HTTP 路由**（见 `backend/docs/XUEQIU_OPTIONAL.md`）。
+`xueqiu_http.py` / `xueqiu_pipeline.py` 为可选补充源，提供 `GET /api/xueqiu/company` 与 `GET /api/xueqiu/bundle`。公司接口在雪球不可用时补充公开公司资料与本地新闻归档，并标明实际来源；雪球讨论、事件等专属内容仍需要有效登录态。通过管理员设置、`integrations.json` 的 `xueqiu_cookies` 或 `XUEQIU_COOKIES` 配置 Cookie；过期后需手动登录雪球并更新，数据自动更新不会自动续期 Cookie。
+
+`company_updates.py` 在服务运行期间默认每 15 分钟刷新所有账户股票列表的标的并集；可见页面每 60 秒检查更新。配置为 `COMPANY_AUTO_REFRESH_ENABLED=true`、`COMPANY_REFRESH_INTERVAL_SEC=900`。公司资料持久缓存于 `backend/data/company_updates/`，失败时保留各部分上次成功内容与实际采集时间，并通过 `stale_fields` 标记旧资料。细节见 `backend/docs/XUEQIU_OPTIONAL.md`。
 
 ## 启动预热（`ENABLE_STARTUP_DATA_CHECK`）
 

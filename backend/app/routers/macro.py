@@ -1,11 +1,12 @@
 """市场研判 · 宏观与行业：Tushare 指数/外汇/黄金/国际原油等。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.deps.auth import get_current_user
 from app.services import macro_tushare_service
 
-router = APIRouter(prefix="/api/macro", tags=["macro"])
+router = APIRouter(prefix="/api/macro", tags=["macro"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/catalog")
@@ -14,7 +15,7 @@ def get_macro_catalog():
     return {
         "items": macro_tushare_service.catalog(),
         "index_basic_doc": "https://tushare.pro/document/2?doc_id=94",
-        "token_hint": "使用 settings.effective_tushare_token（.env 或 integrations.json）",
+        "token_hint": "优先使用当前账户 Tushare Token，再回退 integrations.json 或 .env",
     }
 
 

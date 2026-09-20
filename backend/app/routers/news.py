@@ -17,7 +17,8 @@ from app.services import (
 from app.storage import news_store, watchlist_store
 from app.storage.users_store import UserRecord
 
-router = APIRouter(prefix="/api/news", tags=["news"])
+# 新闻抓取和解读可能调用账户凭证；开放模式仍由依赖自动使用本地默认账户。
+router = APIRouter(prefix="/api/news", tags=["news"], dependencies=[Depends(get_current_user)])
 
 
 class AnalyzeBody(BaseModel):
@@ -52,10 +53,11 @@ class NewsSourceConfigBody(BaseModel):
 
 @router.get("/feed")
 async def news_feed(
+    user: Annotated[UserRecord, Depends(get_current_user)],
     symbols: str | None = Query(default=None, description="逗号分隔代码；空则用股票列表"),
     save: bool = Query(default=True, description="是否写入本地 SQLite 新闻库"),
 ):
-    wl = watchlist_store.load_all_symbols_union()
+    wl = watchlist_store.load_symbols(user.id)
     if symbols and symbols.strip():
         sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     else:
@@ -100,8 +102,8 @@ def news_archive(
 
 
 @router.get("/summary")
-def news_summary():
-    return {"items": news_store.summary_for_symbols(watchlist_store.load_all_symbols_union()), "archive": news_store.stats()}
+def news_summary(user: Annotated[UserRecord, Depends(get_current_user)]):
+    return {"items": news_store.summary_for_symbols(watchlist_store.load_symbols(user.id)), "archive": news_store.stats()}
 
 
 @router.get("/status")
@@ -115,18 +117,24 @@ def news_status():
 
 
 @router.post("/sync-archive-feeds")
-async def sync_archive_feeds(body: SyncArchiveBody | None = None):
+async def sync_archive_feeds(
+    user: Annotated[UserRecord, Depends(get_current_user)],
+    body: SyncArchiveBody | None = None,
+):
     """合并拉取 RSS + A 股快讯 + 36氪/虎嗅，写入 SQLite，并更新 matched_symbols。"""
-    syms = body.symbols if body and body.symbols else None
+    syms = body.symbols if body and body.symbols else watchlist_store.load_symbols(user.id)
     lookback = body.lookback_days if body else None
     return await news_feed_sync.sync_all_sources_to_archive(syms, lookback_days=lookback)
 
 
 @router.post("/analyze-symbol-archive")
-def analyze_symbol_archive(body: AnalyzeSymbolArchiveBody):
+def analyze_symbol_archive(
+    body: AnalyzeSymbolArchiveBody,
+    user: Annotated[UserRecord, Depends(get_current_user)],
+):
     """对某列表内标的：近 30 天已匹配、尚未完成解读的条目批量分析并可选写回。"""
     symbol = body.symbol.strip().upper()
-    wl = watchlist_store.load_all_symbols_union()
+    wl = watchlist_store.load_symbols(user.id)
     if symbol not in wl:
         return {"ok": False, "detail": "该代码不在股票列表中", "analyzed": 0, "results": []}
     pending = news_store.list_pending([symbol], limit=body.limit, max_age_days=body.lookback_days)
@@ -162,8 +170,8 @@ def analyze_symbol_archive(body: AnalyzeSymbolArchiveBody):
 
 
 @router.post("/analyze")
-def analyze_news(body: AnalyzeBody):
-    wl = watchlist_store.load_all_symbols_union()
+def analyze_news(body: AnalyzeBody, user: Annotated[UserRecord, Depends(get_current_user)]):
+    wl = watchlist_store.load_symbols(user.id)
     items = body.items[: body.max_items]
     if not items:
         return {"watchlist": wl, "results": []}

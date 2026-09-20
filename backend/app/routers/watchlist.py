@@ -156,6 +156,31 @@ class ParseImportBody(BaseModel):
     merge: bool = Field(default=True, description="true 时与现有股票列表合并去重")
 
 
+def _save_imported_symbols(
+    symbols: list[str],
+    details: list[dict],
+    background_tasks: BackgroundTasks,
+    user_id: int,
+):
+    """文本和 Excel 导入共用合并、重匹配及资料回填流程。"""
+    cur = watchlist_store.load_symbols(user_id)
+    previous = set(cur)
+    saved = watchlist_store.save_symbols(user_id, [*cur, *symbols])
+    added = [symbol for symbol in saved if symbol not in previous]
+    nwm.invalidate_match_hints_cache()
+    news_store.rematch_all_matched_symbols()
+    queued = added if added and tushare_service.is_configured() else []
+    if queued:
+        background_tasks.add_task(_background_tushare_fetch, added)
+    return {
+        "symbols": saved,
+        "parsed": symbols,
+        "details": details,
+        "added": added,
+        "tushare_backfill_queued": queued,
+    }
+
+
 @router.post("/parse-import")
 def parse_watchlist_import(
     body: ParseImportBody,
@@ -166,28 +191,7 @@ def parse_watchlist_import(
     symbols, details = watchlist_import.parse_text_to_symbols(body.text)
     if not body.merge:
         return {"symbols": symbols, "details": details, "saved": None}
-    cur = watchlist_store.load_symbols(user.id)
-    cur_set = {s.upper() for s in cur}
-    merged = list(cur)
-    added: list[str] = []
-    for s in symbols:
-        u = s.upper()
-        if u not in cur_set:
-            cur_set.add(u)
-            merged.append(u)
-            added.append(u)
-    saved = watchlist_store.save_symbols(user.id, merged)
-    nwm.invalidate_match_hints_cache()
-    news_store.rematch_all_matched_symbols()
-    if added and tushare_service.is_configured():
-        background_tasks.add_task(_background_tushare_fetch, added)
-    return {
-        "symbols": saved,
-        "parsed": symbols,
-        "details": details,
-        "added": added,
-        "tushare_backfill_queued": added if added and tushare_service.is_configured() else [],
-    }
+    return _save_imported_symbols(symbols, details, background_tasks, user.id)
 
 
 @router.post("/parse-import-xlsx")
@@ -207,28 +211,7 @@ async def parse_watchlist_import_xlsx(
         raise HTTPException(status_code=400, detail=f"解析失败: {e!s}") from e
     if not merge:
         return {"symbols": symbols, "details": details, "saved": None}
-    cur = watchlist_store.load_symbols(user.id)
-    cur_set = {s.upper() for s in cur}
-    merged = list(cur)
-    added: list[str] = []
-    for s in symbols:
-        u = s.upper()
-        if u not in cur_set:
-            cur_set.add(u)
-            merged.append(u)
-            added.append(u)
-    saved = watchlist_store.save_symbols(user.id, merged)
-    nwm.invalidate_match_hints_cache()
-    news_store.rematch_all_matched_symbols()
-    if added and tushare_service.is_configured():
-        background_tasks.add_task(_background_tushare_fetch, added)
-    return {
-        "symbols": saved,
-        "parsed": symbols,
-        "details": details,
-        "added": added,
-        "tushare_backfill_queued": added if added and tushare_service.is_configured() else [],
-    }
+    return _save_imported_symbols(symbols, details, background_tasks, user.id)
 
 
 @router.get("")
@@ -326,15 +309,7 @@ async def refresh_watchlist_profiles(
         if t in wl and t not in seen:
             seen.add(t)
             ordered.append(t)
-    errors: dict[str, str] = {}
-    for sym in ordered:
-        auto, err = company_profile_em.fetch_company_survey(sym)
-        lk = a_share_stocks.lookup_by_yahoo_symbol(sym)
-        if lk and not (auto.get("name") or "").strip():
-            auto["name"] = (lk.get("name") or "").strip()
-        profile_store.upsert_auto(sym, auto, err)
-        if err:
-            errors[sym] = err
+    errors = await _refresh_f10_only(ordered)
     # 向量化可能较慢，放线程池避免阻塞事件循环；前端已延长超时与代理时间
     issuer_uploads_sync = await asyncio.to_thread(irag.reindex_all_for_symbols, ordered)
     return {

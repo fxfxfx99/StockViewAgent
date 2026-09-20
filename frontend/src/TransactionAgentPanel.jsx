@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Divider, Modal, Progress, Row, Space, Spin, T
 import { ReloadOutlined } from "@ant-design/icons";
 import * as api from "./api";
 import { qk } from "./hooks/queryKeys.js";
+import { safeUrl } from "./components/format.js";
 
 const { Text, Paragraph } = Typography;
 
@@ -17,12 +18,6 @@ function scoreStatus(score) {
   if (score >= 70) return "success";
   if (score <= 35) return "exception";
   return "normal";
-}
-
-function fmtErr(e) {
-  const d = e?.response?.data?.detail;
-  if (typeof d === "string") return d;
-  return e?.message || "加载失败";
 }
 
 export default function TransactionAgentPanel({ symbol, displayName = "", asOf = null }) {
@@ -50,10 +45,10 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
   return (
     <Card
       size="small"
-      bordered={false}
+      variant="borderless"
       className="ex-transaction-agent-card"
       title={
-        <span className="sva-panel-title">多策略观点</span>
+        <span className="sva-panel-title">市场研判 · 多策略观点</span>
       }
       extra={
         <Space size={8}>
@@ -66,7 +61,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
     >
       <Spin spinning={query.isFetching && !data}>
         {query.isError ? (
-          <Alert type="error" showIcon message={fmtErr(query.error)} />
+          <Alert type="error" showIcon message={api.getApiErrorMessage(query.error)} />
         ) : null}
 
         {summary ? (
@@ -195,8 +190,8 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
               {(selectedDetail.sources || []).length ? (
                 selectedDetail.sources.map((src, i) => (
                   <div key={`${src.title || "source"}-${i}`} className="ex-transaction-agent-source">
-                    {src.url ? (
-                      <a href={src.url} target="_blank" rel="noreferrer">
+                    {safeUrl(src.url) ? (
+                      <a href={safeUrl(src.url)} target="_blank" rel="noreferrer">
                         {src.title || src.url}
                       </a>
                     ) : (

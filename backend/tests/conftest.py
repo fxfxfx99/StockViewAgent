@@ -6,6 +6,7 @@ import pytest
 
 _TEST_ROOT = tempfile.TemporaryDirectory(prefix="stockviewagent-tests-")
 os.environ["ENABLE_SCHEDULER"] = "false"
+os.environ["COMPANY_AUTO_REFRESH_ENABLED"] = "false"
 for _name in (
     "OPENAI_API_KEY",
     "OPENAI_API_BASE",

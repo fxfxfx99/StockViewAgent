@@ -17,12 +17,12 @@ echo "使用 Node:   $(node -v) / npm $(npm -v)"
 
 mkdir -p "$ROOT/backend/data" "$ROOT/pids"
 
-if [[ -d "$ROOT/backend/.venv" ]] && ! sva_venv_ok "$ROOT"; then
-  echo "现有虚拟环境不可用（常见于换机或 Python 版本不符），将重建..."
+if [[ -d "$ROOT/backend/.venv" ]] && ! sva_python_ok "$ROOT/backend/.venv/bin/python"; then
+  echo "现有虚拟环境解释器不可用（常见于换机或 Python 版本不符），将重建..."
   mv "$ROOT/backend/.venv" "$ROOT/backend/.venv.invalid.$(date +%s)"
 fi
 
-if ! sva_venv_ok "$ROOT"; then
+if [[ ! -x "$ROOT/backend/.venv/bin/python" ]]; then
   echo "创建 Python 虚拟环境..."
   "$PY" -m venv "$ROOT/backend/.venv"
 fi
@@ -53,10 +53,7 @@ if [[ ! -d "$ROOT/frontend/node_modules" ]] || \
    [[ "$(cat "$ROOT/frontend/node_modules/.package-hash")" != "$PKG_HASH" ]] || \
    ! sva_frontend_ok "$ROOT"; then
   echo "安装前端依赖..."
-  if ! (cd "$ROOT/frontend" && npm ci); then
-    echo "npm ci 失败，改用 npm install..."
-    (cd "$ROOT/frontend" && npm install)
-  fi
+  (cd "$ROOT/frontend" && npm ci)
   printf '%s\n' "$PKG_HASH" > "$ROOT/frontend/node_modules/.package-hash"
 else
   echo "前端依赖已是最新，跳过 npm ci"

@@ -58,15 +58,14 @@ def upsert_auto(symbol: str, auto: dict[str, Any], fetch_error: str | None) -> N
     manual = dict(prev.get("manual") or {}) if isinstance(prev.get("manual"), dict) else {}
     tu = prev.get("tushare")
     tushare = dict(tu) if isinstance(tu, dict) else {}
+    previous_auto = prev.get("auto") if isinstance(prev.get("auto"), dict) else {}
     now = int(time.time())
     em_ts = now if not fetch_error else int(prev.get("em_fetched_at") or 0)
     row = {
         "auto": {
-            "name": str(auto.get("name") or ""),
-            "org_name": str(auto.get("org_name") or ""),
-            "main_business": str(auto.get("main_business") or ""),
-            "industry": str(auto.get("industry") or ""),
-            "intro": str(auto.get("intro") or ""),
+            # 外部源失败时保留最后成功的数据，同时记录本次错误供界面展示。
+            key: str(auto.get(key) or (previous_auto.get(key) if fetch_error else "") or "")
+            for key in _MERGE_KEYS
         },
         "manual": manual,
         "fetch_error": fetch_error,
@@ -85,9 +84,12 @@ def upsert_tushare(symbol: str, payload: dict[str, Any], fetch_error: str | None
     prev = allp.get(sym)
     if not isinstance(prev, dict):
         prev = {"auto": {}, "manual": {}, "fetch_error": None, "em_fetched_at": 0}
-    block = dict(payload)
+    previous_tushare = prev.get("tushare")
+    block = dict(previous_tushare) if fetch_error and isinstance(previous_tushare, dict) else {}
+    block.update(payload)
     block["fetch_error"] = fetch_error
-    block["fetched_at"] = int(time.time())
+    if not fetch_error:
+        block["fetched_at"] = int(time.time())
     prev["tushare"] = block
     allp[sym] = prev
     _save_all_raw(allp)

@@ -62,3 +62,8 @@ FREE_STOCKDB_BASE_URL=http://127.0.0.1:7899
 
 - `kline_source`：实际命中的源（见上表）。
 - `metrics.fallback_note`：前置源失败时的简要错误摘要（截断存储）。
+
+## 行情时间口径
+
+A 股来源的无时区日期与分钟时间统一按 `Asia/Shanghai` 转为 Unix 时间戳；已有 Unix 时间戳保持不变。
+缓存的行情日期、K 线解读摘要及历史节点均按上海交易日展示/截断，不依赖服务主机的 `TZ`。

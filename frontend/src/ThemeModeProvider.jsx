@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { ConfigProvider } from "antd";
+import { App as AntApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { appDarkTheme, appLightTheme, THEME_STORAGE_KEY } from "./appTheme.js";
 
@@ -40,7 +40,7 @@ export function ThemeModeProvider({ children }) {
   return (
     <ThemeModeContext.Provider value={ctx}>
       <ConfigProvider locale={zhCN} theme={antTheme}>
-        {children}
+        <AntApp component={false}>{children}</AntApp>
       </ConfigProvider>
     </ThemeModeContext.Provider>
   );

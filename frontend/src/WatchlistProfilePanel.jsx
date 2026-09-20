@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import {
   Alert,
   Button,
@@ -11,14 +12,22 @@ import {
   Spin,
   Tag,
   Typography,
-  message,
+  App as AntApp,
 } from "antd";
 import { EditOutlined, ReloadOutlined } from "@ant-design/icons";
 import * as api from "./api";
 import { useWatchlistStockDetail } from "./hooks/useWatchlistStockDetail.js";
 import { useXueqiuCompany } from "./hooks/useXueqiuCompany.js";
+import { safeUrl } from "./components/format.js";
 
 const { Text, Paragraph, Link } = Typography;
+const AUTH_LABELS = {
+  missing: "雪球未连接",
+  expired: "雪球登录已失效",
+  connected: "雪球已连接",
+  anonymous: "雪球匿名连接",
+  unavailable: "雪球暂不可用",
+};
 
 function stripHtml(s) {
   if (!s) return "";
@@ -34,9 +43,7 @@ function securityLabel(symbol, profile) {
 function formatXueqiuTime(v) {
   if (v == null || v === "") return "";
   const n = Number(v);
-  if (!Number.isFinite(n)) return String(v);
-  const ms = n > 1e12 ? n : n * 1000;
-  const d = new Date(ms);
+  const d = new Date(Number.isFinite(n) ? (n > 1e12 ? n : n * 1000) : v);
   if (Number.isNaN(d.getTime())) return String(v);
   const pad = (x) => String(x).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -52,12 +59,12 @@ function mergeCompanyProfile(p, stockDetailProfile, xueqiuCompany) {
     }
     return "";
   };
-  return {
-    industry: pick(p.industry, x.industry, s.industry),
-    org_name: pick(p.org_name, x.org_name, s.org_name),
-    intro: pick(stripHtml(p.intro), x.intro, stripHtml(s.intro)),
-    name: pick(p.name, x.name, s.name),
-  };
+  return Object.fromEntries(["industry", "org_name", "intro", "name"].map((field) => {
+    const values = p.manual_fields?.includes(field)
+      ? [p[field], x[field], s[field]]
+      : [x[field], p[field], s[field]];
+    return [field, pick(...(field === "intro" ? values.map(stripHtml) : values))];
+  }));
 }
 
 function CompanyTextBox({ multiline, children }) {
@@ -72,7 +79,18 @@ function CompanyTextBox({ multiline, children }) {
   );
 }
 
-function FeedList({ items, emptyText }) {
+function SectionFreshness({ data, field }) {
+  if (!data) return null;
+  const fetchedAt = data.section_fetched_at?.[field];
+  return (
+    <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+      资料采集：{fetchedAt ? formatXueqiuTime(fetchedAt) : "时间未知"}
+      {data.stale_fields?.includes(field) ? " · 缓存" : ""}
+    </Text>
+  );
+}
+
+function FeedList({ items, emptyText, sourceLabel }) {
   if (!items?.length) {
     return <Text type="secondary">{emptyText}</Text>;
   }
@@ -87,6 +105,7 @@ function FeedList({ items, emptyText }) {
             <div className="ex-xueqiu-feed-meta">
               {item.created_at ? <Text type="secondary">{formatXueqiuTime(item.created_at)}</Text> : null}
               {item.event_type ? <Tag>{item.event_type}</Tag> : null}
+              {item.source_label || sourceLabel ? <Text type="secondary">{item.source_label || sourceLabel}</Text> : null}
             </div>
             <Text strong className="ex-xueqiu-feed-title">{item.title || "—"}</Text>
             {item.message ? (
@@ -99,9 +118,9 @@ function FeedList({ items, emptyText }) {
                 {item.text_excerpt}
               </Paragraph>
             ) : null}
-            {item.url ? (
-              <Link href={item.url} target="_blank" rel="noreferrer">
-                雪球原文
+            {safeUrl(item.url) ? (
+              <Link href={safeUrl(item.url)} target="_blank" rel="noreferrer">
+                查看原文
               </Link>
             ) : null}
           </div>
@@ -121,19 +140,21 @@ export default function WatchlistProfilePanel({
   singleSymbol = null,
   embedded = false,
 }) {
+  const { message } = AntApp.useApp();
   const [editOpen, setEditOpen] = useState(false);
   const [editSymbol, setEditSymbol] = useState("");
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
 
   const sym = String(singleSymbol || "").trim().toUpperCase();
-  const { data: stockDetail, loading: stockDetailLoading } = useWatchlistStockDetail(sym);
+  const isListed = symbols.includes(sym);
+  const { data: stockDetail, loading: stockDetailLoading, error: stockDetailError } = useWatchlistStockDetail(isListed ? sym : "");
   const {
     data: xueqiuData,
     isFetching: xueqiuFetching,
-    refetch: refetchXueqiu,
+    error: xueqiuError,
     isPending: xueqiuPending,
-  } = useXueqiuCompany(sym);
+  } = useXueqiuCompany(isListed ? sym : "");
   const p = sym ? profiles[sym] || { symbol: sym } : null;
 
   const openEdit = () => {
@@ -149,9 +170,9 @@ export default function WatchlistProfilePanel({
   };
 
   const submitManual = async () => {
-    const v = await form.validateFields();
     setSaving(true);
     try {
+      const v = await form.validateFields();
       const payload = { symbol: editSymbol };
       for (const k of ["name", "org_name", "industry", "intro"]) {
         const t = (v[k] || "").trim();
@@ -170,22 +191,17 @@ export default function WatchlistProfilePanel({
       message.success("已保存手动补充");
     } catch (e) {
       if (e?.errorFields) return;
-      message.error(e?.message || "保存失败");
+      message.error(api.getApiErrorMessage(e));
     } finally {
       setSaving(false);
     }
-  };
-
-  const refreshAll = async () => {
-    await onRefreshAll?.();
-    await refetchXueqiu();
   };
 
   if (!sym) {
     return null;
   }
 
-  if (!symbols.includes(sym)) {
+  if (!isListed) {
     return (
       <Alert
         type="info"
@@ -203,22 +219,34 @@ export default function WatchlistProfilePanel({
   const companyErrors = (stockDetail?.partial_errors || []).filter((msg) =>
     String(msg).startsWith("公司资料")
   );
-  const xueqiuErrors = xueqiuData?.errors || [];
+  const sectionErrors = [...new Set(Object.values(xueqiuData?.section_errors || {}).filter(Boolean))];
+  const sources = xueqiuData?.sources || {};
+  const authStatus = xueqiuData?.auth_status;
+  const needsConnection = authStatus === "missing" || authStatus === "expired";
   const err = p.fetch_error;
-  const xueqiuLoading = xueqiuPending || xueqiuFetching;
+  const xueqiuLoading = xueqiuPending && !hasCompanyData;
 
   return (
     <div style={{ marginTop: embedded ? 0 : 20 }}>
-      <Spin spinning={(loading && !refreshing) || xueqiuLoading}>
+      <Spin spinning={(loading && !refreshing && !hasCompanyData) || xueqiuLoading}>
+        {stockDetailError || xueqiuError ? (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 10 }}
+            message={api.getApiErrorMessage(stockDetailError || xueqiuError)}
+          />
+        ) : null}
         <Space wrap style={{ marginBottom: 14 }}>
           <Text strong>{securityLabel(sym, { ...p, name: merged.name || p.name })}</Text>
-          <Tag color="blue">雪球</Tag>
+          {sources.company ? <Tag color="blue">{sources.company}</Tag> : null}
           {p.manual_fields?.length ? <Tag color="purple">含手动补充</Tag> : null}
-          {xueqiuData?.cookies_configured ? (
-            <Tag color="cyan">Cookie 已配置</Tag>
-          ) : (
-            <Tag color="default">匿名 warm-up</Tag>
-          )}
+          {AUTH_LABELS[authStatus] ? (
+            <Tag color={authStatus === "connected" ? "cyan" : authStatus === "expired" ? "orange" : "default"}>
+              {AUTH_LABELS[authStatus]}
+            </Tag>
+          ) : null}
+          {needsConnection ? <RouterLink to="/setup">{authStatus === "expired" ? "更新雪球连接" : "连接雪球（可选）"}</RouterLink> : null}
           {err ? (
             <Tag color="orange" title={err}>
               东财 F10：{err.length > 24 ? `${err.slice(0, 24)}…` : err}
@@ -226,22 +254,30 @@ export default function WatchlistProfilePanel({
           ) : null}
         </Space>
 
-        {xueqiuErrors.length ? (
+        {xueqiuData ? (
+          <Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+            {xueqiuData.auto_refresh_enabled
+              ? `每 ${Math.round((xueqiuData.refresh_interval_sec || 900) / 60)} 分钟自动更新`
+              : "自动更新已关闭"}
+            {xueqiuData.fetched_at ? ` · 最近更新：${formatXueqiuTime(xueqiuData.fetched_at)}` : " · 等待首次更新"}
+            {xueqiuData.status === "stale" ? " · 当前保留上次成功数据" : ""}
+            {xueqiuFetching ? " · 正在检查更新…" : ""}
+          </Paragraph>
+        ) : null}
+
+        {needsConnection && xueqiuData?.auth_message ? (
+          <Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+            {xueqiuData.auth_message}
+          </Paragraph>
+        ) : null}
+
+        {sectionErrors.length ? (
           <Alert
             type="warning"
             showIcon
             style={{ marginBottom: 10 }}
-            message="雪球部分数据未加载"
-            description={
-              <>
-                {xueqiuErrors.join("；")}
-                {!xueqiuData?.cookies_configured ? (
-                  <div style={{ marginTop: 6 }}>
-                    可在管理员设置中配置雪球 Cookie，或登录 xueqiu.com 后复制 Cookie 到 integrations。
-                  </div>
-                ) : null}
-              </>
-            }
+            message={xueqiuData?.status === "stale" ? "部分资料更新暂时失败，已保留上次成功数据" : "部分公司信息暂不可用"}
+            description={sectionErrors.join("；")}
           />
         ) : null}
 
@@ -255,7 +291,7 @@ export default function WatchlistProfilePanel({
           />
         ) : null}
 
-        <Space style={{ marginBottom: 10 }}>
+        <Space wrap style={{ marginBottom: 10 }}>
           <Button size="small" icon={<EditOutlined />} onClick={openEdit}>
             手动补充 / 覆盖
           </Button>
@@ -265,21 +301,25 @@ export default function WatchlistProfilePanel({
             ghost
             icon={<ReloadOutlined />}
             loading={refreshing || xueqiuFetching}
-            onClick={refreshAll}
+            onClick={onRefreshAll}
           >
             刷新公司资料
           </Button>
           {(stockDetailLoading || loading) && !hasCompanyData ? (
             <Text type="secondary">公司资料加载中…</Text>
           ) : null}
-          {xueqiuData?.stock_url ? (
-            <Link href={xueqiuData.stock_url} target="_blank" rel="noreferrer">
+          {safeUrl(xueqiuData?.stock_url) ? (
+            <Link href={safeUrl(xueqiuData.stock_url)} target="_blank" rel="noreferrer">
               雪球个股页
             </Link>
           ) : null}
         </Space>
 
-        <Descriptions column={1} size="small" bordered labelStyle={{ width: 108 }}>
+        <div style={{ marginBottom: 6 }}>
+          <Text strong>公司资料</Text>
+          <SectionFreshness data={xueqiuData} field="company" />
+        </div>
+        <Descriptions column={1} size="small" bordered styles={{ label: { width: 108 } }}>
           <Descriptions.Item label="行业">
             <CompanyTextBox multiline={false}>
               <Text style={{ whiteSpace: "pre-wrap" }}>{merged.industry || "—"}</Text>
@@ -304,15 +344,17 @@ export default function WatchlistProfilePanel({
 
         <div className="ex-xueqiu-section">
           <Text strong>最近大事</Text>
+          <SectionFreshness data={xueqiuData} field="major_events" />
           <div className="ex-xueqiu-section-body">
-            <FeedList items={majorEvents} emptyText="暂无大事件（需雪球 Cookie 或有效匿名会话）" />
+            <FeedList items={majorEvents} emptyText="暂无最近大事" sourceLabel={sources.major_events} />
           </div>
         </div>
 
         <div className="ex-xueqiu-section">
           <Text strong>新闻</Text>
+          <SectionFreshness data={xueqiuData} field="news" />
           <div className="ex-xueqiu-section-body">
-            <FeedList items={xueqiuNews} emptyText="暂无个股新闻" />
+            <FeedList items={xueqiuNews} emptyText="暂无个股新闻" sourceLabel={sources.news} />
           </div>
         </div>
       </Spin>
@@ -324,10 +366,10 @@ export default function WatchlistProfilePanel({
         onOk={submitManual}
         confirmLoading={saving}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Paragraph type="secondary" style={{ fontSize: 12 }}>
-          保存时会提交本页全部字段：某行留空表示清除该字段的「手动值」。公司信息主源为雪球；手动值优先于雪球与东财自动拉取。
+          保存时会提交本页全部字段：某行留空表示清除该字段的「手动值」。手动值优先于自动更新的公司资料。
         </Paragraph>
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="证券简称">

@@ -10,7 +10,7 @@ export function useNewsActions() {
     onSuccess: updated,
   });
   const analyze = useMutation({
-    mutationFn: (symbol) => api.analyzeNewsForSymbol(symbol),
+    mutationFn: (symbol) => api.analyzeNewsForSymbol(symbol, api.NEWS_ANALYSIS_BATCH_SIZE),
     onSuccess: updated,
   });
   return { sync, analyze };

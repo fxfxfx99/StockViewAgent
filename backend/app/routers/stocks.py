@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.deps.auth import get_current_user
+from app.deps.auth import get_current_user, require_admin
 from app.services import a_share_stocks, issuer_basic_info_universe
 from app.storage import company_fundamentals_store, universe_company_store
 from app.storage.users_store import UserRecord
@@ -31,14 +31,14 @@ def stocks_meta():
 
 
 @router.post("/universe/rebuild")
-async def stocks_universe_rebuild():
-    """从本地上传「上市公司基本信息」CSV 重建搜索用股票列表（大文件可能耗时数分钟）。"""
+async def stocks_universe_rebuild(_: Annotated[UserRecord, Depends(require_admin)]):
+    """管理员从本地上传 CSV 重建股票列表（大文件可能耗时数分钟）。"""
     return await asyncio.to_thread(issuer_basic_info_universe.rebuild_universe_from_upload_blocking)
 
 
 @router.post("/refresh")
-def stocks_refresh():
-    """从东方财富拉取沪深京 A 股列表并覆盖本地文件。"""
+def stocks_refresh(_: Annotated[UserRecord, Depends(require_admin)]):
+    """管理员从东方财富拉取沪深京 A 股列表并覆盖本地文件。"""
     try:
         return a_share_stocks.fetch_and_save()
     except Exception as e:

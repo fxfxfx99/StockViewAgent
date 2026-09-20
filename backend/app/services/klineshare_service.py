@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.services.market_time import market_timestamp
 
 _DEFAULT_BASE = "https://data.klineshare.cn"
 _UA = (
@@ -223,7 +224,7 @@ def _row_to_candle(row: Any) -> dict[str, Any] | None:
             d = str(row.get("trade_date"))
             if len(d) == 8:
                 try:
-                    ts = int(datetime.strptime(d, "%Y%m%d").timestamp())
+                    ts = market_timestamp(datetime.strptime(d, "%Y%m%d"))
                 except ValueError:
                     ts = None
         o = _num(row.get("open") or row.get("o"))

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.services.market_time import SHANGHAI_TZ, market_date
 
 _KIND_DIR: dict[str, Path] = {}
 
@@ -71,7 +72,7 @@ def last_bar_date_from_candles(candles: list[dict[str, Any]]) -> date | None:
         return None
     try:
         t = float(candles[-1].get("t"))
-        return datetime.fromtimestamp(t).date()
+        return market_date(t)
     except (TypeError, ValueError, OSError):
         return None
 
@@ -89,7 +90,7 @@ def build_cache_warning(
     else:
         parts.append("本次在线拉取失败，已回退为本地缓存。")
     if last_bar:
-        days = (date.today() - last_bar).days
+        days = (datetime.now(SHANGHAI_TZ).date() - last_bar).days
         if days < 0:
             days = 0
         parts.append(f"缓存中最后一根日线：{last_bar.isoformat()}；之后约 {days} 个自然日未能更新。")
@@ -149,7 +150,7 @@ def merge_stale_indices(
         try:
             y, m, d = int(td[:4]), int(td[4:6]), int(td[6:8])
             list_day = date(y, m, d)
-            days = (date.today() - list_day).days
+            days = (datetime.now(SHANGHAI_TZ).date() - list_day).days
             if days < 0:
                 days = 0
             parts.append(f"列表基准日：{list_day.isoformat()}；距今约 {days} 个自然日未能更新。")

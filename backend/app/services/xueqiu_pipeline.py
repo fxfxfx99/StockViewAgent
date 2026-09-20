@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import html
 import re
+import time
 from typing import Any
 
-from app.services import xueqiu_http
+from app.services import company_public_sources, xueqiu_http
 
 _YAHOO = re.compile(r"^(\d{6})\.(SS|SH|SZ|BJ)$", re.I)
 
@@ -92,7 +93,7 @@ def stage_fetch_company_f10(xq_symbol: str) -> tuple[dict[str, Any] | None, str 
     url = "https://stock.xueqiu.com/v5/stock/f10/cn/company.json"
     params = {"symbol": xq_symbol}
     ref = xueqiu_http.stock_page_referer(xq_symbol)
-    data, err = xueqiu_http.request_json("GET", url, params=params, referer=ref)
+    data, err = xueqiu_http.request_json("GET", url, params=params, referer=ref, timeout_sec=10, max_retries=0)
     if err:
         return None, err
     if not isinstance(data, dict):
@@ -137,15 +138,19 @@ def stage_fetch_major_events(xq_symbol: str, count: int = 15) -> tuple[list[dict
     url = "https://stock.xueqiu.com/v5/stock/screener/event/list.json"
     params = {"symbol": xq_symbol, "page": 1, "size": min(max(1, count), 30)}
     ref = xueqiu_http.stock_page_referer(xq_symbol)
-    data, err = xueqiu_http.request_json("GET", url, params=params, referer=ref)
+    data, err = xueqiu_http.request_json("GET", url, params=params, referer=ref, timeout_sec=10, max_retries=0)
     if err:
         return [], err
     if not isinstance(data, dict):
         return [], "大事件接口格式异常"
     block = data.get("data") if isinstance(data.get("data"), dict) else data
-    items = block.get("items") or block.get("list") or data.get("list") or []
+    # 显式空列表是有效结果；字段缺失或类型错误不能清空已有缓存。
+    items = next(
+        (container[key] for container, key in ((block, "items"), (block, "list"), (data, "list")) if key in container),
+        None,
+    )
     if not isinstance(items, list):
-        return [], None
+        return [], "大事件接口格式异常：缺少有效事件列表"
     out: list[dict[str, Any]] = []
     for it in items[:count]:
         if not isinstance(it, dict):
@@ -185,14 +190,14 @@ def stage_fetch_stock_timeline(
         "hl": "0",
     }
     ref = xueqiu_http.stock_page_referer(xq_symbol)
-    data, err = xueqiu_http.request_json("GET", url, params=params, referer=ref)
+    data, err = xueqiu_http.request_json("GET", url, params=params, referer=ref, timeout_sec=10, max_retries=0)
     if err:
         return [], err
     if not isinstance(data, dict):
         return [], "时间线接口格式异常"
-    lst = data.get("list") or data.get("statuses") or []
+    lst = data["list"] if "list" in data else data.get("statuses")
     if not isinstance(lst, list):
-        return [], None
+        return [], "时间线接口格式异常：缺少有效资讯列表"
     out: list[dict[str, Any]] = []
     for it in lst[:count]:
         if not isinstance(it, dict):
@@ -348,7 +353,7 @@ def stage_fetch_kline_daily_snippet(xq_symbol: str, days: int = 30) -> tuple[lis
 
 
 def run_company_bundle(yahoo_symbol: str) -> dict[str, Any]:
-    """公司信息栏：F10 简介 + 大事件 + 个股新闻（主源雪球）。"""
+    """公司信息栏：雪球优先，失败时使用公开资料并保留真实来源与连接状态。"""
     xq = yahoo_to_xq_symbol(yahoo_symbol)
     if not xq:
         return {
@@ -364,33 +369,77 @@ def run_company_bundle(yahoo_symbol: str) -> dict[str, Any]:
             "stock_url": None,
         }
 
-    errors: list[str] = []
-
-    def _add_err(msg: str | None) -> None:
-        if msg and msg not in errors:
-            errors.append(msg)
-
+    cookies_configured = bool(xueqiu_http.effective_xueqiu_cookies())
     raw_company, c_err = stage_fetch_company_f10(xq)
-    company_norm: dict[str, Any] | None = None
-    _add_err(c_err)
-    if raw_company and not c_err:
-        company_norm = stage_normalize_company_f10(raw_company)
+    company = stage_normalize_company_f10(raw_company) if raw_company and not c_err else None
+    if not c_err and not (company and any(company.values())):
+        c_err = "雪球公司简介为空"
+        company = None
+    auth_status = xueqiu_http.auth_error_status(c_err)
+    if auth_status:
+        # 已确认登录不可用时，不重复请求同一会话下的其它接口。
+        major_events, news, e_err, n_err = [], [], c_err, c_err
+    else:
+        major_events, e_err = stage_fetch_major_events(xq, count=15)
+        auth_status = xueqiu_http.auth_error_status(e_err)
+        if auth_status:
+            news, n_err = [], e_err
+        else:
+            news, n_err = stage_fetch_stock_timeline(xq, source="自选股新闻", count=12)
+            auth_status = xueqiu_http.auth_error_status(n_err)
+    if not auth_status:
+        auth_status = "unavailable" if c_err and e_err and n_err else "connected" if cookies_configured else "anonymous"
 
-    major_events, e_err = stage_fetch_major_events(xq, count=15)
-    _add_err(e_err)
+    now = int(time.time())
+    sources = {"company": "雪球", "major_events": "雪球", "news": "雪球"}
+    section_times = {field: now for field in sources}
+    section_errors = {"company": c_err, "major_events": e_err, "news": n_err}
+    stale_fields = []
+    if c_err:
+        company, sources["company"], section_times["company"], section_errors["company"] = company_public_sources.fetch_company(yahoo_symbol)
+        if section_errors["company"] and company:
+            stale_fields.append("company")
+    if e_err or n_err:
+        public_items, public_source, fetched_at, public_error = company_public_sources.fetch_news(
+            yahoo_symbol, (company or {}).get("name") or None,
+        )
+        feed = [company_public_sources.as_feed_item(item) for item in public_items]
+        if e_err:
+            # 公告可作为事件补充；普通资讯不能冒充公司大事件。
+            major_events = [item for item in feed if item["event_type"] == "公司公告"][:15]
+        if n_err:
+            news = [item for item in feed if item["event_type"] != "公司公告"][:12]
+        for field, error in (("major_events", e_err), ("news", n_err)):
+            if error:
+                sources[field] = public_source
+                section_times[field] = fetched_at
+                section_errors[field] = public_error
+                if public_error:
+                    items = major_events if field == "major_events" else news
+                    section_times[field] = max((item.get("fetched_at") or 0 for item in items), default=0) or None
+                    if items:
+                        stale_fields.append(field)
 
-    news, n_err = stage_fetch_stock_timeline(xq, source="自选股新闻", count=12)
-    _add_err(n_err)
-
+    messages = {
+        "missing": "雪球接口需要登录，当前使用公开资料补充；可在配置台连接雪球。",
+        "expired": "雪球登录已失效，当前使用公开资料补充；请在配置台更新 Cookie。",
+        "unavailable": "雪球暂不可用，当前使用公开资料补充，将自动重试。",
+    }
     return {
-        "ok": bool(company_norm or major_events or news),
+        "ok": bool(company or major_events or news),
         "yahoo_symbol": yahoo_symbol.strip().upper(),
         "xq_symbol": xq,
-        "cookies_configured": bool(xueqiu_http.effective_xueqiu_cookies()),
-        "company": company_norm,
+        "cookies_configured": cookies_configured,
+        "auth_status": auth_status,
+        "auth_message": messages.get(auth_status),
+        "company": company,
         "major_events": major_events,
         "news": news,
-        "errors": errors,
+        "errors": list(dict.fromkeys(str(error) for error in section_errors.values() if error)),
+        "section_errors": section_errors,
+        "sources": sources,
+        "section_fetched_at": section_times,
+        "stale_fields": stale_fields,
         "source": "https://xueqiu.com/",
         "stock_url": f"https://xueqiu.com/S/{xq}",
     }

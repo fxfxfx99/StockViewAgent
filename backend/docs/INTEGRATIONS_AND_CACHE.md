@@ -1,5 +1,15 @@
 # 集成配置优先级与资料缓存
 
+## 请求账户与本地开放模式
+
+行情、宏观和新闻接口均建立当前账户上下文，确保读取该账户配置的行情与 LLM 凭证。
+`AUTH_REQUIRED=true` 时这些接口必须携带 Bearer Token；默认 `false` 时无需登录，自动使用本地默认账户。
+新闻抓取、解读和摘要的默认标的范围为当前账户的股票列表；后台归档匹配仍使用所有账户的列表并集。
+盘后自动解读逐账户读取凭证，仅处理已配置 LLM 且曾手动解读的标的；未配置的账户单独跳过。
+
+各账户股票列表独立保存，公司资料缓存共享；移除标的只会清理所有账户都不再使用的公司资料。
+F10 或 Tushare 资料刷新失败时保留上次成功数据与时间，并记录此次错误，避免临时断网清空资料。
+
 ## 雪球 `xueqiu_cookies`
 
 雪球 **`GET /api/xueqiu/bundle`** 为**可选**补充数据（讨论/摘要等），非主流程；详见 [XUEQIU_OPTIONAL.md](./XUEQIU_OPTIONAL.md)。
@@ -17,8 +27,9 @@
 
 生效顺序：
 
-1. **`integrations.json`** 中的 `tushare_token`（非空优先）
-2. 环境变量 **`TUSHARE_TOKEN`**
+1. **当前账户配置**中的 `tushare_token`（非空优先）
+2. **`integrations.json`** 中的 `tushare_token`
+3. 环境变量 **`TUSHARE_TOKEN`**
 
 代码：`Settings.effective_tushare_token`。
 

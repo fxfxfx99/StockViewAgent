@@ -12,13 +12,13 @@
 from __future__ import annotations
 
 import math
-import time
 from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
 
 from app.config import settings
+from app.services.market_time import SHANGHAI_TZ, market_timestamp
 from app.services.tushare_service import _cell, _get_pro, is_configured
 from app.storage.tushare_daily_cache import (
     load_entry,
@@ -101,9 +101,9 @@ def catalog() -> list[dict[str, Any]]:
 
 
 def _trade_date_to_ts(s: str) -> int:
-    """YYYYMMDD -> 本地日历日 12:00 的时间戳（与现有 K 线展示一致）。"""
+    """YYYYMMDD -> 上海日历日 12:00 的时间戳（与现有 K 线展示一致）。"""
     dt = datetime.strptime(s, "%Y%m%d").replace(hour=12, minute=0, second=0)
-    return int(time.mktime(dt.timetuple()))
+    return market_timestamp(dt)
 
 
 def _df_to_candles(df: pd.DataFrame, kind: str) -> list[dict[str, Any]]:
@@ -156,7 +156,7 @@ def _df_to_candles(df: pd.DataFrame, kind: str) -> list[dict[str, Any]]:
 
 def _fetch_macro_kline_live(meta: dict[str, Any], range_param: str) -> dict[str, Any]:
     days = _RANGE_DAYS.get((range_param or "1y").strip().lower(), 370)
-    end = datetime.now()
+    end = datetime.now(SHANGHAI_TZ)
     start = end - timedelta(days=days)
     start_s = start.strftime("%Y%m%d")
     end_s = end.strftime("%Y%m%d")
@@ -259,7 +259,7 @@ def fetch_macro_kline(series_id: str, range_param: str = "1y") -> dict[str, Any]
 
 def _find_recent_sw_daily_trade_date(pro: Any) -> str:
     """向前回溯若干自然日，找到 sw_daily 有数据的一日（用于拉取当日全市场行业指数列表）。"""
-    d = datetime.now()
+    d = datetime.now(SHANGHAI_TZ)
     last_err: Exception | None = None
     for _ in range(45):
         td = d.strftime("%Y%m%d")
@@ -344,7 +344,7 @@ def fetch_sw_daily_kline(ts_code: str, range_param: str = "1y") -> dict[str, Any
 
     try:
         days = _RANGE_DAYS.get(rng, 370)
-        end = datetime.now()
+        end = datetime.now(SHANGHAI_TZ)
         start = end - timedelta(days=days)
         start_s = start.strftime("%Y%m%d")
         end_s = end.strftime("%Y%m%d")
