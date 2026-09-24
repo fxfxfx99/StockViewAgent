@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.deps.auth import get_current_user
 from app.services import a_share_stocks, company_profile_em, issuer_basic_info_universe, issuer_rag_service as irag
 from app.services import tushare_service
@@ -325,6 +326,8 @@ def patch_watchlist_profile_manual(
     user: Annotated[UserRecord, Depends(get_current_user)],
     body: ProfileManualBody,
 ):
+    if settings.auth_required and user.role != "admin":
+        raise HTTPException(status_code=403, detail="共享公司资料仅管理员可修改")
     wl = watchlist_store.load_symbols(user.id)
     sym = body.symbol.strip().upper()
     if sym not in wl:

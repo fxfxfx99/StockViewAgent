@@ -1,65 +1,105 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import * as api from "./api.js";
 
 const AuthContext = createContext(null);
 
-/**
- * 本地开放模式：无登录 UI。后端 AUTH_REQUIRED=false 时，无 Token 也可拉取 /me 与业务接口。
- */
+/** 服务端决定是否登录；本地 AUTH_REQUIRED=false 继续使用默认账号。 */
 export function AuthProvider({ children }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState(null);
+  const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const configRef = useRef(null);
+  const refreshVersion = useRef(0);
+
+  const clearSession = useCallback((reason = "") => {
+    refreshVersion.current += 1;
+    api.setAuthToken("");
+    setUser(null);
+    setError(reason);
+    setLoading(false);
+    void queryClient.cancelQueries();
+    queryClient.clear();
+  }, [queryClient]);
 
   const refreshMe = useCallback(async () => {
+    const version = ++refreshVersion.current;
     setLoading(true);
     setError("");
     try {
-      await api.getHealth();
+      const nextConfig = await api.getAuthConfig();
+      if (version !== refreshVersion.current) return;
+      configRef.current = nextConfig;
+      setConfig(nextConfig);
+      if (nextConfig.auth_required && !api.getAuthToken()) {
+        setUser(null);
+        return;
+      }
+      let nextUser;
       try {
-        const u = await api.getMe();
-        setUser(u);
+        nextUser = await api.getMe();
       } catch (e) {
-        // 开放本地模式：清除过期 Token 后重试，避免股票列表等接口因 user=null 被禁用
-        if (api.getAuthToken() && e?.response?.status === 401) {
+        if (version !== refreshVersion.current) return;
+        if (!nextConfig.auth_required && api.getAuthToken() && e?.response?.status === 401) {
           api.setAuthToken("");
-          const u = await api.getMe();
-          setUser(u);
+          nextUser = await api.getMe();
         } else {
           throw e;
         }
       }
+      if (version === refreshVersion.current) setUser(nextUser);
     } catch (e) {
-      setUser(null);
-      setError(api.getApiErrorMessage(e));
+      if (version === refreshVersion.current) {
+        setUser(null);
+        setError(api.getApiErrorMessage(e));
+      }
     } finally {
-      setLoading(false);
+      if (version === refreshVersion.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    const unsubscribe = api.onAuthExpired(() => {
+      if (configRef.current?.auth_required) clearSession("登录已过期，请重新登录。");
+    });
     void refreshMe();
-  }, [refreshMe]);
+    return () => {
+      unsubscribe();
+      refreshVersion.current += 1;
+    };
+  }, [clearSession, refreshMe]);
 
-  const value = useMemo(
-    () => ({
-      user,
-      loading,
-      error,
-      isAdmin: user?.role === "admin",
-      refreshMe,
-      setUser,
-      /** 本地开放模式不提供登录操作。 */
-      login: async () => {
-        throw new Error("本产品为本地开放部署，无需登录");
-      },
-      logout: () => {
-        api.setAuthToken("");
-        setUser(null);
-      },
-    }),
-    [user, loading, error, refreshMe]
-  );
+  const authenticate = useCallback(async (credentials, isRegistration) => {
+    const result = await (isRegistration ? api.register(credentials) : api.login(credentials));
+    refreshVersion.current += 1;
+    void queryClient.cancelQueries();
+    queryClient.clear();
+    api.setAuthToken(result.access_token);
+    setUser(result.user);
+    setError("");
+    setLoading(false);
+  }, [queryClient]);
+
+  const login = useCallback((credentials) => authenticate(credentials, false), [authenticate]);
+  const register = useCallback((credentials) => authenticate(credentials, true), [authenticate]);
+  const logout = useCallback(() => clearSession(), [clearSession]);
+
+  const value = useMemo(() => ({
+    user,
+    loading,
+    error,
+    authRequired: config?.auth_required === true,
+    registrationEnabled: config?.registration_enabled === true,
+    configReady: config !== null,
+    isAdmin: user?.role === "admin",
+    refreshMe,
+    setUser,
+    login,
+    register,
+    logout,
+  }), [user, loading, error, config, refreshMe, login, register, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

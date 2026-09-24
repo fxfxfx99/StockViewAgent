@@ -70,7 +70,7 @@ function normalizeSymbolCandidate(raw) {
 export default function App() {
   const { message } = AntApp.useApp();
   const qc = useQueryClient();
-  const { user, loading: bootLoading, error: authError, refreshMe } = useAuth();
+  const { user, loading: bootLoading, error: authError, refreshMe, authRequired, logout } = useAuth();
   const { chartSymbol, setChartSymbol, asOf, setAsOf } = useAppUrlState();
 
   const {
@@ -327,6 +327,12 @@ export default function App() {
         <Space size={4} className="sva-header-actions">
           <ThemeModeToggle />
           <ConfigConsoleButton isAdmin={user?.role === "admin"} />
+          {authRequired ? (
+            <>
+              <Text className="sva-header-user" title={user?.username}>{user?.display_name || user?.username}</Text>
+              <Button type="text" size="small" onClick={logout}>退出</Button>
+            </>
+          ) : null}
         </Space>
       </Header>
 
@@ -470,6 +476,16 @@ export default function App() {
                 <PanelSuspense>
                   <LazyPanels.NewsInterpretationPanelLazy
                     key={focusSymbol}
+                    symbol={focusSymbol}
+                    displayName={focusSecurityLabel}
+                  />
+                </PanelSuspense>
+              ) : null}
+
+              {focusSymbol ? (
+                <PanelSuspense>
+                  <LazyPanels.XueqiuCommentsPanelLazy
+                    key={`${user?.id}:${focusSymbol}`}
                     symbol={focusSymbol}
                     displayName={focusSecurityLabel}
                   />

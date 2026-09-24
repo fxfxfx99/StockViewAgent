@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App.jsx";
 import { SetupPage } from "./ConfigConsole.jsx";
 import { AuthProvider } from "./AuthContext.jsx";
+import AuthGate from "./AuthGate.jsx";
 import { queryClient } from "./queryClient.js";
 import { ThemeModeProvider } from "./ThemeModeProvider.jsx";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
@@ -17,10 +18,12 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         <ThemeModeProvider>
           <AuthProvider>
             <ErrorBoundary>
-              <Routes>
-                <Route path="/setup" element={<SetupPage />} />
-                <Route path="/*" element={<App />} />
-              </Routes>
+              <AuthGate>
+                <Routes>
+                  <Route path="/setup" element={<SetupPage />} />
+                  <Route path="/*" element={<App />} />
+                </Routes>
+              </AuthGate>
             </ErrorBoundary>
           </AuthProvider>
         </ThemeModeProvider>

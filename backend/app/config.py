@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     # false（默认）：本地开放模式，无 Token 时自动使用本地用户，便于 GitHub 自托管部署
     # true：强制登录，接口需 Bearer Token
     auth_required: bool = False
+    # 仅在强制登录时允许公网访客自行创建普通用户；默认关闭。
+    auth_registration_enabled: bool = False
+    # 包含已有账户；达到上限后停止自助注册，避免试用实例无限增长。
+    auth_registration_max_users: int = 200
     # 浏览器默认仅允许 loopback 来源；局域网前端/部署域名填写完整来源，逗号分隔。
     # 对应主机也加入 Host 白名单；无 Origin 的可信主机 CLI/Agent 调用保持可用。
     cors_allowed_origins: str = ""
@@ -102,6 +106,9 @@ class Settings(BaseSettings):
     xueqiu_min_interval_sec: float = 1.2
     xueqiu_max_retries: int = 2
     xueqiu_timeout_sec: float = 25.0
+    # 自选股雪球评论：北京时间每日 09:00 筛选昨日最多 200 条讨论。
+    # 同时受 ENABLE_SCHEDULER 控制；手动刷新不受定时开关影响。
+    xueqiu_comments_auto_refresh_enabled: bool = True
     # 服务运行期间刷新所有账户股票列表的公共公司资料；多实例只开启一个。
     company_auto_refresh_enabled: bool = True
     company_refresh_interval_sec: int = 900

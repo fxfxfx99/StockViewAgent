@@ -21,6 +21,7 @@ const client = axios.create({
 });
 
 const TOKEN_KEY = "sva_token";
+const authExpiredListeners = new Set();
 
 let authToken = "";
 try {
@@ -43,12 +44,29 @@ export function setAuthToken(token) {
   }
 }
 
+export function onAuthExpired(listener) {
+  authExpiredListeners.add(listener);
+  return () => authExpiredListeners.delete(listener);
+}
+
 client.interceptors.request.use((config) => {
-  if (authToken) {
+  if (authToken && !config.skipAuth) {
     config.headers.Authorization = `Bearer ${authToken}`;
   }
   return config;
 });
+
+client.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // 旧账号仍在途的请求不能让后来登录的账号退出。
+    const sentToken = error.config?.headers?.Authorization;
+    if (error.response?.status === 401 && authToken && sentToken === `Bearer ${authToken}`) {
+      for (const listener of authExpiredListeners) listener();
+    }
+    return Promise.reject(error);
+  }
+);
 
 export function getApiErrorMessage(error) {
   if (!error?.response) {
@@ -69,6 +87,21 @@ export async function getHealth() {
 
 export async function getMe() {
   const { data } = await client.get("/auth/me", { timeout: 10_000 });
+  return data;
+}
+
+export async function getAuthConfig() {
+  const { data } = await client.get("/auth/config", { timeout: 10_000, skipAuth: true });
+  return data;
+}
+
+export async function login(credentials) {
+  const { data } = await client.post("/auth/login", credentials, { skipAuth: true });
+  return data;
+}
+
+export async function register(credentials) {
+  const { data } = await client.post("/auth/register", credentials, { skipAuth: true });
   return data;
 }
 
@@ -218,6 +251,22 @@ export async function getXueqiuCompany(symbol, { force = false } = {}) {
   const { data } = await client.get("/xueqiu/company", {
     params: { symbol, ...(force ? { force: true } : {}) },
     timeout: 120000,
+  });
+  return data;
+}
+
+export async function getXueqiuComments(symbol, { signal } = {}) {
+  const { data } = await client.get("/xueqiu/comments", {
+    params: { symbol },
+    signal,
+    timeout: 15_000,
+  });
+  return data;
+}
+
+export async function refreshXueqiuComments(symbol, mode = "latest") {
+  const { data } = await client.post("/xueqiu/comments/refresh", { symbol, mode }, {
+    timeout: 15_000,
   });
   return data;
 }

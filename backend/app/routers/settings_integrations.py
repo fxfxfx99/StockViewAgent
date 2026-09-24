@@ -58,7 +58,7 @@ def _xueqiu_block() -> dict[str, Any]:
         "cookies_configured": n > 0 or env,
         "integrations_key": "xueqiu_cookies",
         "priority_hint": "integrations.json 中 xueqiu_cookies 非空时优先于环境变量 XUEQIU_COOKIES；见 backend/docs/INTEGRATIONS_AND_CACHE.md",
-        "hint": "浏览器登录 xueqiu.com → 开发者工具 → 请求头 Cookie 整段粘贴；勿提交到 git",
+        "hint": "默认自动获取并缓存雪球匿名 Cookie，无需填写。仅当雪球要求登录或验证时，由管理员登录后补充登录 Cookie；勿提交到 git",
     }
 
 
@@ -315,7 +315,7 @@ class LLMPatch(BaseModel):
 class IntegrationsUpdate(BaseModel):
     xueqiu_cookies: str | None = Field(
         default=None,
-        description="雪球 Cookie 整段；空字符串清除 integrations 中的值",
+        description="可选的雪球登录 Cookie，优先于自动匿名会话；空字符串清除 integrations 中的值",
     )
     tushare_token: str | None = Field(
         default=None,
@@ -357,6 +357,17 @@ def test_tushare(user: Annotated[UserRecord, Depends(get_current_user)]):
 @router.put("/integrations")
 def put_integrations(body: IntegrationsUpdate, user: Annotated[UserRecord, Depends(get_current_user)]):
     patch = body.model_dump(exclude_unset=True)
+    llm_update = None
+    if body.llm is not None:
+        lm = body.llm.model_dump(exclude_unset=True)
+        if lm:
+            from app.security.llm_endpoints import validate_llm_endpoints
+            from app.services.llm_runtime_unify import unify_llm_runtime_fields
+
+            current = dict(load_user_credentials(user.id).get("llm", {}))
+            current.update(lm)
+            validate_llm_endpoints(current)
+            llm_update = unify_llm_runtime_fields(current)
     platform_keys = {
         "xueqiu_cookies",
         "adata_proxy_enabled",
@@ -382,13 +393,7 @@ def put_integrations(body: IntegrationsUpdate, user: Annotated[UserRecord, Depen
     if adata_patch:
         merge_integrations(adata_patch)
 
-    if body.llm is not None:
-        lm = body.llm.model_dump(exclude_unset=True)
-        if lm:
-            from app.services.llm_runtime_unify import unify_llm_runtime_fields
-
-            current = dict(load_user_credentials(user.id).get("llm", {}))
-            current.update(lm)
-            merge_user_credentials(user.id, {"llm": unify_llm_runtime_fields(current)})
+    if llm_update is not None:
+        merge_user_credentials(user.id, {"llm": llm_update})
 
     return integrations_payload(user.id)

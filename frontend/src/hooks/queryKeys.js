@@ -12,6 +12,7 @@ export const qk = {
   kline: (symbol, range, interval) => ["market", "kline", symbol, range, interval],
   transactionAgentViews: (symbol, asOf) => ["transaction-agent", "views", symbol || "", asOf || ""],
   xueqiuCompany: (symbol) => ["xueqiu", "company", symbol || ""],
+  xueqiuComments: (symbol, userId) => ["xueqiu", "comments", userId ?? "guest", symbol || ""],
   newsArchive: (symbol, page, sort, scope = "analysis") => [
     "news",
     "archive",

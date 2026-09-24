@@ -90,9 +90,11 @@
 
 ## 雪球（可选）
 
-`xueqiu_http.py` / `xueqiu_pipeline.py` 为可选补充源，提供 `GET /api/xueqiu/company` 与 `GET /api/xueqiu/bundle`。公司接口在雪球不可用时补充公开公司资料与本地新闻归档，并标明实际来源；雪球讨论、事件等专属内容仍需要有效登录态。通过管理员设置、`integrations.json` 的 `xueqiu_cookies` 或 `XUEQIU_COOKIES` 配置 Cookie；过期后需手动登录雪球并更新，数据自动更新不会自动续期 Cookie。
+`xueqiu_http.py` / `xueqiu_pipeline.py` 为可选补充源，提供 `GET /api/xueqiu/company` 与 `GET /api/xueqiu/bundle`。公司接口在雪球不可用时补充公开公司资料与本地新闻归档，并标明实际来源。默认自动访问雪球首页建立匿名会话，访客 Cookie 在内存缓存 15 分钟，到期后下次使用时重新获取；自动获取失败或接口拒绝后冷却 5 分钟。状态接口只展示会话状态，不返回 Cookie。匿名会话不能代替账号登录：若雪球要求登录或验证码，需要人工完成后通过管理员设置、`integrations.json` 的 `xueqiu_cookies` 或 `XUEQIU_COOKIES` 提供有效 Cookie。显式配置优先，登录凭据过期后仍需人工更新。
 
 `company_updates.py` 在服务运行期间默认每 15 分钟刷新所有账户股票列表的标的并集；可见页面每 60 秒检查更新。配置为 `COMPANY_AUTO_REFRESH_ENABLED=true`、`COMPANY_REFRESH_INTERVAL_SEC=900`。公司资料持久缓存于 `backend/data/company_updates/`，失败时保留各部分上次成功内容与实际采集时间，并通过 `stale_fields` 标记旧资料。细节见 `backend/docs/XUEQIU_OPTIONAL.md`。
+
+**雪球评论精选**位于新闻解读之后。`GET /api/xueqiu/comments` 读取账户隔离的快照，`POST /api/xueqiu/comments/refresh` 将最近 200 条或昨日讨论加入后台队列；`xueqiu_comments_pipeline` 负责限频采集、去重与逐批 LLM 筛选。自选股每日北京时间 09:00 更新前一天内容，受 `ENABLE_SCHEDULER` 与 `XUEQIU_COMMENTS_AUTO_REFRESH_ENABLED` 控制。结果与队列保存在 `xueqiu_comments.db`，错误时保留上次成功精选并显式标记。当前账户配置好大模型凭据即可入队，雪球会话在实际抓取时自动获取，无需先手填 Cookie。完整规则见 [雪球评论精选](../backend/docs/XUEQIU_OPTIONAL.md#雪球评论精选)。
 
 ## 启动预热（`ENABLE_STARTUP_DATA_CHECK`）
 

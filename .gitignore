@@ -43,4 +43,5 @@ htmlcov/
 
 logs/
 pids/
+.public-trial/
 *.csv

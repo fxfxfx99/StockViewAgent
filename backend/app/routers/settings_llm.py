@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.deps.auth import get_current_user
+from app.security.llm_endpoints import validate_llm_endpoints
 from app.services.llm_provider_presets import infer_from_api_base, public_presets_list
 from app.services.llm_runtime_unify import unify_llm_runtime_fields
 from app.storage.user_credentials_store import load_user_credentials, merge_user_credentials
@@ -125,5 +126,6 @@ def put_llm(body: LLMUpdate, user: Annotated[UserRecord, Depends(get_current_use
         kw["embedding_model"] = patch["embedding_model"] or ""
     if "embedding_api_base" in patch:
         kw["embedding_api_base"] = patch["embedding_api_base"] or ""
+    validate_llm_endpoints(kw)
     merge_user_credentials(user.id, {"llm": unify_llm_runtime_fields(kw)})
     return llm_public_dict(user.id)

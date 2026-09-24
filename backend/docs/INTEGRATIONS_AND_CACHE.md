@@ -14,14 +14,21 @@ F10 或 Tushare 资料刷新失败时保留上次成功数据与时间，并记�
 
 雪球 **`GET /api/xueqiu/bundle`** 为**可选**补充数据（讨论/摘要等），非主流程；详见 [XUEQIU_OPTIONAL.md](./XUEQIU_OPTIONAL.md)。
 
+默认无需手填 Cookie：实际抓取前，服务自动访问雪球首页建立匿名会话，访客 Cookie 只在进程内存缓存 15 分钟，到期后在下次使用时重新获取。自动获取失败或接口拒绝后冷却 5 分钟，再由后续采集请求触发重试。只读状态接口不触发会话获取，也不返回 Cookie 内容。
+
 生效顺序（**前者覆盖后者**）：
 
 1. **`backend/data/integrations.json`** 中的 `xueqiu_cookies`（非空时唯一生效）
 2. 环境变量 **`XUEQIU_COOKIES`**（`Settings.xueqiu_cookies`）
+3. 以上均为空时，使用自动获取的匿名会话
 
-代码：`app/services/xueqiu_http.py` → `effective_xueqiu_cookies()`。
+代码：`app/services/xueqiu_http.py`；`effective_xueqiu_cookies()` 读取显式配置，实际请求负责获取或复用自动会话。
 
-若在控制台将 Cookie 清空（空字符串），会**删除**文件中的键并**回退**到环境变量。
+若在控制台将 Cookie 清空（空字符串），会**删除**文件中的键并**回退**到环境变量；环境变量也为空时恢复自动模式。手动 Cookie 不会被自动匿名会话覆盖。
+
+匿名会话不能代替账号登录，也不能保证访问需要登录的接口。若雪球要求登录或验证码，应人工完成后在管理员设置提供有效 Cookie。手动配置的登录 Cookie 过期后仍需人工更新；自动续取只适用于访客 Cookie。
+
+评论精选只要求当前账户已配置大模型凭据即可入队，不再以是否保存 Cookie 为门槛；会话获取在后台抓取时执行，实际失败状态会反馈到评论面板。
 
 ## Tushare Token
 

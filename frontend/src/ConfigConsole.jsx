@@ -392,10 +392,10 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
                 <div style={{ marginTop: 8 }}>
                   <Form.Item
                     name="xueqiu_cookies"
-                    label="雪球 Cookie（可选，留空不修改）"
-                    extra="用于连接雪球补充数据；登录失效后需重新登录雪球并更新 Cookie。未连接时仍会自动更新可用的公开资料。"
+                    label="雪球登录 Cookie（可选回退，留空不修改）"
+                    extra="默认由服务自动获取并更新雪球 Cookie，无需手动配置。仅在雪球要求登录或人工验证时，完成登录或验证后填写有效的登录 Cookie 作为回退；手动提供的登录状态失效后需更新。"
                   >
-                    <Input.TextArea rows={2} placeholder="公司信息/讨论补充" />
+                    <Input.TextArea rows={2} placeholder="通常无需填写；自动会话不可用时可提供登录 Cookie" />
                   </Form.Item>
                   <Form.Item name="adata_proxy_enabled" label="行情 HTTP 代理" valuePropName="checked">
                     <Switch />

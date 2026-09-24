@@ -54,7 +54,7 @@ def materials_list(_: Annotated[UserRecord, Depends(get_current_user)]):
 
 @router.post("/materials")
 async def materials_upload(
-    _: Annotated[UserRecord, Depends(get_current_user)],
+    _: Annotated[UserRecord, Depends(require_admin)],
     file: UploadFile = File(...),
     summary: str = Form(""),
 ):
@@ -67,7 +67,7 @@ async def materials_upload(
 
 
 @router.delete("/materials/{mid}")
-def materials_delete(mid: str, _: Annotated[UserRecord, Depends(get_current_user)]):
+def materials_delete(mid: str, _: Annotated[UserRecord, Depends(require_admin)]):
     if not kls.delete_material(mid):
         raise HTTPException(404, "未找到")
     return {"ok": True}
