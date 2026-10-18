@@ -128,4 +128,7 @@ def put_llm(body: LLMUpdate, user: Annotated[UserRecord, Depends(get_current_use
         kw["embedding_api_base"] = patch["embedding_api_base"] or ""
     validate_llm_endpoints(kw)
     merge_user_credentials(user.id, {"llm": unify_llm_runtime_fields(kw)})
+    if settings.enable_research_worker:
+        from app.services import local_autopilot
+        local_autopilot.reconcile(user.id)
     return llm_public_dict(user.id)

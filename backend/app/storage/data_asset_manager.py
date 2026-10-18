@@ -1,9 +1,12 @@
 """统一数据资产管理：原子写入、轻量备份与目录索引。
 
-业务文件保存在 backend/data，索引与备份保存在 backend/data/_managed。
+所有本地资产跟随 STOCKVIEW_DATA_DIR；索引与写入前备份位于 _managed。
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+from functools import wraps
+import fcntl
 import hashlib
 import json
 import os
@@ -28,6 +31,25 @@ def managed_root() -> Path:
 
 def catalog_path() -> Path:
     return managed_root() / _CATALOG_NAME
+
+
+@contextmanager
+def catalog_lock():
+    """Serialize catalog read/modify/write across API and worker processes."""
+    with (managed_root() / "catalog.lock").open("a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _catalog_writer(function):
+    @wraps(function)
+    def locked(*args, **kwargs):
+        with catalog_lock():
+            return function(*args, **kwargs)
+    return locked
 
 
 def _now() -> datetime:
@@ -95,6 +117,7 @@ def _json_size_hint(data: Any) -> int:
         return 0
 
 
+@_catalog_writer
 def _record_asset(
     path: Path,
     *,
@@ -106,6 +129,8 @@ def _record_asset(
     size_bytes: int | None = None,
 ) -> None:
     rel = _relative(path)
+    if Path(rel).is_absolute():
+        return  # External sources are not portable assets of this directory.
     catalog = _load_catalog()
     assets = catalog.setdefault("assets", {})
     prev = assets.get(rel) if isinstance(assets.get(rel), dict) else {}
@@ -215,6 +240,8 @@ def register_existing_asset(
 def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
     name = path.name
     stem = path.stem
+    if rel.startswith("research/"):
+        return {"kind": "research_immutable_data", "key": rel, "source": "research_archive"}
     if rel.startswith("kline_bundle_cache/"):
         return {"kind": "kline_bundle_cache", "key": stem, "source": "local_cache"}
     if rel.startswith("market_history_cache/"):
@@ -253,6 +280,7 @@ def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
         "company_fundamentals.db": ("sqlite_db", "company_fundamentals", "company_fundamentals_store"),
         "strategy_knowledge.db": ("sqlite_db", "strategy_knowledge", "strategy_knowledge_store"),
         "decision_signals.db": ("sqlite_db", "decision_signals", "decision_signal_store"),
+        "research.sqlite3": ("sqlite_db", "research", "research_store"),
     }
     if name in mapping:
         kind, key, source = mapping[name]
@@ -264,64 +292,121 @@ def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
     return {"kind": "data_file", "key": stem, "source": ""}
 
 
+# Categories describe ownership/retention without deciding deletion policy.
+_CATEGORIES = {
+    "research": ("研究与策略证据", "durable"),
+    "knowledge": ("资料与知识库", "durable"),
+    "news": ("新闻与公司资料", "durable"),
+    "accounts": ("账户与配置", "durable"),
+    "cache": ("行情与接口缓存", "rebuildable"),
+    "runtime": ("运行日志与状态", "runtime"),
+    "backups": ("历史备份", "backup"),
+    "index": ("索引与迁移记录", "durable"),
+    "other": ("其他本地资产", "durable"),
+}
+
+
+def _category(rel: str) -> str:
+    first = rel.split("/", 1)[0]
+    if rel.startswith(("_managed/backups/", "_managed/legacy/")):
+        return "backups"
+    if first == "_managed" or first == "INDEX.md":
+        return "index"
+    if rel.endswith(("-wal", "-journal")):
+        return _category(rel.rsplit("-", 1)[0])  # May contain committed database changes.
+    if first == "runtime" or rel.endswith((".lock", ".pid", "-shm")):
+        return "runtime"
+    if first in {"research", "research.sqlite3", "research_agent.db", "quant.db", "decision_signals.db", "stock_picker_agents.db"}:
+        return "research"
+    if first in {"issuer_uploads", "kline_learning", "imports", "strategy_knowledge.db", "kline_insights"}:
+        return "knowledge"
+    if first in {"news.db", "company_fundamentals.db", "company_updates", "company_basic_universe.json", "issuer_basic_info_universe.json", "xueqiu_comments.db"}:
+        return "news"
+    if first in {"users.db", "watchlists", "watchlist.json", "watchlist_profiles.json", "llm_runtime.json", "integrations.json", "platform.json", "cn_headline_sources_override.json"}:
+        return "accounts"
+    if "cache" in first or first in {"a_share_stocks.json"}:
+        return "cache"
+    return "other"
+
+
+def _walk_files(root: Path):
+    # Never traverse symlinks: a portable root must not silently index another
+    # directory, nor follow a mount/symlink loop during inventory.
+    for base, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if not (Path(base) / d).is_symlink())
+        for name in sorted(files):
+            path = Path(base) / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                yield path, path.stat()
+            except FileNotFoundError:
+                continue  # Cache rotation may race with a read-only scan.
+
+
 def scan_data_assets() -> dict[str, Any]:
-    """扫描 backend/data 并合并 catalog，用于管理页/API 展示。"""
+    """Inventory real files, including backups; never read secret contents."""
+    root = settings.data_dir.resolve()
     catalog = _load_catalog()
     catalog_assets = catalog.get("assets") if isinstance(catalog.get("assets"), dict) else {}
     assets: list[dict[str, Any]] = []
-    for p in sorted(settings.data_dir.rglob("*")):
-        if not p.is_file():
-            continue
-        rel = _relative(p)
-        if rel.startswith(f"{_MANAGED_DIR}/"):
-            continue
+    all_items: list[dict[str, Any]] = []
+    categories = {key: {"id": key, "label": value[0], "retention": value[1], "files": 0, "size_bytes": 0}
+                  for key, value in _CATEGORIES.items()}
+    for path, stat in _walk_files(root):
+        rel = path.relative_to(root).as_posix()
         meta = dict(catalog_assets.get(rel) or {})
-        inferred = _infer_asset_meta(rel, p)
-        stat = p.stat()
-        if meta.get("kind") in (None, "", "unclassified"):
-            meta["kind"] = inferred["kind"]
-        if meta.get("key") in (None, ""):
-            meta["key"] = inferred["key"]
-        if meta.get("source") in (None, ""):
-            meta["source"] = inferred["source"]
-        meta["path"] = rel
-        meta["size_bytes"] = stat.st_size
-        meta.setdefault("updated_at", datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat())
-        assets.append(meta)
-
-    totals: dict[str, Any] = {"files": len(assets), "size_bytes": sum(int(a.get("size_bytes") or 0) for a in assets)}
+        inferred = _infer_asset_meta(rel, path)
+        for field in ("kind", "key", "source"):
+            if meta.get(field) in (None, "", "unclassified"):
+                meta[field] = inferred[field]
+        meta.update(path=rel, size_bytes=stat.st_size, category=_category(rel),
+                    updated_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat())
+        # Discard stale absolute backup locators from older catalogs.
+        meta["backups"] = [b for b in (meta.get("backups") or []) if isinstance(b, str) and not Path(b).is_absolute() and ".." not in Path(b).parts]
+        all_items.append(meta)
+        category = categories[meta["category"]]
+        category["files"] += 1
+        category["size_bytes"] += stat.st_size
+        if not rel.startswith(f"{_MANAGED_DIR}/"):
+            assets.append(meta)
+    totals = {"files": len(assets), "size_bytes": sum(a["size_bytes"] for a in assets)}
+    directory_totals = {"files": len(all_items), "size_bytes": sum(a["size_bytes"] for a in all_items)}
     by_kind: dict[str, dict[str, int]] = {}
     for a in assets:
-        kind = str(a.get("kind") or "unclassified")
-        ent = by_kind.setdefault(kind, {"files": 0, "size_bytes": 0})
-        ent["files"] += 1
-        ent["size_bytes"] += int(a.get("size_bytes") or 0)
-
+        entry = by_kind.setdefault(a["kind"], {"files": 0, "size_bytes": 0})
+        entry["files"] += 1
+        entry["size_bytes"] += a["size_bytes"]
     return {
-        "managed_dir": _relative(managed_root()),
-        "catalog": _relative(catalog_path()),
-        "totals": totals,
-        "by_kind": by_kind,
-        "items": assets,
+        "data_root": str(root), "managed_dir": _MANAGED_DIR, "catalog": f"{_MANAGED_DIR}/{_CATALOG_NAME}",
+        "totals": totals, "directory_totals": directory_totals, "by_kind": by_kind, "items": assets,
+        "categories": list(categories.values()),
+        "index": {"path": f"{_MANAGED_DIR}/{_CATALOG_NAME}", "guide": "INDEX.md", "updated_at": catalog.get("updated_at")},
+        "migration": {
+            "commands": "./backend/.venv/bin/python scripts/storage.py migrate --to '/path/to/StockViewAgent-data'",
+            "notes": ["先停止 start.sh 管理的服务及 Docker；在项目根目录执行，替换为尚不存在的新目录路径。",
+                      "迁移校验 SQLite 和文件哈希，成功后原目录仍保留；按命令输出设置 STOCKVIEW_DATA_DIR 后再启动。",
+                      "目录包含已保存的 API 配置、账户和资料，请作为私有备份保管；外部 .env 与外部数据服务需另行配置。",
+                      "刷新索引只扫描文件，不抓取行情、不调用模型，也不清理历史证据。"],
+        },
     }
 
 
+@_catalog_writer
 def refresh_catalog_from_disk() -> dict[str, Any]:
-    """把当前磁盘文件写入 catalog；已有业务写入记录的 kind/source 会被保留。"""
+    """Rebuild portable relative locators without discarding metadata."""
     scanned = scan_data_assets()
     catalog = _load_catalog()
-    existing = catalog.get("assets") if isinstance(catalog.get("assets"), dict) else {}
-    next_assets: dict[str, Any] = {}
-    for item in scanned["items"]:
-        rel = str(item.get("path") or "")
-        if not rel:
+    root = settings.data_dir.resolve()
+    next_assets = {item["path"]: item for item in scanned["items"]}
+    # Backups are part of the persistent inventory too. The catalog and its
+    # lock/guide are generated artifacts; excluding them avoids self-reference.
+    for path, stat in _walk_files(root / _MANAGED_DIR):
+        rel = path.relative_to(root).as_posix()
+        if rel in {f"{_MANAGED_DIR}/{_CATALOG_NAME}", f"{_MANAGED_DIR}/catalog.lock"}:
             continue
-        prev = existing.get(rel) if isinstance(existing.get(rel), dict) else {}
-        merged = {**item}
-        for field in ("kind", "key", "source", "item_count", "backups"):
-            if field in prev and (field not in merged or merged.get(field) in (None, "", "unclassified")):
-                merged[field] = prev[field]
-        next_assets[rel] = merged
-    catalog["assets"] = next_assets
+        next_assets[rel] = {**_infer_asset_meta(rel, path), "path": rel, "size_bytes": stat.st_size,
+                            "category": _category(rel), "updated_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()}
+    catalog.update(version=2, assets=next_assets)
     _write_catalog(catalog)
     return scan_data_assets()

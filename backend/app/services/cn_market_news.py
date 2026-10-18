@@ -97,14 +97,30 @@ async def _fetch_rss(
     headers: dict[str, str] = {}
     if referer:
         headers["Referer"] = referer
-    r = await get_with_retry(client, url, headers=headers or None)
-    if r is None:
-        return []
-    parsed = feedparser.parse(r.content)
+    automatic = id_prefix.startswith("auto_rss_")
+    if automatic:
+        from app.services.source_autopilot import fetch_discovered_news_document, _trusted_url
+        try:
+            document = await fetch_discovered_news_document(url)
+        except (httpx.HTTPError, ValueError, OSError):
+            return []
+    else:
+        r = await get_with_retry(client, url, headers=headers or None)
+        if r is None:
+            return []
+        document = r.content
+    parsed = feedparser.parse(document)
     out: list[dict[str, Any]] = []
     for e in parsed.entries[:45]:
         title = html.unescape((e.get("title") or "").strip())
         link = (e.get("link") or "").strip() or "#"
+        if automatic:
+            try:
+                _trusted_url(link)
+            except ValueError:
+                continue
+            if not title:
+                continue
         summary = (e.get("summary") or e.get("description") or "").strip()
         summary = re.sub(r"<[^>]+>", "", summary)
         summary = html.unescape(summary)[:800]
@@ -286,7 +302,7 @@ async def _attach_related_entity_labels(items: list[dict[str, Any]]) -> None:
         it["related_entities"] = ents
 
 
-async def fetch_cn_headlines(
+async def _fetch_cn_headlines(
     limit: int = 50,
     major_first: bool = True,
 ) -> dict[str, Any]:
@@ -301,11 +317,13 @@ async def fetch_cn_headlines(
     ) as client:
         rows = sources_for_fetch(include_disabled_rss=False)
         groups, fetch_meta = await _gather_from_rows(client, rows, em_page_size=55)
+        records_received = sum(len(group) for group in groups)
         merged = _merge_groups(groups, major_first)
 
         if not merged:
             rows_all = sources_for_fetch(include_disabled_rss=True)
             groups2, meta2 = await _gather_from_rows(client, rows_all, em_page_size=60)
+            records_received += sum(len(group) for group in groups2)
             merged = _merge_groups(groups2, major_first)
             fetch_meta = meta2
 
@@ -330,6 +348,7 @@ async def fetch_cn_headlines(
 
     return {
         "items": merged[:limit],
+        "records_received": records_received,
         "sources": catalog,
         "fetched_at": int(time.time()),
         "fetch_meta": fetch_meta,
@@ -341,3 +360,17 @@ async def fetch_cn_headlines(
             "healthy_count": maint.get("healthy_count"),
         },
     }
+
+
+async def fetch_cn_headlines(limit: int = 50, major_first: bool = True, *, record_activity: bool = True) -> dict[str, Any]:
+    """Archive orchestration owns its event; standalone requests record here."""
+    from app.services.runtime_telemetry import record_collection
+    try:
+        result = await _fetch_cn_headlines(limit, major_first)
+    except Exception:
+        if record_activity:
+            record_collection("news_archive", "cn_headlines", status="failed", error_code="source_unavailable")
+        raise
+    if record_activity:
+        record_collection("news_archive", "cn_headlines", records_received=result["records_received"])
+    return result

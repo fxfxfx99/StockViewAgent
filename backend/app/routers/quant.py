@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/quant", tags=["quant"])
 class BacktestRequest(BaseModel):
     symbol: str = Field(..., description="A 股代码，如 600519.SS")
     range: str = Field(default="2y", description="K 线区间")
-    interval: str = Field(default="1d", description="当前回测建议使用 1d")
+    interval: Literal["1d"] = Field(default="1d", description="可信回测仅支持日线")
     strategy_id: str = Field(default="ma_cross")
     params: dict[str, Any] = Field(default_factory=dict)
     initial_cash: float = Field(default=100000.0, gt=0)
@@ -27,7 +27,7 @@ class BacktestRequest(BaseModel):
 class PortfolioBacktestRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list, description="股票池，至少 2 只")
     range: str = Field(default="2y", description="K 线区间")
-    interval: str = Field(default="1d", description="当前组合因子回测建议使用 1d")
+    interval: Literal["1d"] = Field(default="1d", description="可信组合回测仅支持日线")
     params: dict[str, Any] = Field(default_factory=dict)
     initial_cash: float = Field(default=100000.0, gt=0)
     max_position_pct: float = Field(default=1.0, ge=0, le=1)
@@ -54,10 +54,11 @@ def quant_catalog(_: Annotated[UserRecord, Depends(get_current_user)]):
         "joinquant_model": quant_backtest.JOINQUANT_MODEL,
         "engine": {
             "name": "StockViewAgent Quant Lab",
+            "version": quant_backtest.ENGINE_VERSION,
             "mode": "template_safe_backtest_and_factor_rotation",
             "granularity": "daily_bar",
-            "supports": ["A股T+1", "整手撮合", "佣金/印花税/过户费", "比例/跳价滑点", "单标的模板", "多股票因子TopN轮动", "LLM策略草案", "参数网格搜索", "样本外验证", "成本压力测试"],
-            "limits": ["当前不执行任意用户 Python", "组合回测当前为等权多头轮动", "非投资建议"],
+            "supports": ["按交易日T+1", "板块申报数量", "按历史日期计算税费", "完整费用预算", "下一日开盘撮合", "多股票因子TopN轮动", "LLM策略草案", "训练/验证/独立留出", "成本压力测试", "数据质量晋级门禁"],
+            "limits": ["仅日线", "当前不执行任意用户 Python", "无真实盘口排队", "未知交易元数据或公司行动禁止自动晋级", "现金股息按税前除权日预记，仅限探索", "独立留出与自主研究共享每账户一次的访问门禁", "组合回测当前为等权多头轮动"],
         },
     }
 

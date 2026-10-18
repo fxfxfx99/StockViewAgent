@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.runtime_paths import resolve_data_dir
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
-_DATA_DIR = _BACKEND_DIR / "data"
+_DATA_DIR = resolve_data_dir(_BACKEND_DIR)
 _PROJECT_ROOT = _BACKEND_DIR.parent
 
 
@@ -86,6 +87,8 @@ class Settings(BaseSettings):
     auth_bootstrap_user_password: str = ""
     # 多 worker / 多副本部署时只允许独立 scheduler 实例开启，避免重复任务。
     enable_scheduler: bool = True
+    # Research runs in a separate persistent worker, never inside API lifespan.
+    enable_research_worker: bool = True
     # 启动后异步检查/预热外部数据源；不阻塞服务启动。
     enable_startup_data_check: bool = True
     startup_data_check_delay_sec: float = 5.0
@@ -134,18 +137,24 @@ class Settings(BaseSettings):
 
     @property
     def data_dir(self) -> Path:
+        # Fixed for the lifetime of this process; changing .env must never send
+        # existing SQLite connections and new file writes to different roots.
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
         return _DATA_DIR
 
     @property
+    def stockview_data_dir(self) -> str:
+        return str(_DATA_DIR)
+
+    @property
     def kline_learning_dir(self) -> Path:
-        p = _PROJECT_ROOT / "kline_learning"
+        p = self.data_dir / "kline_learning"
         (p / "files").mkdir(parents=True, exist_ok=True)
         return p
 
     @property
     def issuer_uploads_dir(self) -> Path:
-        p = _PROJECT_ROOT / "issuer_uploads"
+        p = self.data_dir / "issuer_uploads"
         (p / "files").mkdir(parents=True, exist_ok=True)
         return p
 

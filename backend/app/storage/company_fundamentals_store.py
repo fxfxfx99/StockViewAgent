@@ -1,6 +1,6 @@
 """上市公司结构化基础库：基本信息、财务指标、管理层经营讨论与分析。
 
-数据来自本地 CSV，可重复导入；以逻辑主键 upsert，避免持续更新时重复膨胀。
+数据来自本地 CSV，可重复导入；最新视图按逻辑主键 upsert，原始内容修订不可变保存。
 """
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ from app.config import settings
 from app.storage import data_asset_manager
 
 DB_NAME = "company_fundamentals.db"
+_DATASET_TABLES = {
+    "basic_info": "company_basic_records",
+    "financial": "financial_indicator_records",
+    "mda": "management_discussion_records",
+}
 
 
 def db_path() -> Path:
@@ -58,6 +63,8 @@ def init_db() -> None:
               imported_at TEXT NOT NULL,
               row_count INTEGER NOT NULL DEFAULT 0
             );
+            CREATE INDEX IF NOT EXISTS idx_source_files_content
+              ON source_files(dataset,sha256,size_bytes);
 
             CREATE TABLE IF NOT EXISTS company_basic_records (
               logical_key TEXT PRIMARY KEY,
@@ -128,8 +135,41 @@ def init_db() -> None:
               ON management_discussion_records(symbol, report_date DESC);
             CREATE INDEX IF NOT EXISTS idx_basic_name
               ON company_basic_records(short_name);
+
+            CREATE TABLE IF NOT EXISTS fundamentals_schema_meta (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS company_record_revisions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              dataset TEXT NOT NULL,
+              logical_key TEXT NOT NULL,
+              symbol TEXT NOT NULL,
+              report_date TEXT NOT NULL,
+              row_hash TEXT NOT NULL,
+              content_hash TEXT NOT NULL,
+              raw_json TEXT NOT NULL,
+              source_path TEXT NOT NULL,
+              observed_at TEXT NOT NULL,
+              recorded_at TEXT NOT NULL,
+              published_at TEXT,
+              publication_field TEXT,
+              available_at TEXT,
+              origin TEXT NOT NULL,
+              UNIQUE(dataset,logical_key,content_hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_company_revision_symbol
+              ON company_record_revisions(symbol,dataset,observed_at,id);
+            CREATE TRIGGER IF NOT EXISTS company_revision_no_update BEFORE UPDATE ON company_record_revisions
+              BEGIN SELECT RAISE(ABORT,'Company content revisions are immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS company_revision_no_delete BEFORE DELETE ON company_record_revisions
+              BEGIN SELECT RAISE(ABORT,'Company content revisions are immutable'); END;
             """
         )
+        if not conn.execute("SELECT 1 FROM fundamentals_schema_meta WHERE key='content_revisions_v1'").fetchone():
+            for dataset, table in _DATASET_TABLES.items():
+                for row in conn.execute(f"SELECT * FROM {table}").fetchall():
+                    _record_revision(conn, dataset, dict(row), origin="legacy_backfill")
+            conn.execute("INSERT INTO fundamentals_schema_meta VALUES('content_revisions_v1','1')")
     data_asset_manager.register_existing_asset(
         db_path(),
         kind="sqlite_db",
@@ -200,8 +240,87 @@ def _iter_csv(path: Path) -> Iterable[dict[str, str]]:
 
 
 def _upsert_many(conn: sqlite3.Connection, sql: str, rows: list[tuple[Any, ...]]) -> None:
-    if rows:
-        conn.executemany(sql, rows)
+    if not rows:
+        return
+    dataset = {_UPSERT_BASIC: "basic_info", _UPSERT_FINANCIAL: "financial", _UPSERT_MDA: "mda"}[sql]
+    table = _DATASET_TABLES[dataset]
+    columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})")]
+    keys = list({row[0] for row in rows})
+    # Retain pre-existing rows too, including databases populated before this
+    # migration. Batches stay below conservative SQLite variable limits.
+    for offset in range(0, len(keys), 800):
+        part = keys[offset:offset + 800]
+        placeholders = ",".join("?" for _ in part)
+        for old in conn.execute(f"SELECT * FROM {table} WHERE logical_key IN ({placeholders})", part).fetchall():
+            _record_revision(conn, dataset, dict(old), origin="before_update")
+    for row in rows:
+        _record_revision(conn, dataset, dict(zip(columns, row)), origin="csv_import")
+    conn.executemany(sql, rows)
+
+
+def _explicit_timestamp(value: Any) -> str | None:
+    """Do not invent a time or timezone for a date-only announcement."""
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, (float, int)):
+            dt = datetime.fromtimestamp(value, timezone.utc)
+        else:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                return None
+        return dt.astimezone(timezone.utc).isoformat()
+    except (ValueError, TypeError, OSError, OverflowError):
+        return None
+
+
+def _publication_metadata(raw: dict) -> tuple[str | None, str | None, str | None]:
+    # Accounting period EndDate/Accper and local import time are deliberately
+    # absent. Preserve date-only source declarations without granting PIT use.
+    fields = ("published_at", "PublishedAt", "PublicationDate", "AnnouncementDate", "AnnDate",
+              "DeclareDate", "Annodt", "FI_T1.Annodt", "FI_T1.AnnDate", "公告时间", "公告日期")
+    field = next((key for key in fields if raw.get(key) not in (None, "")), None)
+    value = str(raw[field]) if field else None
+    published = _explicit_timestamp(value) or value
+    available = next((_explicit_timestamp(raw[key]) for key in ("available_at", "AvailableAt")
+                      if raw.get(key) not in (None, "")), None)
+    return published, field, available
+
+
+def _record_revision(conn: sqlite3.Connection, dataset: str, record: dict, *, origin: str) -> None:
+    raw = json.loads(record["raw_json"])
+    if dataset == "mda":
+        # The latest view stores the long text separately; the revision must be
+        # self-contained or a subsequent correction would lose the earlier text.
+        raw["ManaDiscAnal"] = record.get("mana_disc_anal") or ""
+    encoded = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
+    published, field, available = _publication_metadata(raw)
+    conn.execute("""INSERT OR IGNORE INTO company_record_revisions
+      (dataset,logical_key,symbol,report_date,row_hash,content_hash,raw_json,source_path,
+       observed_at,recorded_at,published_at,publication_field,available_at,origin)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        dataset, record["logical_key"], record["symbol"], record["report_date"], record["row_hash"],
+        digest, encoded, record["source_path"], record["updated_at"], _now_iso(), published, field, available, origin))
+
+
+def list_revisions(symbol: str, *, dataset: str | None = None, logical_key: str | None = None,
+                   observed_before: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Explain revisions and local observations; not automatic PIT factor input."""
+    if dataset is not None and dataset not in _DATASET_TABLES:
+        raise ValueError("Unknown fundamentals dataset")
+    cutoff = _explicit_timestamp(observed_before)
+    if observed_before is not None and cutoff is None:
+        raise ValueError("observed_before requires a timestamp with timezone")
+    init_db()
+    sym = symbol.strip().upper().split(".", 1)[0]
+    with connect() as conn:
+        rows = conn.execute("""SELECT * FROM company_record_revisions WHERE symbol=?
+          AND (? IS NULL OR dataset=?) AND (? IS NULL OR logical_key=?)
+          AND (? IS NULL OR observed_at<=?) ORDER BY observed_at DESC,id DESC LIMIT ?""",
+          (sym, dataset, dataset, logical_key, logical_key, cutoff, cutoff, max(1, min(int(limit), 10000)))).fetchall()
+    return [{**dict(row), "raw": json.loads(row["raw_json"]), "usage": "explanation_and_revision_audit",
+             "historical_availability_verified": False} for row in rows]
 
 
 _UPSERT_BASIC = """
@@ -276,9 +395,28 @@ ON CONFLICT(logical_key) DO UPDATE SET
 
 def _source_rel(path: Path) -> str:
     try:
-        return str(path.resolve().relative_to(settings.data_dir.parent.resolve()))
+        return path.resolve().relative_to(settings.data_dir.resolve()).as_posix()
     except ValueError:
+        # An explicit external import remains an honest origin reference. The
+        # self-contained row revisions do not depend on this file to be read.
         return str(path.resolve())
+
+
+def _already_imported(conn, source, dataset, sha, size) -> bool:
+    old = conn.execute("SELECT * FROM source_files WHERE path=?", (source,)).fetchone()
+    if old is not None:
+        return old["dataset"] == dataset and old["sha256"] == sha and int(old["size_bytes"]) == size
+    # Relocation can leave a legacy absolute/parent-relative provenance key.
+    # Reuse byte-identical evidence and add the new locator without rewriting
+    # immutable historical source paths or replaying every CSV row.
+    old = conn.execute("SELECT * FROM source_files WHERE dataset=? AND sha256=? AND size_bytes=? LIMIT 1",
+                       (dataset, sha, size)).fetchone()
+    if old is None:
+        return False
+    conn.execute("""INSERT INTO source_files(path,dataset,sha256,size_bytes,mtime,imported_at,row_count)
+                    VALUES(?,?,?,?,?,?,?)""",
+                 (source, dataset, sha, size, old["mtime"], old["imported_at"], old["row_count"]))
+    return True
 
 
 def import_basic_csv(path: Path, *, force: bool = False, batch_size: int = 2000) -> int:
@@ -287,8 +425,7 @@ def import_basic_csv(path: Path, *, force: bool = False, batch_size: int = 2000)
     stat = path.stat()
     source = _source_rel(path)
     with connect() as conn:
-        old = conn.execute("SELECT sha256, size_bytes FROM source_files WHERE path=?", (source,)).fetchone()
-        if old and old["sha256"] == sha and int(old["size_bytes"]) == stat.st_size and not force:
+        if not force and _already_imported(conn, source, "basic_info", sha, stat.st_size):
             return 0
         rows: list[tuple[Any, ...]] = []
         count = 0
@@ -346,8 +483,7 @@ def import_financial_csv(path: Path, *, force: bool = False, batch_size: int = 1
     stat = path.stat()
     source = _source_rel(path)
     with connect() as conn:
-        old = conn.execute("SELECT sha256, size_bytes FROM source_files WHERE path=?", (source,)).fetchone()
-        if old and old["sha256"] == sha and int(old["size_bytes"]) == stat.st_size and not force:
+        if not force and _already_imported(conn, source, "financial", sha, stat.st_size):
             return 0
         rows: list[tuple[Any, ...]] = []
         count = 0
@@ -397,8 +533,7 @@ def import_mda_csv(path: Path, *, force: bool = False, batch_size: int = 1000) -
     stat = path.stat()
     source = _source_rel(path)
     with connect() as conn:
-        old = conn.execute("SELECT sha256, size_bytes FROM source_files WHERE path=?", (source,)).fetchone()
-        if old and old["sha256"] == sha and int(old["size_bytes"]) == stat.st_size and not force:
+        if not force and _already_imported(conn, source, "mda", sha, stat.st_size):
             return 0
         rows: list[tuple[Any, ...]] = []
         count = 0
@@ -451,7 +586,7 @@ def import_mda_csv(path: Path, *, force: bool = False, batch_size: int = 1000) -
 
 
 def import_local_2025_files(root: Path | None = None, *, force: bool = False) -> dict[str, Any]:
-    base = root or settings.data_dir.parent.parent
+    base = root or settings.data_dir / "imports" / "company_fundamentals"
     files = {
         "financial": base / "财务指标 2025.csv",
         "mda": base / "管理层经营讨论与分析 2025.csv",
@@ -463,7 +598,7 @@ def import_local_2025_files(root: Path | None = None, *, force: bool = False) ->
     with connect() as conn:
         cur = conn.execute(
             "INSERT INTO import_runs(started_at,status,source_dir) VALUES(?,?,?)",
-            (started, "running", str(base)),
+            (started, "running", _source_rel(base)),
         )
         run_id = int(cur.lastrowid)
 

@@ -11,13 +11,17 @@ import asyncio
 import itertools
 import json
 import math
+from datetime import datetime
+from decimal import Decimal
 from collections import deque
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.config import settings
-from app.services import kline_pipeline, llm_client
+from app.services import kline_pipeline, llm_client, trading_rules
 
 TRADING_DAYS = 252
+ENGINE_VERSION = "daily-target-replay-v2.2"
 
 STRATEGY_CATALOG: list[dict[str, Any]] = [
     {
@@ -201,7 +205,7 @@ def _signal_weights(bars: list[dict[str, Any]], strategy_id: str, params: dict[s
     weights = [0.0] * len(bars)
     reasons = [""] * len(bars)
     if strategy_id == "buy_and_hold":
-        for i in range(1, len(bars)):
+        for i in range(len(bars)):
             weights[i] = 1.0
             reasons[i] = "基准策略持有"
     elif strategy_id == "ma_cross":
@@ -265,37 +269,28 @@ def _signal_weights(bars: list[dict[str, Any]], strategy_id: str, params: dict[s
 def _slip_price(price: float, side: str, cost: dict[str, Any]) -> float:
     slippage = cost.get("slippage") or {}
     stype = str(slippage.get("type") or "ratio")
-    decimals = int(cost.get("price_decimals") or 2)
+    decimals = int(cost.get("price_decimals", 2))
     if stype == "tick":
         delta = _num(slippage.get("tick_size"), 0.01) * _num(slippage.get("tick_count"), 2)
-        return round(price + delta if side == "buy" else price - delta, decimals)
+        return trading_rules.price_round(price + delta if side == "buy" else price - delta, decimals)
     ratio = _num(slippage.get("ratio"), 0.001) / 2.0
-    return round(price * (1 + ratio) if side == "buy" else price * (1 - ratio), decimals)
+    return trading_rules.price_round(price * (1 + ratio) if side == "buy" else price * (1 - ratio), decimals)
 
 
-def _fees(symbol: str, price: float, shares: int, side: str, cost: dict[str, Any]) -> dict[str, float]:
-    notional = price * shares
-    commission = max(_num(cost.get("min_commission"), 5.0), notional * _num(cost.get("commission_rate"), 0.0003))
-    stamp = notional * _num(cost.get("stamp_tax_rate"), 0.001) if side == "sell" else 0.0
-    transfer = notional * _num(cost.get("transfer_fee_rate"), 0.00001) if symbol.endswith((".SS", ".SH")) else 0.0
-    flow = _num(cost.get("flow_fee"), 0.0)
-    return {
-        "commission": round(commission, 4),
-        "stamp_tax": round(stamp, 4),
-        "transfer_fee": round(transfer, 4),
-        "flow_fee": round(flow, 4),
-        "total": round(commission + stamp + transfer + flow, 4),
-    }
+def _fees(symbol: str, price: float, shares: int, side: str, cost: dict[str, Any], date: str) -> dict[str, float]:
+    return trading_rules.fees(symbol, price, shares, side, cost, date)
 
 
 def _default_cost_model(cost_model: dict[str, Any] | None = None) -> dict[str, Any]:
     out = {
         "commission_rate": 0.0003,
         "min_commission": 5.0,
-        "stamp_tax_rate": 0.001,
-        "transfer_fee_rate": 0.00001,
+        "stamp_tax_rate": None,
+        "transfer_fee_rate": None,
         "flow_fee": 0.0,
         "price_decimals": 2,
+        "max_volume_participation": 0.1,
+        "fee_multiplier": 1.0,
         "slippage": {"type": "ratio", "ratio": 0.001, "tick_size": 0.01, "tick_count": 2},
     }
     for k, v in (cost_model or {}).items():
@@ -303,6 +298,28 @@ def _default_cost_model(cost_model: dict[str, Any] | None = None) -> dict[str, A
             out["slippage"] = {**out["slippage"], **v}
         else:
             out[k] = v
+    for key in ("commission_rate", "min_commission", "stamp_tax_rate", "transfer_fee_rate", "flow_fee", "fee_multiplier"):
+        if out[key] is None and key in {"stamp_tax_rate", "transfer_fee_rate"}:
+            continue
+        if not math.isfinite(float(out[key])) or float(out[key]) < 0:
+            raise ValueError(f"{key} 须为有限非负数")
+        out[key] = float(out[key])
+    participation = float(out["max_volume_participation"])
+    if not math.isfinite(participation) or not 0 < participation <= 1:
+        raise ValueError("max_volume_participation 须大于0且不超过1")
+    out["max_volume_participation"] = participation
+    if not 0 <= int(out["price_decimals"]) <= 6:
+        raise ValueError("price_decimals 超出范围")
+    slippage = out["slippage"]
+    if not isinstance(slippage, dict):
+        raise ValueError("slippage 须为对象")
+    if slippage.get("type") not in {"ratio", "tick"}:
+        raise ValueError("slippage.type 须为 ratio 或 tick")
+    for key in ("ratio", "tick_size", "tick_count"):
+        if not math.isfinite(float(slippage[key])) or float(slippage[key]) < 0:
+            raise ValueError(f"slippage.{key} 须为有限非负数")
+    if float(slippage["ratio"]) >= 2:
+        raise ValueError("slippage.ratio 须小于2")
     return out
 
 
@@ -318,7 +335,7 @@ def _annualized_return(total_return: float, n: int) -> float:
     base = 1.0 + total_return
     if base <= 0:
         return -1.0
-    return base ** (TRADING_DAYS / n) - 1.0
+    return math.exp(min(700.0, math.log(base) * TRADING_DAYS / n)) - 1.0
 
 
 def _performance(equity_curve: list[dict[str, Any]], trades: list[dict[str, Any]], initial_cash: float) -> dict[str, Any]:
@@ -327,7 +344,8 @@ def _performance(equity_curve: list[dict[str, Any]], trades: list[dict[str, Any]
         return {}
     final = equities[-1]
     total_ret = final / initial_cash - 1.0
-    returns = [(equities[i] / equities[i - 1] - 1.0) for i in range(1, len(equities)) if equities[i - 1] > 0]
+    previous = [initial_cash, *equities[:-1]]
+    returns = [(current / prior - 1.0) for current, prior in zip(equities, previous) if prior > 0]
     avg = sum(returns) / len(returns) if returns else 0.0
     var = sum((r - avg) ** 2 for r in returns) / (len(returns) - 1) if len(returns) > 1 else 0.0
     vol = math.sqrt(var) * math.sqrt(TRADING_DAYS)
@@ -347,108 +365,446 @@ def _performance(equity_curve: list[dict[str, Any]], trades: list[dict[str, Any]
         "max_drawdown_pct": round(max_dd * 100, 4),
         "trade_count": len(trades),
         "sell_count": len(sells),
+        "buy_count": sum(t["side"] == "buy" for t in trades),
+        "completed_trade_count": sum(bool(t.get("position_closed")) for t in sells),
+        "turnover_pct": round(sum(float(t["amount"]) for t in trades) / initial_cash * 100, 4),
+        "total_fees": round(sum(float(t["fee"]["total"]) for t in trades), 4),
     }
+
+
+def _day_timestamp(day: str) -> int:
+    return int(datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+
+
+def _daily_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for original in rows:
+        day = trading_rules.trade_date(original.get("trade_date") or original["t"])
+        if day in out:
+            raise ValueError("当前引擎仅支持日线，每标的每交易日须唯一（重复日期或分钟线）")
+        row = dict(original)
+        row["t"], row["trade_date"] = _day_timestamp(day), day
+        for field in ("o", "c"):
+            if row.get(field) is not None and (not math.isfinite(float(row[field])) or float(row[field]) < 0):
+                raise ValueError(f"无效行情字段 {field}")
+        out[day] = row
+    return dict(sorted(out.items()))
+
+
+def _fraction(value: float, name: str) -> float:
+    value = float(value)
+    if not math.isfinite(value) or not 0 <= value <= 1:
+        raise ValueError(f"{name} 须介于0和1之间")
+    return value
+
+
+def run_target_backtest(
+    *, bars_by_symbol: dict[str, list[dict[str, Any]]],
+    targets_by_t: dict[int, dict[str, float]], initial_cash: float = 100_000.0,
+    cost_model: dict[str, Any] | None = None, max_position_pct: float = 1.0,
+    max_symbol_weight: float = 1.0, t_plus_one: bool = True,
+    evaluation_start: int | None = None, evaluation_end: int | None = None,
+    precommitted_targets_by_t: dict[int, dict[str, float]] | None = None,
+    initial_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pure daily replay shared by research and paper trading.
+
+    targets_by_t contains complete portfolios committed at the CLOSE; execute
+    once at the next union-calendar OPEN. Missing symbols imply zero weight.
+    precommitted_targets_by_t contains portfolios committed before an explicitly
+    named execution day. It is reserved for frozen paper orders, not optimizers.
+    Warmup bars update context only; no warmup holdings, trades or returns enter
+    evaluation. Capacity uses previous-day volume, never today's final volume.
+    """
+    if not math.isfinite(float(initial_cash)) or initial_cash <= 0:
+        raise ValueError("initial_cash 须为有限正数")
+    max_position_pct = _fraction(max_position_pct, "max_position_pct")
+    max_symbol_weight = _fraction(max_symbol_weight, "max_symbol_weight")
+    cost = _default_cost_model(cost_model)
+    daily = {str(sym).upper(): _daily_rows(rows) for sym, rows in bars_by_symbol.items()}
+    symbols = sorted(daily)
+    dates = sorted({day for rows in daily.values() for day in rows})
+    if not dates:
+        raise ValueError("没有可回放日线")
+    start = trading_rules.trade_date(evaluation_start) if evaluation_start is not None else dates[0]
+    end = trading_rules.trade_date(evaluation_end) if evaluation_end is not None else dates[-1]
+    if start > end:
+        raise ValueError("评价起始日不能晚于结束日")
+
+    def normalize_targets(raw: dict[int, dict[str, float]]) -> dict[str, dict[str, float]]:
+        result: dict[str, dict[str, float]] = {}
+        for timestamp, weights in raw.items():
+            day = trading_rules.trade_date(timestamp)
+            if day in result:
+                raise ValueError("同一交易日只能提交一份目标")
+            normalized = {str(sym).upper(): _fraction(weight, "target_weight") for sym, weight in weights.items()}
+            if set(normalized) - set(symbols):
+                raise ValueError("目标包含未提供行情的标的")
+            limited = {sym: min(normalized.get(sym, 0.0), max_symbol_weight) for sym in symbols}
+            total = sum(limited.values())
+            scale = min(1.0, max_position_pct / total) if total else 0.0
+            result[day] = {sym: weight * scale for sym, weight in limited.items()}
+        return result
+
+    close_targets = normalize_targets(targets_by_t)
+    committed = normalize_targets(precommitted_targets_by_t or {})
+    # bisect handles targets from the last close of a previous persisted batch.
+    from bisect import bisect_right
+    execution_targets: dict[str, tuple[str, dict[str, float]]] = {}
+    for day, weights in sorted(close_targets.items()):
+        next_index = bisect_right(dates, day)
+        if next_index < len(dates):
+            execution_targets[dates[next_index]] = (day, weights)
+    for day, weights in committed.items():
+        if day in execution_targets:
+            raise ValueError("预承诺目标与收盘目标冲突")
+        execution_targets[day] = ("precommitted", weights)
+
+    state = dict(initial_state or {})
+    cash = float(state.get("cash", initial_cash))
+    shares = {sym: int((state.get("positions") or {}).get(sym, 0)) for sym in symbols}
+    if not math.isfinite(cash) or cash < 0 or any(value < 0 for value in shares.values()):
+        raise ValueError("初始账户不支持负现金或空头")
+    if set(state.get("positions") or {}) - set(symbols):
+        raise ValueError("初始持仓缺少对应行情")
+    available = {sym: int((state.get("available") or {}).get(sym, shares[sym])) for sym in symbols}
+    if any(available[sym] < 0 or available[sym] > shares[sym] for sym in symbols):
+        raise ValueError("初始可卖数量无效")
+    last_prices = {sym: _num((state.get("last_prices") or {}).get(sym)) for sym in symbols}
+    basis = {sym: _num((state.get("cost_basis") or {}).get(sym), shares[sym] * last_prices[sym]) for sym in symbols}
+    applied_actions = set(state.get("applied_corporate_actions") or [])
+    cash_distributions = {sym: _num((state.get("cash_distributions") or {}).get(sym)) for sym in symbols}
+    last_day = state.get("last_trade_date")
+    if any(shares[sym] and last_prices[sym] <= 0 for sym in symbols):
+        raise ValueError("初始持仓必须提供last_prices")
+    opening_equity = cash + sum(shares[sym] * last_prices[sym] for sym in symbols)
+    if opening_equity <= 0:
+        raise ValueError("初始净值须为正数")
+    previous: dict[str, dict[str, Any]] = {}
+    trades: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    curve: list[dict[str, Any]] = []
+    positions: list[dict[str, Any]] = []
+    issues: set[str] = {"symbol_history_missing"} if any(not rows for rows in daily.values()) else set()
+    warnings: set[str] = set()
+    if any(value > 0 for value in cash_distributions.values()):
+        issues.add("cash_dividend_net_payment_unverified")
+        warnings.add("恢复账户包含税前股息，投资者股息税及实际派款日差异未模拟")
+    action_blocked: set[str] = set(state.get("unresolved_corporate_actions") or [])
+    if action_blocked:
+        issues.add("unresolved_corporate_action_in_account")
+    action_ledger: list[dict[str, Any]] = []
+    prev_weights = {sym: 0.0 for sym in symbols}
+
+    def reject(day: str, sym: str, side: str, reason: str, requested: int = 0) -> None:
+        if reason == "missing_bar":
+            issues.add("missing_execution_bar")
+        rejected.append({"t": _day_timestamp(day), "trade_date": day, "symbol": sym,
+                         "side": side, "reason": reason, "requested_volume": requested})
+
+    for day in dates:
+        if day > end:
+            break
+        bars = {sym: daily[sym].get(day) for sym in symbols}
+        in_evaluation = day >= start and (not state.get("last_trade_date") or day > state["last_trade_date"])
+        actions_today: dict[str, list[dict[str, Any]]] = {}
+        for sym, bar in bars.items():
+            if not bar:
+                continue
+            issues.update(trading_rules.daily_bar_availability_issues(bar, day))
+            if bar.get("availability_inferred") is True:
+                issues.add("historical_availability_missing")
+            if bar.get("example_only") or bar.get("synthetic") or bar.get("source") == "format_fixture_not_market_data":
+                issues.add("example_or_synthetic_data")
+            if bar.get("price_basis") != "raw" and not (bar.get("execution_o") and bar.get("execution_c")):
+                issues.add("raw_execution_price_unverified")
+            if _num(bar.get("execution_o"), _num(bar.get("o"))) <= 0 or _num(bar.get("execution_c"), _num(bar.get("c"))) <= 0:
+                issues.add("nonpositive_execution_price")
+            if not any(type(bar.get(key)) is bool for key in ("tradable", "suspended")) and bar.get("trade_status") not in {"trading", "suspended", "delisted"}:
+                issues.add("historical_trading_status_missing")
+            if bar.get("volume_unit") != "shares":
+                issues.add("volume_unit_unverified")
+            if bar.get("corporate_actions_checked") is not True:
+                issues.add("corporate_action_coverage_unverified")
+            if trading_rules.price_limits(sym, bar, previous.get(sym), day)[2]:
+                issues.add("historical_price_limits_inferred")
+            actions, action_issues = trading_rules.parse_corporate_actions(bar, day)
+            issues.update(action_issues)
+            if any(a["cash_dividend"] > 0 for a in actions):
+                issues.add("cash_dividend_net_payment_unverified")
+            if action_issues:
+                if in_evaluation and shares[sym]:
+                    action_blocked.add(sym)
+            elif actions:
+                actions_today[sym] = actions
+            if day < "2015-08-01":
+                issues.add("historical_fee_schedule_requires_override")
+        if in_evaluation:
+            if day != last_day:
+                available = dict(shares)
+            # Corporate actions belong to the overnight holders, before any
+            # opening trades. The ledger travels with paper state on restart.
+            for sym, actions in actions_today.items():
+                pending = [a for a in actions if f"{sym}:{a['fingerprint']}" not in applied_actions]
+                if not pending:
+                    continue
+                old_shares = shares[sym]
+                old_available = available[sym]
+                ratio = Decimal(1)
+                dividend = Decimal(0)
+                for action in pending:
+                    ratio *= Decimal(str(action["split_ratio"]))
+                    dividend += Decimal(str(action["cash_dividend"]))
+                if not math.isfinite(float(ratio)) or not math.isfinite(float(dividend)):
+                    issues.add("corporate_action_invalid_values")
+                    action_blocked.add(sym)
+                    reject(day, sym, "corporate_action", "invalid_values")
+                    continue
+                new_shares = Decimal(old_shares) * ratio
+                new_available = Decimal(old_available) * ratio
+                raw_reference = last_prices[sym] or _num((previous.get(sym) or {}).get("execution_c")) or _num((previous.get(sym) or {}).get("c"))
+                reference = (Decimal(str(raw_reference)) - dividend) / ratio if raw_reference else Decimal(0)
+                if new_shares != new_shares.to_integral_value() or new_available != new_available.to_integral_value():
+                    issues.add("corporate_action_fractional_share_settlement_missing")
+                    action_blocked.add(sym)
+                    reject(day, sym, "corporate_action", "fractional_share_settlement_missing")
+                    continue
+                if (old_shares or raw_reference > 0) and reference <= 0:
+                    issues.add("corporate_action_invalid_ex_reference")
+                    action_blocked.add(sym)
+                    reject(day, sym, "corporate_action", "invalid_ex_reference")
+                    continue
+                cash_credit = float(Decimal(old_shares) * dividend)
+                cash += cash_credit
+                cash_distributions[sym] += cash_credit
+                shares[sym], available[sym] = int(new_shares), int(new_available)
+                # Keep total acquisition basis; splits dilute average cost.
+                # Dividends are separately recorded cash income, not a second
+                # reduction of acquisition basis / realized trading P&L.
+                if reference > 0:
+                    last_prices[sym] = float(reference)
+                    if sym in previous:
+                        previous[sym] = {**previous[sym], "execution_c": float(reference),
+                                         "v": _num(previous[sym].get("v")) * float(ratio)}
+                action_ids = [f"{sym}:{action['fingerprint']}" for action in pending]
+                applied_actions.update(action_ids)
+                action_ledger.append({"t": _day_timestamp(day), "trade_date": day, "symbol": sym,
+                                      "action_ids": action_ids, "old_shares": old_shares,
+                                      "new_shares": shares[sym], "available_shares": available[sym],
+                                      "split_ratio": float(ratio), "cash_dividend_per_old_share": float(dividend),
+                                      "gross_cash_credit": cash_credit, "cost_basis": basis[sym],
+                                      "average_cost": basis[sym] / shares[sym] if shares[sym] else 0.0,
+                                      "ex_reference_price": float(reference) if reference > 0 else None,
+                                      "dividend_tax_basis": "gross_before_investor_tax"})
+                if dividend > 0:
+                    warnings.add("现金股息按税前总额于除权日记账；投资者持有期股息税及实际派款日差异未模拟")
+            open_prices = {sym: _num((bars[sym] or {}).get("execution_o")) or _num((bars[sym] or {}).get("o")) or last_prices[sym] for sym in symbols}
+            equity_open = cash + sum(shares[sym] * open_prices[sym] for sym in symbols)
+            target_entry = execution_targets.get(day)
+            if target_entry:
+                signal_day, weights = target_entry
+                prev_weights = dict(weights)
+                for side in ("sell", "buy"):
+                    for sym in symbols:
+                        bar = bars[sym]
+                        px0 = open_prices[sym]
+                        if side == "buy" and weights[sym] > 0 and px0 <= 0:
+                            reject(day, sym, side, "missing_bar" if bar is None else "invalid_open")
+                            continue
+                        desired = int(equity_open * weights[sym] / px0) if px0 > 0 else 0
+                        # Round target holdings to the board's increment; order minimum
+                        # applies to the delta, not an already-existing small position.
+                        step = 1 if trading_rules.board_for(sym, bar) in {"star", "beijing"} else 100
+                        desired = desired // step * step
+                        delta = desired - shares[sym]
+                        if (side == "buy" and delta <= 0) or (side == "sell" and delta >= 0):
+                            continue
+                        requested = abs(delta)
+                        px = _slip_price(px0, side, cost)
+                        reason = "unmodeled_corporate_action" if sym in action_blocked else trading_rules.execution_block_reason(sym, bar, previous.get(sym), side, px, day)
+                        if reason:
+                            reject(day, sym, side, reason, requested)
+                            continue
+                        prior = previous.get(sym) or {}
+                        # available_volume denotes a separately supplied pre-open auction
+                        # capacity; otherwise use a conservative prior-day participation cap.
+                        known_volume = _num(bar.get("available_volume")) if "available_volume" in bar else _num(prior.get("v"))
+                        if (bar.get("volume_unit") if "available_volume" in bar else prior.get("volume_unit")) == "lots":
+                            known_volume *= 100
+                        capacity = int(known_volume * cost["max_volume_participation"])
+                        if capacity <= 0:
+                            reject(day, sym, side, "volume_capacity_unavailable", requested)
+                            continue
+                        quantity = min(requested, capacity)
+                        if side == "sell":
+                            quantity = min(quantity, available[sym] if t_plus_one else shares[sym])
+                        quantity = trading_rules.order_quantity(sym, quantity, side=side, held=shares[sym], bar=bar)
+                        if side == "buy" and quantity:
+                            # Binary search reserves all fees, including minimum commission.
+                            low, high = 0, quantity
+                            while low < high:
+                                mid = (low + high + 1) // 2
+                                gross = px * mid
+                                total = gross + _fees(sym, px, mid, side, cost, day)["total"]
+                                if total <= cash + 1e-8:
+                                    low = mid
+                                else:
+                                    high = mid - 1
+                            quantity = trading_rules.order_quantity(sym, low, side=side, held=shares[sym], bar=bar)
+                        if quantity <= 0:
+                            reason = "t_plus_one" if side == "sell" and available[sym] <= 0 else "insufficient_cash_or_order_size" if side == "buy" else "order_size_or_capacity"
+                            reject(day, sym, side, reason, requested)
+                            continue
+                        fee = _fees(sym, px, quantity, side, cost, day)
+                        gross = px * quantity
+                        if side == "sell" and cash + gross < fee["total"]:
+                            reject(day, sym, side, "insufficient_cash_for_fees", requested)
+                            continue
+                        realized = None
+                        if side == "buy":
+                            cash -= gross + fee["total"]
+                            basis[sym] += gross + fee["total"]
+                            shares[sym] += quantity
+                            if not t_plus_one:
+                                available[sym] += quantity
+                        else:
+                            removed_basis = basis[sym] * quantity / shares[sym]
+                            basis[sym] -= removed_basis
+                            realized = gross - fee["total"] - removed_basis
+                            cash += gross - fee["total"]
+                            shares[sym] -= quantity
+                            available[sym] = max(0, available[sym] - quantity)
+                        cash = max(0.0, cash) if cash > -1e-8 else cash
+                        if cash < 0:
+                            raise AssertionError("Execution produced negative cash")
+                        trades.append({"t": _day_timestamp(day), "trade_date": day, "symbol": sym,
+                                       "signal_date": signal_day, "side": side, "price": px,
+                                       "volume": quantity, "amount": round(gross, 4), "fee": fee,
+                                       "reason": "已承诺目标仓位", "requested_volume": requested,
+                                       "partial": quantity < requested, "realized_pnl": round(realized, 4) if realized is not None else None,
+                                       "position_closed": side == "sell" and shares[sym] == 0})
+                        if quantity < requested:
+                            reject(day, sym, side, "partial_fill_capacity_cash_or_lot", requested - quantity)
+            for sym, bar in bars.items():
+                if bar and (_num(bar.get("execution_c")) or _num(bar.get("c"))) > 0:
+                    last_prices[sym] = _num(bar.get("execution_c")) or _num(bar.get("c"))
+                elif shares[sym]:
+                    issues.add("stale_holding_valuation")
+            equity = cash + sum(shares[sym] * last_prices[sym] for sym in symbols)
+            curve.append({"t": _day_timestamp(day), "trade_date": day, "equity": round(equity, 6),
+                          "cash": round(cash, 6), "holding_count": sum(v > 0 for v in shares.values()),
+                          "shares": sum(shares.values())})
+            positions.append({"t": _day_timestamp(day), "target_weights": dict(prev_weights),
+                              "actual_weight": round((equity - cash) / equity, 6) if equity else 0.0,
+                              "holdings": dict(shares), "holding_count": sum(v > 0 for v in shares.values())})
+            last_day = day
+        for sym, bar in bars.items():
+            if bar:
+                previous[sym] = bar
+                if not in_evaluation and not state.get("last_trade_date"):
+                    last_prices[sym] = _num(bar.get("execution_c")) or _num(bar.get("c")) or last_prices[sym]
+    warnings.add("日线开盘撮合和前日量容量为保守近似，未模拟真实盘口排队")
+    warnings.add("交易日历来自输入数据并集；数据完整性须由数据快照质量检查保证")
+    if not t_plus_one:
+        issues.add("a_share_t_plus_one_disabled")
+    performance = _performance(curve, trades, opening_equity)
+    performance["gross_dividend_income"] = round(sum(row["gross_cash_credit"] for row in action_ledger), 6)
+    result = {"engine_version": ENGINE_VERSION, "rules_version": trading_rules.RULES_VERSION,
+              "performance": performance, "trades": trades, "equity_curve": curve,
+              "position_curve": positions, "rejected_orders": rejected, "bar_count": len(curve),
+              "corporate_action_ledger": action_ledger,
+              "initial_cash": initial_cash, "initial_equity": opening_equity, "cost_model": cost,
+              "max_position_pct": max_position_pct, "max_symbol_weight": max_symbol_weight,
+              "t_plus_one": bool(t_plus_one),
+              "quality": {"eligible": not issues and bool(curve), "issues": sorted(issues), "warnings": sorted(warnings)},
+              "final_state": {"cash": cash, "positions": shares, "available": available,
+                              "cost_basis": basis, "last_prices": last_prices, "last_trade_date": last_day,
+                              "applied_corporate_actions": sorted(applied_actions),
+                              "unresolved_corporate_actions": sorted(action_blocked),
+                              "cash_distributions": cash_distributions},
+              "engine_notes": ["收盘目标仅在下一交易日开盘执行一次，非调仓日不交易。", "预热期不成交、不计绩效；未知交易元数据会禁止自动晋级。", "已公告分红和拆股于除权日开盘前按旧持仓入账；未知行动、迟到公告和未明确零碎股结算仍拒绝交易。"]}
+    result.update(performance)
+    return result
 
 
 def run_backtest(
-    *,
-    candles: list[dict[str, Any]],
-    strategy_id: str,
-    params: dict[str, Any] | None,
-    initial_cash: float,
-    commission_rate: float | None = None,
-    cost_model: dict[str, Any] | None = None,
-    max_position_pct: float = 1.0,
-    t_plus_one: bool = True,
-    symbol: str = "",
+    *, candles: list[dict[str, Any]], strategy_id: str, params: dict[str, Any] | None,
+    initial_cash: float, commission_rate: float | None = None,
+    cost_model: dict[str, Any] | None = None, max_position_pct: float = 1.0,
+    t_plus_one: bool = True, symbol: str = "", evaluation_start: int | None = None,
+    evaluation_end: int | None = None,
 ) -> dict[str, Any]:
-    if initial_cash <= 0:
-        raise ValueError("initial_cash 须为正数")
-    bars = sorted([b for b in candles if b.get("o") and b.get("c")], key=lambda x: float(x.get("t") or 0))
+    bars = list(_daily_rows(candles).values())
     if len(bars) < 20:
         raise ValueError("K 线数据不足，至少需要 20 根")
     sid = (strategy_id or "buy_and_hold").strip().lower()
-    params = _clamp_params(sid, params)
-    cost = _default_cost_model(cost_model)
+    clamped = _clamp_params(sid, params)
+    cost = dict(cost_model or {})
     if commission_rate is not None:
         cost["commission_rate"] = commission_rate
-    max_position_pct = max(0.0, min(1.0, float(max_position_pct or 1.0)))
-    signals = _signal_weights(bars, sid, params)
-
-    cash = float(initial_cash)
-    shares = 0
-    available_shares = 0
-    trades: list[dict[str, Any]] = []
-    equity_curve: list[dict[str, Any]] = []
-    position_curve: list[dict[str, Any]] = []
-
-    for i, bar in enumerate(bars):
-        open_px = _num(bar.get("o"))
-        close_px = _num(bar.get("c"))
-        target_weight = min(max(_num(signals[i].get("target_weight"), 0.0), 0.0), max_position_pct)
-        equity_before = cash + shares * open_px
-        target_value = equity_before * target_weight
-        target_shares = _lot_shares(target_value, open_px)
-        delta = target_shares - shares
-        reason = signals[i].get("reason") or "目标仓位调整"
-
-        if delta > 0:
-            px = _slip_price(open_px, "buy", cost)
-            max_affordable = _lot_shares(cash - _num(cost.get("min_commission"), 5.0), px)
-            vol = min(delta // 100 * 100, max_affordable)
-            if vol >= 100:
-                fee = _fees(symbol, px, vol, "buy", cost)
-                gross = px * vol
-                cash -= gross + fee["total"]
-                shares += vol
-                if not t_plus_one:
-                    available_shares += vol
-                trades.append({"t": int(bar["t"]), "side": "buy", "price": px, "volume": vol, "amount": round(gross, 2), "fee": fee, "reason": reason})
-        elif delta < 0:
-            sellable = available_shares if t_plus_one else shares
-            vol = min((-delta) // 100 * 100, sellable // 100 * 100)
-            if vol >= 100:
-                px = _slip_price(open_px, "sell", cost)
-                fee = _fees(symbol, px, vol, "sell", cost)
-                gross = px * vol
-                cash += gross - fee["total"]
-                shares -= vol
-                available_shares -= vol if t_plus_one else 0
-                trades.append({"t": int(bar["t"]), "side": "sell", "price": px, "volume": vol, "amount": round(gross, 2), "fee": fee, "reason": reason})
-
-        equity = cash + shares * close_px
-        equity_curve.append({"t": int(bar["t"]), "equity": round(equity, 2), "cash": round(cash, 2), "shares": shares})
-        position_curve.append({"t": int(bar["t"]), "target_weight": target_weight, "actual_weight": round((shares * close_px / equity) if equity > 0 else 0.0, 4), "reason": reason})
-        if t_plus_one:
-            available_shares = shares
-
-    perf = _performance(equity_curve, trades, initial_cash)
-    first_open = _num(bars[1].get("o"), _num(bars[0].get("o")))
-    last_close = _num(bars[-1].get("c"))
-    benchmark_ret = (last_close / first_open - 1.0) if first_open > 0 else 0.0
-    perf["benchmark_buy_hold_return_pct"] = round(benchmark_ret * 100, 4)
-    perf["excess_return_pct"] = round(perf.get("total_return_pct", 0.0) - perf["benchmark_buy_hold_return_pct"], 4)
-    result = {
-        "strategy_id": sid,
-        "strategy_name": next((s["name"] for s in STRATEGY_CATALOG if s["id"] == sid), sid),
-        "params": params,
-        "initial_cash": round(initial_cash, 2),
-        "cost_model": cost,
-        "t_plus_one": bool(t_plus_one),
-        "max_position_pct": max_position_pct,
-        "performance": perf,
-        "trades": trades,
-        "equity_curve": equity_curve,
-        "position_curve": position_curve,
-        "bar_count": len(bars),
-        "engine_notes": [
-            "信号按日线收盘后可见信息生成，下一根 bar 开盘调仓。",
-            "A 股按 100 股整手撮合；默认启用 T+1，卖出印花税、最低佣金、过户费和滑点纳入成本。",
-            "当前版本为研究型单标的/单仓位回测，不执行任意用户 Python，不连接实盘账户。",
-        ],
-    }
-    result.update(perf)
+    signals = _signal_weights(bars, sid, clamped)
+    sym = symbol.strip().upper() or "600000.SS"
+    targets: dict[int, dict[str, float]] = {}
+    previous_weight: float | None = None
+    evaluation_day = trading_rules.trade_date(evaluation_start) if evaluation_start is not None else None
+    for index, (bar, signal) in enumerate(zip(bars, signals)):
+        weight = signal["target_weight"]
+        # Seed the evaluation portfolio from the immediately preceding close,
+        # even if a persistent position signal started during indicator warmup.
+        seed = evaluation_day is not None and index + 1 < len(bars) and bar["trade_date"] < evaluation_day <= bars[index + 1]["trade_date"]
+        if weight != previous_weight or seed:
+            targets[bar["t"]] = {sym: weight}
+        previous_weight = weight
+    result = run_target_backtest(bars_by_symbol={sym: bars}, targets_by_t=targets,
+                                 initial_cash=initial_cash, cost_model=cost,
+                                 max_position_pct=max_position_pct, t_plus_one=t_plus_one,
+                                 evaluation_start=evaluation_start, evaluation_end=evaluation_end)
+    # Benchmark uses the same fees, calendar and execution constraints.
+    benchmark_targets = {bars[0]["t"]: {sym: 1.0}}
+    if evaluation_day:
+        earlier = [b for b in bars if b["trade_date"] < evaluation_day]
+        if earlier:
+            benchmark_targets = {earlier[-1]["t"]: {sym: 1.0}}
+    if sid == "buy_and_hold" and max_position_pct == 1.0:
+        benchmark = result["performance"].get("total_return_pct", 0.0)
+    else:
+        baseline = run_target_backtest(bars_by_symbol={sym: bars}, targets_by_t=benchmark_targets,
+                                      initial_cash=initial_cash, cost_model=cost, t_plus_one=t_plus_one,
+                                      evaluation_start=evaluation_start, evaluation_end=evaluation_end)
+        benchmark = baseline["performance"].get("total_return_pct", 0.0)
+    result["performance"]["benchmark_buy_hold_return_pct"] = benchmark
+    result["performance"]["excess_return_pct"] = round(result["performance"].get("total_return_pct", 0.0) - benchmark, 4)
+    result.update(result["performance"])
+    result.update({"strategy_id": sid, "strategy_name": next((s["name"] for s in STRATEGY_CATALOG if s["id"] == sid), sid), "params": clamped})
+    for row in result["position_curve"]:
+        row["target_weight"] = row["target_weights"].get(sym, 0.0)
     return result
+
+
+def _require_daily(interval: str) -> None:
+    if interval != "1d":
+        raise ValueError("可信回测当前仅支持1d日线，分钟/周/月线不能沿用日线年化及T+1规则")
+
+
+async def _market_bundle(symbol: str, range_param: str, interval: str) -> dict[str, Any]:
+    from app.security.user_context import current_user_id
+    from app.services import research_data
+    _require_daily(interval)
+    return await research_data.fetch_bundle(current_user_id.get() or 0, symbol, range_param, interval)
+
+
+def _merge_market_quality(result: dict, bundle: dict) -> None:
+    """Execution eligibility never overrides acquisition/provenance blockers."""
+    quality = result["quality"]
+    source_quality = bundle.get("research_quality") or {}
+    issues = set(quality.get("issues", [])) | set(source_quality.get("issues", []))
+    if source_quality.get("eligible") is False and not source_quality.get("issues"):
+        issues.add("market_data_quality_unverified")
+    if bundle.get("cache_stale"):
+        issues.add("stale_market_cache")
+    result["quality"] = {"eligible": bool(quality.get("eligible")) and not issues,
+                         "issues": sorted(issues),
+                         "warnings": sorted(set(quality.get("warnings", [])) | set(source_quality.get("warnings", [])))}
 
 
 async def backtest_from_market(
@@ -464,7 +820,7 @@ async def backtest_from_market(
     t_plus_one: bool = True,
 ) -> dict[str, Any]:
     sym = symbol.strip().upper()
-    bundle = await kline_pipeline.fetch_a_share_kline_with_fallbacks(sym, range_param, interval)
+    bundle = await _market_bundle(sym, range_param, interval)
     result = run_backtest(
         candles=bundle.get("candles") or [],
         strategy_id=strategy_id,
@@ -483,8 +839,10 @@ async def backtest_from_market(
             "interval": interval,
             "kline_source": bundle.get("kline_source"),
             "data_as_of": bundle.get("data_as_of"),
+            "research_batch_ids": bundle.get("research_batch_ids", []),
         }
     )
+    _merge_market_quality(result, bundle)
     return result
 
 
@@ -495,7 +853,9 @@ def _grid_values(definition: dict[str, Any], raw: Any) -> list[Any]:
     for value in values:
         try:
             parsed = int(value) if definition.get("type") == "int" else float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(parsed):
             continue
         parsed = max(definition.get("min", parsed), min(definition.get("max", parsed), parsed))
         if parsed not in out:
@@ -504,89 +864,157 @@ def _grid_values(definition: dict[str, Any], raw: Any) -> list[Any]:
 
 
 def optimize_backtest(
-    *,
-    candles: list[dict[str, Any]],
-    strategy_id: str,
-    param_grid: dict[str, Any] | None,
-    initial_cash: float,
-    cost_model: dict[str, Any] | None = None,
-    max_position_pct: float = 1.0,
-    t_plus_one: bool = True,
-    symbol: str = "",
-    train_ratio: float = 0.7,
-    objective: str = "sharpe",
+    *, candles: list[dict[str, Any]], strategy_id: str, param_grid: dict[str, Any] | None,
+    initial_cash: float, cost_model: dict[str, Any] | None = None,
+    max_position_pct: float = 1.0, t_plus_one: bool = True, symbol: str = "",
+    train_ratio: float = 0.7, objective: str = "sharpe",
+    include_holdout: bool = True,
 ) -> dict[str, Any]:
-    """Bounded grid search with chronological out-of-sample and cost stress tests."""
+    """Train shortlist -> validation selection/stress -> ONE untouched holdout.
+
+    The holdout is not exposed to proposal generation or candidate selection.
+    This pure function has no persistence. HTTP/worker callers must use the
+    recorded wrapper, which reserves the user-wide holdout before execution.
+    """
     catalog = next((s for s in STRATEGY_CATALOG if s["id"] == strategy_id), None)
     if not catalog or not catalog.get("params"):
         raise ValueError("该策略没有可优化参数")
-    bars = sorted([b for b in candles if b.get("o") and b.get("c")], key=lambda x: float(x.get("t") or 0))
+    bars = list(_daily_rows(candles).values())
     if len(bars) < 80:
         raise ValueError("稳健性验证至少需要 80 根 K 线")
-    train_ratio = max(0.55, min(0.85, float(train_ratio)))
-    split = max(40, min(len(bars) - 20, int(len(bars) * train_ratio)))
+    if objective not in {"sharpe", "return"}:
+        raise ValueError("objective 须为 sharpe 或 return")
+    if not math.isfinite(float(train_ratio)):
+        raise ValueError("train_ratio 须为有限数")
+    ratio = max(0.55, min(0.85, float(train_ratio)))
+    train_end = max(40, min(len(bars) - 40, int(len(bars) * ratio)))
+    validation_end = train_end + (len(bars) - train_end) // 2
     definitions = {p["key"]: p for p in catalog["params"]}
-    keys: list[str] = []
-    axes: list[list[Any]] = []
-    for key, definition in definitions.items():
-        values = _grid_values(definition, (param_grid or {}).get(key, definition["default"]))
-        keys.append(key)
-        axes.append(values or [definition["default"]])
+    keys = list(definitions)
+    axes = [_grid_values(definition, (param_grid or {}).get(key, definition["default"])) or [definition["default"]] for key, definition in definitions.items()]
     combinations = list(itertools.islice(itertools.product(*axes), 60))
     metric_key = "total_return_pct" if objective == "return" else "sharpe"
+    common = {"strategy_id": strategy_id, "initial_cash": initial_cash, "cost_model": cost_model,
+              "max_position_pct": max_position_pct, "t_plus_one": t_plus_one, "symbol": symbol}
     rows: list[dict[str, Any]] = []
     for values in combinations:
-        params = dict(zip(keys, values, strict=True))
-        train = run_backtest(
-            candles=bars[:split], strategy_id=strategy_id, params=params, initial_cash=initial_cash,
-            cost_model=cost_model, max_position_pct=max_position_pct, t_plus_one=t_plus_one, symbol=symbol,
-        )
+        train = run_backtest(candles=bars[:train_end], params=dict(zip(keys, values, strict=True)), **common)
         rows.append({"params": train["params"], "train": train["performance"]})
     rows.sort(key=lambda row: float(row["train"].get(metric_key) or 0), reverse=True)
     finalists = rows[: min(10, len(rows))]
-    test_bars = bars[max(0, split - 30):]
     for row in finalists:
-        test = run_backtest(
-            candles=test_bars, strategy_id=strategy_id, params=row["params"], initial_cash=initial_cash,
-            cost_model=cost_model, max_position_pct=max_position_pct, t_plus_one=t_plus_one, symbol=symbol,
-        )
-        row["test"] = test["performance"]
+        # All pre-split bars are indicator context only; no arbitrary 30-bar limit.
+        validation = run_backtest(candles=bars[:validation_end], params=row["params"],
+                                  evaluation_start=bars[train_end]["t"], **common)
+        row["validation"] = validation["performance"]
         train_score = float(row["train"].get(metric_key) or 0)
-        test_score = float(row["test"].get(metric_key) or 0)
-        row["stability_score"] = round(test_score - abs(train_score - test_score) * 0.25, 4)
+        score = float(row["validation"].get(metric_key) or 0)
+        row["stability_score"] = round(score - abs(train_score - score) * 0.25, 4)
     finalists.sort(key=lambda row: row["stability_score"], reverse=True)
-    best = finalists[0]
-    stress: list[dict[str, Any]] = []
+    selected = finalists[0]
+    frozen_params = dict(selected["params"])
+    stress = []
     base_cost = _default_cost_model(cost_model)
     for multiple in (0.0, 1.0, 2.0):
-        stressed = {**base_cost, "commission_rate": base_cost["commission_rate"] * multiple}
-        stressed["slippage"] = {**base_cost["slippage"], "ratio": base_cost["slippage"]["ratio"] * multiple}
-        result = run_backtest(
-            candles=test_bars, strategy_id=strategy_id, params=best["params"], initial_cash=initial_cash,
-            cost_model=stressed, max_position_pct=max_position_pct, t_plus_one=t_plus_one, symbol=symbol,
-        )
-        stress.append({"cost_multiple": multiple, "performance": result["performance"]})
+        stressed = {**base_cost, "fee_multiplier": base_cost["fee_multiplier"] * multiple}
+        stressed["slippage"] = {**base_cost["slippage"], "ratio": float(base_cost["slippage"]["ratio"]) * multiple,
+                               "tick_count": float(base_cost["slippage"]["tick_count"]) * multiple}
+        result = run_backtest(candles=bars[:validation_end], params=frozen_params,
+                              evaluation_start=bars[train_end]["t"], **{**common, "cost_model": stressed})
+        stress.append({"cost_multiple": multiple, "partition": "validation", "performance": result["performance"]})
+        if multiple == 1.0:
+            quality = result["quality"]
+    best = dict(selected)
+    if include_holdout:
+        holdout = run_backtest(candles=bars, params=frozen_params,
+                              evaluation_start=bars[validation_end]["t"], **common)
+        best.update(holdout=holdout["performance"], test=holdout["performance"])
+        quality = holdout["quality"]
     return {
-        "mode": "robustness_lab", "strategy_id": strategy_id, "symbol": symbol,
-        "objective": objective, "train_ratio": train_ratio, "split_timestamp": int(bars[split]["t"]),
-        "combination_count": len(combinations), "best_params": best["params"], "best": best,
-        "candidates": finalists, "cost_stress": stress,
-        "notes": [
-            "参数仅在较早的样本内区间排序，较新的区间用于样本外复核。",
-            "样本外测试额外保留 30 根预热 K 线供指标计算，绩效仍应结合交易明细判断。",
-            "成本压力测试覆盖零成本、基准成本和双倍成本；稳定不等于未来盈利。",
-        ],
+        "mode": "robustness_lab", "engine_version": ENGINE_VERSION,
+        "strategy_id": strategy_id, "symbol": symbol, "objective": objective,
+        "train_ratio": train_end / len(bars), "split_timestamp": bars[train_end]["t"],
+        "holdout_start": bars[validation_end]["t"], "holdout_evaluation_count": int(include_holdout),
+        "holdout_status": "evaluated" if include_holdout else "not_evaluated",
+        "partitions": {"train": {"start": bars[0]["t"], "end": bars[train_end - 1]["t"], "bars": train_end},
+                       "validation": {"start": bars[train_end]["t"], "end": bars[validation_end - 1]["t"], "bars": validation_end - train_end},
+                       "holdout": {"start": bars[validation_end]["t"], "end": bars[-1]["t"], "bars": len(bars) - validation_end}},
+        "combination_count": len(combinations), "best_params": frozen_params, "best": best,
+        "candidates": finalists, "cost_stress": stress, "quality": quality,
+        "notes": ["训练期只选入围候选；验证期选优并做成本压力测试；参数冻结后仅评估一次独立留出期。",
+                  "预热使用完整此前历史，预热期不成交且不计入收益。",
+                  "历史测试会消耗独立测试集；HTTP入口与自主研究共享每账户一次的持久访问门禁。"],
     }
 
 
+def _recorded_market_optimization(user_id: int, bundle: dict, sym: str, range_param: str,
+                                  interval: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Freeze validation-selected parameters before atomic, durable access.
+
+    The shared gate is deliberately user-wide, including changed windows and
+    symbols: a previously seen test interval cannot become 'independent' by
+    changing a request. A crash after reservation consumes access fail-closed.
+    """
+    from app.storage.research_store import ResearchStore, content_hash
+    ledger = ResearchStore()
+    bars = bundle.get("candles") or []
+    # Acquisition timestamps do not change prices or execution inputs. Keep
+    # nested action announcements, which *do* affect executability.
+    stable_bars = [{key: value for key, value in bar.items()
+                    if key not in {"fetched_at", "source_time", "available_at"}} for bar in bars]
+    request = {"engine_version": ENGINE_VERSION, "symbol": sym, "range": range_param,
+               "interval": interval, "data_hash": content_hash(stable_bars), "parameters": kwargs}
+    request_id = content_hash(request)
+    ledger.put_entity(user_id, "quant_optimization_request", request, request_id)
+    cached = ledger.get_entity(user_id, "quant_optimization_result", request_id)
+    if cached:
+        ledger.put_entity(user_id, "quant_optimization_access", {"request_id": request_id, "status": "cached_result"})
+        result = {**cached["payload"], "reused_result": True, "holdout_evaluation_count": 0}
+        _merge_market_quality(result, bundle)
+        return result
+    result = optimize_backtest(candles=bars, symbol=sym, include_holdout=False, **kwargs)
+    result.update({"range": range_param, "interval": interval, "kline_source": bundle.get("kline_source"),
+                   "data_as_of": bundle.get("data_as_of"), "request_id": request_id, "reused_result": False,
+                   "research_batch_ids": bundle.get("research_batch_ids", [])})
+    freeze = {"kind": "legacy_quant", "request_id": request_id, "data_hash": request["data_hash"],
+              "engine_version": ENGINE_VERSION, "params": result["best_params"], "partitions": result["partitions"]}
+    ledger.put_entity(user_id, "quant_optimization_freeze", freeze, request_id)
+    permitted = ledger.compare_and_set_state(user_id, "holdout_access", None, freeze)
+    if permitted:
+        ledger.put_entity(user_id, "quant_optimization_access", {"request_id": request_id, "status": "reserved"})
+        try:
+            holdout = run_backtest(candles=bars, strategy_id=kwargs["strategy_id"], params=result["best_params"],
+                                  initial_cash=kwargs["initial_cash"], cost_model=kwargs.get("cost_model"),
+                                  max_position_pct=kwargs.get("max_position_pct", 1.0),
+                                  t_plus_one=kwargs.get("t_plus_one", True), symbol=sym,
+                                  evaluation_start=result["holdout_start"])
+        except Exception as exc:
+            ledger.put_entity(user_id, "quant_optimization_access", {"request_id": request_id, "status": "failed_consumed", "error_type": type(exc).__name__})
+            raise
+        result["best"].update(holdout=holdout["performance"], test=holdout["performance"])
+        result.update(quality=holdout["quality"], holdout_status="evaluated", holdout_evaluation_count=1)
+    else:
+        result["holdout_status"] = "already_consumed"
+        result["notes"].append("本账户的独立留出访问已消耗；本次只报告验证期选优，不再次查看测试期。")
+    _merge_market_quality(result, bundle)
+    ledger.put_entity(user_id, "quant_optimization_access", {"request_id": request_id, "status": result["holdout_status"]})
+    if permitted:
+        ledger.put_entity(user_id, "quant_optimization_result", result, request_id)
+    else:
+        # Concurrent requests may finish validation while the winning request
+        # is still evaluating. They must never overwrite its immutable result.
+        ledger.put_entity(user_id, "quant_validation_result", result)
+    return result
+
+
 async def optimize_backtest_from_market(**kwargs: Any) -> dict[str, Any]:
+    from app.security.user_context import current_user_id
     sym = str(kwargs.pop("symbol", "")).strip().upper()
     range_param = str(kwargs.pop("range_param", "2y"))
     interval = str(kwargs.pop("interval", "1d"))
-    bundle = await kline_pipeline.fetch_a_share_kline_with_fallbacks(sym, range_param, interval)
-    result = optimize_backtest(candles=bundle.get("candles") or [], symbol=sym, **kwargs)
-    result.update({"range": range_param, "interval": interval, "kline_source": bundle.get("kline_source")})
-    return result
+    bundle = await _market_bundle(sym, range_param, interval)
+    return await asyncio.to_thread(_recorded_market_optimization, current_user_id.get() or 0,
+                                   bundle, sym, range_param, interval, kwargs)
 
 
 def _std(vals: list[float]) -> float:
@@ -643,197 +1071,95 @@ def _factor_score(
 async def _fetch_symbol_bundle(symbol: str, range_param: str, interval: str) -> tuple[str, dict[str, Any] | None, str | None]:
     sym = symbol.strip().upper()
     try:
-        bundle = await kline_pipeline.fetch_a_share_kline_with_fallbacks(sym, range_param, interval)
+        bundle = await _market_bundle(sym, range_param, interval)
         return sym, bundle, None
     except Exception as exc:  # noqa: BLE001
         return sym, None, str(exc)
 
 
-async def portfolio_factor_backtest_from_market(
-    *,
-    symbols: list[str],
-    range_param: str,
-    interval: str,
-    params: dict[str, Any] | None,
-    initial_cash: float,
-    cost_model: dict[str, Any] | None = None,
-    max_position_pct: float = 1.0,
-    t_plus_one: bool = True,
+def run_portfolio_factor_backtest(
+    *, bars_by_symbol: dict[str, list[dict[str, Any]]], params: dict[str, Any] | None,
+    initial_cash: float, cost_model: dict[str, Any] | None = None,
+    max_position_pct: float = 1.0, t_plus_one: bool = True,
 ) -> dict[str, Any]:
-    if initial_cash <= 0:
-        raise ValueError("initial_cash 须为正数")
-    cleaned: list[str] = []
-    seen: set[str] = set()
-    for s in symbols:
-        sym = str(s or "").strip().upper()
-        if not sym or sym in seen:
+    """Factor signals use each symbol's observed history and the union calendar."""
+    from bisect import bisect_right
+    daily = {sym: _daily_rows(rows) for sym, rows in bars_by_symbol.items()}
+    if len(daily) < 2:
+        raise ValueError("组合因子回测至少需要2只标的")
+    calendar = sorted({day for rows in daily.values() for day in rows})
+    parameters = _clamp_portfolio_params(params, len(daily))
+    warmup = max(parameters["momentum_lookback"], parameters["trend_ma"], parameters["volatility_lookback"], 20) + 1
+    if len(calendar) <= warmup + 1:
+        raise ValueError("股票池日线不足以完成指标预热和下一日撮合")
+    rows_by_symbol = {sym: list(rows.values()) for sym, rows in daily.items()}
+    days_by_symbol = {sym: list(rows) for sym, rows in daily.items()}
+    targets = {}
+    log = []
+    for index, day in enumerate(calendar):
+        if index < warmup or (index - warmup) % parameters["rebalance_days"]:
             continue
-        if not (len(sym) == 9 and sym[:6].isdigit() and sym[6:] in (".SS", ".SH", ".SZ", ".BJ")):
-            continue
-        seen.add(sym)
-        cleaned.append(sym)
-    if len(cleaned) < 2:
-        raise ValueError("组合因子回测至少需要 2 只 A 股标的")
-    cleaned = cleaned[:50]
-    params2 = _clamp_portfolio_params(params, len(cleaned))
-    cost = _default_cost_model(cost_model)
-    max_position_pct = max(0.0, min(1.0, float(max_position_pct or 1.0)))
+        scored = []
+        for sym in sorted(daily):
+            if day not in daily[sym]:
+                continue
+            idx = bisect_right(days_by_symbol[sym], day) - 1
+            score = _factor_score(sym, idx, rows_by_symbol, parameters)
+            if score:
+                scored.append(score)
+        scored.sort(key=lambda row: (-row["score"], row["symbol"]))
+        selected = scored[:parameters["top_n"]]
+        weight = 1 / len(selected) if selected else 0.0
+        targets[_day_timestamp(day)] = {row["symbol"]: weight for row in selected}
+        log.append({"t": _day_timestamp(day), "signal_date": day, "selected": selected,
+                    "target_weight": weight * max_position_pct, "candidate_count": len(scored)})
+    start = _day_timestamp(calendar[warmup + 1])
+    result = run_target_backtest(bars_by_symbol=rows_by_symbol, targets_by_t=targets,
+                                 initial_cash=initial_cash, cost_model=cost_model,
+                                 max_position_pct=max_position_pct, t_plus_one=t_plus_one,
+                                 evaluation_start=start)
+    baseline = run_target_backtest(bars_by_symbol=rows_by_symbol,
+                                   targets_by_t={_day_timestamp(calendar[warmup]): {sym: 1 / len(daily) for sym in daily}},
+                                   initial_cash=initial_cash, cost_model=cost_model,
+                                   t_plus_one=t_plus_one, evaluation_start=start)
+    benchmark = baseline["performance"].get("total_return_pct", 0.0)
+    result["performance"].update({"benchmark_equal_weight_return_pct": benchmark,
+                                  "excess_return_pct": round(result["performance"].get("total_return_pct", 0.0) - benchmark, 4)})
+    result.update(result["performance"])
+    result.update({"mode": "portfolio_factor", "strategy_id": "factor_rotation_topn",
+                   "strategy_name": "多因子 TopN 轮动", "symbols": sorted(daily),
+                   "params": parameters, "rebalance_log": log})
+    return result
 
+
+async def portfolio_factor_backtest_from_market(
+    *, symbols: list[str], range_param: str, interval: str, params: dict[str, Any] | None,
+    initial_cash: float, cost_model: dict[str, Any] | None = None,
+    max_position_pct: float = 1.0, t_plus_one: bool = True,
+) -> dict[str, Any]:
+    _require_daily(interval)
+    cleaned = sorted({str(s).strip().upper() for s in symbols if str(s).strip()})
+    if any(not (len(sym) == 9 and sym[:6].isdigit() and sym[6:] in (".SS", ".SH", ".SZ", ".BJ")) for sym in cleaned):
+        raise ValueError("仅支持6位代码加.SS/.SH/.SZ/.BJ的A股")
+    if not 2 <= len(cleaned) <= 50:
+        raise ValueError("组合股票池须包含2至50只标的")
     sem = asyncio.Semaphore(5)
-
     async def limited(sym: str):
         async with sem:
             return await _fetch_symbol_bundle(sym, range_param, interval)
-
     fetched = await asyncio.gather(*(limited(sym) for sym in cleaned))
-    bars_by_t: dict[str, dict[int, dict[str, Any]]] = {}
-    kline_sources: dict[str, str] = {}
-    errors: dict[str, str] = {}
-    for sym, bundle, err in fetched:
-        if err or not bundle:
-            errors[sym] = err or "空数据"
-            continue
-        rows = sorted(bundle.get("candles") or [], key=lambda x: int(x.get("t") or 0))
-        rows = [r for r in rows if r.get("o") and r.get("c")]
-        if len(rows) < 80:
-            errors[sym] = f"K 线不足：{len(rows)}"
-            continue
-        bars_by_t[sym] = {int(r["t"]): r for r in rows}
-        kline_sources[sym] = str(bundle.get("kline_source") or "")
-    if len(bars_by_t) < 2:
-        raise ValueError(f"可用标的不足：{errors}")
-    common_ts: set[int] | None = None
-    for rows in bars_by_t.values():
-        keys = set(rows.keys())
-        common_ts = keys if common_ts is None else common_ts & keys
-    ts = sorted(common_ts or [])
-    if len(ts) < 80:
-        raise ValueError("股票池共同交易日不足，无法做组合因子回测")
-    bars_by_symbol: dict[str, list[dict[str, Any]]] = {
-        sym: [rows[t] for t in ts] for sym, rows in bars_by_t.items()
-    }
-    symbols_ok = sorted(bars_by_symbol)
-
-    cash = float(initial_cash)
-    shares: dict[str, int] = {sym: 0 for sym in symbols_ok}
-    available: dict[str, int] = {sym: 0 for sym in symbols_ok}
-    trades: list[dict[str, Any]] = []
-    equity_curve: list[dict[str, Any]] = []
-    position_curve: list[dict[str, Any]] = []
-    rebalance_log: list[dict[str, Any]] = []
-    prev_targets: dict[str, float] = {sym: 0.0 for sym in symbols_ok}
-    warmup = max(params2["momentum_lookback"], params2["trend_ma"], params2["volatility_lookback"], 20) + 1
-
-    for i, t in enumerate(ts):
-        close_prices = {sym: _num(bars_by_symbol[sym][i].get("c")) for sym in symbols_ok}
-        open_prices = {sym: _num(bars_by_symbol[sym][i].get("o")) for sym in symbols_ok}
-        is_rebalance = i >= warmup and ((i - warmup) % int(params2["rebalance_days"]) == 0)
-        targets = dict(prev_targets)
-        if is_rebalance:
-            scored = [
-                sc
-                for sym in symbols_ok
-                if (sc := _factor_score(sym, i - 1, bars_by_symbol, params2)) is not None
-            ]
-            scored.sort(key=lambda x: (-x["score"], x["symbol"]))
-            selected = scored[: int(params2["top_n"])]
-            weight = max_position_pct / len(selected) if selected else 0.0
-            targets = {sym: 0.0 for sym in symbols_ok}
-            for row in selected:
-                targets[row["symbol"]] = weight
-            rebalance_log.append(
-                {
-                    "t": int(t),
-                    "selected": selected,
-                    "target_weight": round(weight, 4),
-                    "candidate_count": len(scored),
-                }
-            )
-            prev_targets = dict(targets)
-
-        equity_open = cash + sum(shares[sym] * open_prices[sym] for sym in symbols_ok)
-        # 先卖后买，释放现金。
-        for side in ("sell", "buy"):
-            for sym in symbols_ok:
-                px0 = open_prices[sym]
-                if px0 <= 0:
-                    continue
-                target_shares = _lot_shares(equity_open * targets.get(sym, 0.0), px0)
-                delta = target_shares - shares[sym]
-                if side == "sell" and delta < 0:
-                    sellable = available[sym] if t_plus_one else shares[sym]
-                    vol = min((-delta) // 100 * 100, sellable // 100 * 100)
-                    if vol >= 100:
-                        px = _slip_price(px0, "sell", cost)
-                        fee = _fees(sym, px, vol, "sell", cost)
-                        gross = px * vol
-                        cash += gross - fee["total"]
-                        shares[sym] -= vol
-                        available[sym] -= vol if t_plus_one else 0
-                        trades.append({"t": int(t), "symbol": sym, "side": "sell", "price": px, "volume": vol, "amount": round(gross, 2), "fee": fee, "reason": "因子调仓"})
-                elif side == "buy" and delta > 0:
-                    px = _slip_price(px0, "buy", cost)
-                    max_affordable = _lot_shares(cash - _num(cost.get("min_commission"), 5.0), px)
-                    vol = min(delta // 100 * 100, max_affordable)
-                    if vol >= 100:
-                        fee = _fees(sym, px, vol, "buy", cost)
-                        gross = px * vol
-                        cash -= gross + fee["total"]
-                        shares[sym] += vol
-                        if not t_plus_one:
-                            available[sym] += vol
-                        trades.append({"t": int(t), "symbol": sym, "side": "buy", "price": px, "volume": vol, "amount": round(gross, 2), "fee": fee, "reason": "因子调仓"})
-
-        equity = cash + sum(shares[sym] * close_prices[sym] for sym in symbols_ok)
-        equity_curve.append({"t": int(t), "equity": round(equity, 2), "cash": round(cash, 2), "holding_count": sum(1 for v in shares.values() if v > 0)})
-        position_curve.append(
-            {
-                "t": int(t),
-                "actual_weight": round(sum(shares[sym] * close_prices[sym] for sym in symbols_ok) / equity, 4) if equity > 0 else 0,
-                "holding_count": sum(1 for v in shares.values() if v > 0),
-            }
-        )
-        if t_plus_one:
-            available = dict(shares)
-
-    perf = _performance(equity_curve, trades, initial_cash)
-    # 等权买入持有基准：共同交易日起点到终点的平均收益。
-    bench_rets = []
-    for sym in symbols_ok:
-        first = _num(bars_by_symbol[sym][1].get("o"), _num(bars_by_symbol[sym][0].get("o")))
-        last = _num(bars_by_symbol[sym][-1].get("c"))
-        if first > 0:
-            bench_rets.append(last / first - 1.0)
-    benchmark = sum(bench_rets) / len(bench_rets) if bench_rets else 0.0
-    perf["benchmark_equal_weight_return_pct"] = round(benchmark * 100, 4)
-    perf["excess_return_pct"] = round(perf.get("total_return_pct", 0.0) - perf["benchmark_equal_weight_return_pct"], 4)
-    result = {
-        "mode": "portfolio_factor",
-        "strategy_id": "factor_rotation_topn",
-        "strategy_name": "多因子 TopN 轮动",
-        "symbols": symbols_ok,
-        "unavailable_symbols": errors,
-        "range": range_param,
-        "interval": interval,
-        "params": params2,
-        "initial_cash": round(initial_cash, 2),
-        "cost_model": cost,
-        "t_plus_one": bool(t_plus_one),
-        "max_position_pct": max_position_pct,
-        "performance": perf,
-        "trades": trades,
-        "equity_curve": equity_curve,
-        "position_curve": position_curve,
-        "rebalance_log": rebalance_log,
-        "kline_sources": kline_sources,
-        "bar_count": len(ts),
-        "engine_notes": [
-            "股票池内用上一交易日收盘前可见数据计算多因子分，下一交易日开盘调仓，避免未来函数。",
-            "默认因子：中期动量、价格相对均线趋势、低波动、量能变化；按综合分选择 TopN 等权持有。",
-            "当前为研究型多标的组合回测，适合验证因子方向、调仓频率与成本敏感性，不连接实盘账户。",
-        ],
-    }
-    result.update(perf)
+    errors = {sym: err or "空行情" for sym, bundle, err in fetched if err or not bundle or not bundle.get("candles")}
+    # Never silently shrink the submitted universe after seeing which series fail.
+    if errors:
+        raise ValueError(f"股票池数据不完整，请先修复数据源或显式调整股票池: {errors}")
+    bundles = {sym: bundle for sym, bundle, _ in fetched}
+    result = run_portfolio_factor_backtest(bars_by_symbol={sym: bundle.get("candles") or [] for sym, bundle in bundles.items()},
+                                           params=params, initial_cash=initial_cash, cost_model=cost_model,
+                                           max_position_pct=max_position_pct, t_plus_one=t_plus_one)
+    result.update({"range": range_param, "interval": interval, "unavailable_symbols": {},
+                   "kline_sources": {sym: bundle.get("kline_source") for sym, bundle in bundles.items()}})
+    for bundle in bundles.values():
+        _merge_market_quality(result, bundle)
     return result
 
 

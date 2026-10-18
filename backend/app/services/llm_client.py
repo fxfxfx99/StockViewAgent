@@ -3,6 +3,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+from contextlib import contextmanager
 import json
 import re
 from threading import Event
@@ -29,6 +31,59 @@ _SAFE_ERRORS = {
 }
 _KIMI_API_HOSTS = {"api.moonshot.cn", "api.moonshot.ai", "api.kimi.com"}
 _KIMI_FIXED_TEMPERATURE_MODELS = {"kimi-k2.5", "kimi-k2.6"}
+
+
+def _telemetry_source(api_base: str) -> str:
+    try:
+        return urlsplit(api_base).hostname or ""
+    except (ValueError, TypeError):
+        return ""
+
+
+def _telemetry_error_code(error: BaseException) -> str:
+    code = getattr(error, "status_code", None)
+    if isinstance(error, httpx.HTTPStatusError):
+        code = error.response.status_code
+    if isinstance(code, int) and 100 <= code <= 599:
+        return f"http_{code}"
+    if isinstance(error, (httpx.TimeoutException, TimeoutError)):
+        return "timeout"
+    if isinstance(error, httpx.HTTPError):
+        return "network_error"
+    if isinstance(error, (ValueError, TypeError, KeyError, IndexError, AttributeError)):
+        return "invalid_response"
+    return "request_failed"
+
+
+def _response_usage(response: Any) -> Any:
+    try:
+        usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+        # LiteLLM uses a Pydantic Usage object; preserve its reported fields without
+        # inferring missing totals or substituting a budget reservation.
+        return usage.model_dump() if callable(getattr(usage, "model_dump", None)) else usage
+    except Exception:
+        # Optional accounting metadata must never invalidate a usable answer.
+        return None
+
+
+@contextmanager
+def _llm_attempt(operation: str, *, api_base: str, model: str, user_id: int | None = None):
+    """One actually dispatched request, including failed/cancelled attempts."""
+    from app.services import runtime_telemetry
+
+    event_id = runtime_telemetry.start_event("llm", operation, source=_telemetry_source(api_base),
+                                           model=model, user_id=user_id)
+    result = {"status": "failed", "usage": None, "error_code": "request_failed"}
+    try:
+        yield result
+    except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+        result.update(status="cancelled", error_code="cancelled")
+        raise
+    except BaseException as exc:
+        result.update(status="failed", error_code=_telemetry_error_code(exc))
+        raise
+    finally:
+        runtime_telemetry.finish_event(event_id, user_id=user_id, **result)
 
 
 def safe_error(error: object) -> str:
@@ -118,21 +173,30 @@ def _chat_completion_http_once(
         body["temperature"] = temperature
     try:
         with httpx.Client(timeout=httpx.Timeout(timeout, connect=min(timeout, 10.0))) as client:
-            response = client.post(
-                f"{api_base.rstrip('/')}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-        if response.status_code >= 400:
-            return None, safe_error(f"LLM 服务返回 HTTP {response.status_code}")
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        if not isinstance(content, str) or not content.strip():
-            return None, "LLM 返回空内容"
-        return content.strip(), None
+            with _llm_attempt("chat", api_base=api_base, model=model) as event:
+                response = client.post(
+                    f"{api_base.rstrip('/')}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                if response.status_code >= 400:
+                    event["error_code"] = f"http_{response.status_code}"
+                    try:
+                        event["usage"] = _response_usage(response.json())
+                    except (ValueError, TypeError):
+                        pass
+                    return None, safe_error(f"LLM 服务返回 HTTP {response.status_code}")
+                data = response.json()
+                event["usage"] = _response_usage(data)
+                content = data["choices"][0]["message"]["content"]
+                if not isinstance(content, str) or not content.strip():
+                    event["error_code"] = "empty_response"
+                    return None, "LLM 返回空内容"
+                event.update(status="success", error_code=None)
+                return content.strip(), None
     except httpx.HTTPError as error:
         return None, safe_error(error)
     except (ValueError, TypeError, KeyError, IndexError, AttributeError):
@@ -168,18 +232,30 @@ def chat_completion_sync(
             for key in keys:
                 if cancel_event is not None and cancel_event.is_set():
                     return None, "分析已取消"
+                if not settings.kline_llm_base or not settings.kline_llm_model:
+                    continue
                 try:
-                    resp = litellm.completion(
-                        model=_litellm_model_name(),
-                        messages=messages,
-                        temperature=temperature,
-                        api_key=key,
-                        api_base=settings.kline_llm_base,
-                        timeout=timeout,
-                    )
-                    ch = resp.choices[0].message
-                    content = (ch.content or "").strip() if ch else ""
-                    return content or None, None
+                    model = _litellm_model_name()
+                    with _llm_attempt("chat", api_base=settings.kline_llm_base, model=model) as event:
+                        resp = litellm.completion(
+                            model=model,
+                            messages=messages,
+                            temperature=temperature,
+                            api_key=key,
+                            api_base=settings.kline_llm_base,
+                            timeout=timeout,
+                            # Keep retries visible in our existing key/provider
+                            # loop, instead of one event hiding several charges.
+                            num_retries=0,
+                            max_retries=0,
+                            caching=False,
+                        )
+                        event["usage"] = _response_usage(resp)
+                        ch = resp.choices[0].message
+                        content = (ch.content or "").strip() if ch else ""
+                        event.update(status="success" if content else "failed",
+                                     error_code=None if content else "empty_response")
+                        return content or None, None
                 except Exception as e:  # noqa: BLE001
                     last_err = safe_error(str(e))
                     continue

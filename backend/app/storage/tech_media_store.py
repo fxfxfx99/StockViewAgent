@@ -38,63 +38,62 @@ def init_db() -> None:
     conn.close()
 
 
-def upsert_and_prune(items: list[dict[str, Any]], keep: int = 100) -> None:
+def upsert_and_prune(items: list[dict[str, Any]], keep: int = 100) -> int:
     """写入或更新条目，并删除超出 keep 条的旧记录（按报道时间优先）。"""
     init_db()
     if not items:
-        return
+        return 0
     keep = max(10, min(int(keep), 500))
     now = time.time()
     conn = _connect()
-    for it in items:
-        aid = str(it.get("id") or "").strip()
-        if not aid:
-            continue
-        dh = 1 if it.get("deep_research_hint") else 0
-        conn.execute(
-            """
-            INSERT INTO tech_media_items (
-              id, title, link, summary, published, published_ts, source, deep_hint, saved_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-              title = excluded.title,
-              link = excluded.link,
-              summary = excluded.summary,
-              published = excluded.published,
-              published_ts = excluded.published_ts,
-              source = excluded.source,
-              deep_hint = excluded.deep_hint,
-              saved_at = excluded.saved_at
-            """,
-            (
-                aid,
-                str(it.get("title") or "")[:2000],
-                str(it.get("link") or "")[:2000],
-                str(it.get("summary") or "")[:8000],
-                str(it.get("published") or "")[:500],
-                it.get("published_ts"),
-                str(it.get("source") or "")[:500],
-                dh,
-                now,
-            ),
-        )
-    cur = conn.execute(
-        """
-        SELECT id FROM tech_media_items
-        ORDER BY COALESCE(published_ts, 0) DESC, saved_at DESC
-        LIMIT ?
-        """,
-        (keep,),
-    )
-    keep_ids = [str(r[0]) for r in cur.fetchall()]
-    if not keep_ids:
-        conn.commit()
+    try:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            changed_ids = set()
+            for it in items:
+                aid = str(it.get("id") or "").strip()
+                if not aid:
+                    continue
+                dh = 1 if it.get("deep_research_hint") else 0
+                values = (str(it.get("title") or "")[:2000], str(it.get("link") or "")[:2000],
+                          str(it.get("summary") or "")[:8000], str(it.get("published") or "")[:500],
+                          it.get("published_ts"), str(it.get("source") or "")[:500], dh)
+                old = conn.execute("SELECT title,link,summary,published,published_ts,source,deep_hint FROM tech_media_items WHERE id=?", (aid,)).fetchone()
+                if old is None or tuple(old) != values:
+                    changed_ids.add(aid)
+                conn.execute(
+                    """
+                    INSERT INTO tech_media_items (
+                      id, title, link, summary, published, published_ts, source, deep_hint, saved_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                      title = excluded.title,
+                      link = excluded.link,
+                      summary = excluded.summary,
+                      published = excluded.published,
+                      published_ts = excluded.published_ts,
+                      source = excluded.source,
+                      deep_hint = excluded.deep_hint,
+                      saved_at = excluded.saved_at
+                    """,
+                    (aid, *values, now),
+                )
+            cur = conn.execute(
+                """
+                SELECT id FROM tech_media_items
+                ORDER BY COALESCE(published_ts, 0) DESC, saved_at DESC
+                LIMIT ?
+                """,
+                (keep,),
+            )
+            keep_ids = [str(r[0]) for r in cur.fetchall()]
+            if not keep_ids:
+                return 0
+            placeholders = ",".join("?" * len(keep_ids))
+            conn.execute(f"DELETE FROM tech_media_items WHERE id NOT IN ({placeholders})", keep_ids)
+            return len(changed_ids.intersection(keep_ids))
+    finally:
         conn.close()
-        return
-    placeholders = ",".join("?" * len(keep_ids))
-    conn.execute(f"DELETE FROM tech_media_items WHERE id NOT IN ({placeholders})", keep_ids)
-    conn.commit()
-    conn.close()
 
 
 def list_recent(limit: int = 100) -> list[dict[str, Any]]:

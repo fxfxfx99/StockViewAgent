@@ -95,11 +95,23 @@ export function dataZoomPercentLastN(total, showBars) {
   return { start: Math.max(0, start), end: 100 };
 }
 
-const MA_COLORS = {
-  ma20: "#eab308",
-  ma60: "#60a5fa",
-  ma250: "#a78bfa",
+const DEFAULT_CHART_PALETTE = {
+  text: "#e5e7eb", muted: "#9ca3af", line: "#4b5563", grid: "rgba(75,85,99,0.35)",
+  up: "#f87171", down: "#4ade80", accent: "#60a5fa", selection: "rgba(96,165,250,0.15)",
+  surface: "#1c1c1e", ma20: "#eab308", ma60: "#60a5fa", ma250: "#a78bfa",
 };
+
+/** Canvas colors resolve CSS tokens before reaching ECharts (which cannot use var()). */
+export function candlePaletteFromStyles(styles) {
+  const tokens = {
+    text: "--sva-text", muted: "--sva-text-secondary", line: "--sva-separator-strong",
+    grid: "--sva-separator", up: "--sva-stock-up", down: "--sva-stock-down",
+    accent: "--sva-accent", selection: "--sva-accent-soft", surface: "--sva-panel-bg",
+    ma20: "--sva-chart-ma20", ma60: "--sva-chart-ma60", ma250: "--sva-chart-ma250",
+  };
+  return Object.fromEntries(Object.entries(tokens).map(([key, token]) =>
+    [key, styles.getPropertyValue(token).trim() || DEFAULT_CHART_PALETTE[key]]));
+}
 
 /**
  * @param {object} opts
@@ -116,6 +128,7 @@ const MA_COLORS = {
  * @param {(idx: number, c: object) => string} [opts.tooltipDateLine]
  * @param {(c: object) => string[]} [opts.tooltipExtraLines]
  * @param {(v: number) => string} [opts.volumeAxisFormatter]
+ * @param {object} [opts.palette] Resolved CSS theme colors for canvas rendering
  */
 export function buildCandleVolumeChartOption({
   candles: rawCandles,
@@ -131,7 +144,9 @@ export function buildCandleVolumeChartOption({
   tooltipDateLine,
   tooltipExtraLines,
   volumeAxisFormatter,
+  palette,
 }) {
+  const colors = { ...DEFAULT_CHART_PALETTE, ...palette };
   const candles = aggregateFromDaily ? aggregateCandlesFromDaily(rawCandles || [], viewMode) : rawCandles || [];
   if (!candles.length) return null;
 
@@ -178,12 +193,12 @@ export function buildCandleVolumeChartOption({
       type: "category",
       data: dates,
       boundaryGap: true,
-      axisLine: layout === "mini" ? { show: false } : { lineStyle: { color: "#4b5563" } },
+      axisLine: layout === "mini" ? { show: false } : { lineStyle: { color: colors.line } },
       axisTick: layout === "mini" ? { show: false } : undefined,
       axisLabel:
         layout === "mini"
           ? { show: false }
-          : { color: "#9ca3af", fontSize: 10 },
+          : { color: colors.muted, fontSize: 10 },
     },
   ];
   if (showVolume) {
@@ -192,7 +207,7 @@ export function buildCandleVolumeChartOption({
       data: dates,
       gridIndex: 1,
       boundaryGap: true,
-      axisLine: layout === "mini" ? { show: false } : { lineStyle: { color: "#4b5563" } },
+      axisLine: layout === "mini" ? { show: false } : { lineStyle: { color: colors.line } },
       axisTick: layout === "mini" ? { show: false } : undefined,
       axisLabel: { show: false },
     });
@@ -201,8 +216,8 @@ export function buildCandleVolumeChartOption({
   const yAxisMain = [
     {
       scale: true,
-      splitLine: { lineStyle: { color: layout === "mini" ? "transparent" : "rgba(75,85,99,0.35)" } },
-      axisLabel: layout === "mini" ? { show: false } : { color: "#9ca3af", fontSize: 10 },
+      splitLine: { lineStyle: { color: layout === "mini" ? "transparent" : colors.grid } },
+      axisLabel: layout === "mini" ? { show: false } : { color: colors.muted, fontSize: 10 },
     },
   ];
   if (showVolume && sub) {
@@ -211,12 +226,12 @@ export function buildCandleVolumeChartOption({
       gridIndex: 1,
       splitNumber: 2,
       name: layout === "mini" ? undefined : undefined,
-      splitLine: { lineStyle: { color: layout === "mini" ? "transparent" : "rgba(75,85,99,0.25)" } },
+      splitLine: { lineStyle: { color: layout === "mini" ? "transparent" : colors.grid } },
       axisLabel:
         layout === "mini"
           ? { show: false }
           : {
-              color: "#9ca3af",
+              color: colors.muted,
               fontSize: 10,
               ...(sub.yAxisFormatter ? { formatter: sub.yAxisFormatter } : {}),
             },
@@ -234,10 +249,13 @@ export function buildCandleVolumeChartOption({
             end: dzEnd,
             height: layout === "mini" ? 14 : 18,
             bottom: layout === "mini" ? 0 : 6,
-            borderColor: "#374151",
-            fillerColor: "rgba(34,197,94,0.15)",
-            handleStyle: { color: "#22c55e" },
-            textStyle: { color: "#9ca3af", fontSize: layout === "mini" ? 9 : 11 },
+            borderColor: colors.line,
+            fillerColor: colors.selection,
+            handleStyle: { color: colors.accent },
+            moveHandleStyle: { color: colors.accent },
+            dataBackground: { lineStyle: { color: colors.muted }, areaStyle: { color: colors.grid } },
+            selectedDataBackground: { lineStyle: { color: colors.accent }, areaStyle: { color: colors.selection } },
+            textStyle: { color: colors.muted, fontSize: layout === "mini" ? 9 : 11 },
           },
         ]
       : [{ type: "inside", xAxisIndex: [0], start: dzStart, end: dzEnd }];
@@ -248,10 +266,10 @@ export function buildCandleVolumeChartOption({
       type: "candlestick",
       data: kData,
       itemStyle: {
-        color: "#f87171",
-        color0: "#4ade80",
-        borderColor: "#f87171",
-        borderColor0: "#4ade80",
+        color: colors.up,
+        color0: colors.down,
+        borderColor: colors.up,
+        borderColor0: colors.down,
       },
     },
     {
@@ -260,7 +278,8 @@ export function buildCandleVolumeChartOption({
       data: ma20,
       smooth: false,
       showSymbol: false,
-      lineStyle: { width: 1, color: MA_COLORS.ma20 },
+      lineStyle: { width: 1, color: colors.ma20 },
+      itemStyle: { color: colors.ma20 },
       emphasis: { disabled: true },
     },
     {
@@ -269,7 +288,8 @@ export function buildCandleVolumeChartOption({
       data: ma60,
       smooth: false,
       showSymbol: false,
-      lineStyle: { width: 1, color: MA_COLORS.ma60 },
+      lineStyle: { width: 1, color: colors.ma60 },
+      itemStyle: { color: colors.ma60 },
       emphasis: { disabled: true },
     },
     {
@@ -278,13 +298,31 @@ export function buildCandleVolumeChartOption({
       data: ma250,
       smooth: false,
       showSymbol: false,
-      lineStyle: { width: 1, color: MA_COLORS.ma250 },
+      lineStyle: { width: 1, color: colors.ma250 },
+      itemStyle: { color: colors.ma250 },
       emphasis: { disabled: true },
     },
   ];
 
   if (showVolume && sub) {
-    series.push(...sub.series);
+    let lineIndex = 0;
+    const lineColors = [colors.ma20, colors.ma60, colors.ma250];
+    series.push(...sub.series.map((item) => {
+      if (item.type === "line") {
+        const color = lineColors[lineIndex++ % lineColors.length];
+        return { ...item, lineStyle: { ...item.lineStyle, color }, itemStyle: { ...item.itemStyle, color } };
+      }
+      if (item.type === "bar") {
+        return { ...item, data: item.data.map((point, index) => {
+          if (point == null) return point;
+          const value = typeof point === "object" ? point.value : point;
+          const rises = item.name === "MACD" ? Number(value) >= 0 : Number(candles[index].c) >= Number(candles[index].o);
+          return { ...(typeof point === "object" ? point : {}), value,
+            itemStyle: { ...(point?.itemStyle || {}), color: rises ? colors.up : colors.down } };
+        }) };
+      }
+      return item;
+    }));
   }
 
   const tooltipFormatter = (params) => {
@@ -308,18 +346,23 @@ export function buildCandleVolumeChartOption({
 
   return {
     backgroundColor: "transparent",
+    textStyle: { color: colors.text, fontFamily: "-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif" },
     animation: false,
     legend: {
       data: legendItems,
       top: layout === "mini" ? 0 : 2,
-      textStyle: { color: "#9ca3af", fontSize: layout === "mini" ? 9 : 11 },
+      textStyle: { color: colors.muted, fontSize: layout === "mini" ? 9 : 11 },
       itemWidth: 14,
       itemHeight: layout === "mini" ? 8 : 10,
       ...(layout === "mini" ? { itemGap: 5, left: 0, right: 0 } : {}),
     },
     tooltip: {
       trigger: "axis",
-      axisPointer: { type: "cross" },
+      backgroundColor: colors.surface,
+      borderColor: colors.line,
+      textStyle: { color: colors.text, fontSize: 12 },
+      axisPointer: { type: "cross", lineStyle: { color: colors.muted },
+        crossStyle: { color: colors.muted }, label: { backgroundColor: colors.surface, color: colors.text } },
       confine: true,
       formatter: tooltipFormatter,
     },

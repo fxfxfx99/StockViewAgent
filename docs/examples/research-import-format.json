@@ -1,0 +1,73 @@
+{
+  "bundles": {
+    "600000.SS": {
+      "kline_source": "format_fixture_not_market_data",
+      "price_basis": "raw",
+      "volume_unit": "shares",
+      "candles": [
+        {
+          "t": 1736092800,
+          "o": 10.0,
+          "h": 10.5,
+          "l": 9.5,
+          "c": 10.1,
+          "v": 5000,
+          "source_time": "2025-01-06T15:00:00+08:00",
+          "available_at": "2025-01-06T16:00:00+08:00",
+          "tradable": true,
+          "suspended": false,
+          "st": false,
+          "no_price_limit": false,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "corporate_actions_checked": true
+        },
+        {
+          "t": 1736179200,
+          "o": 10.0,
+          "h": 10.5,
+          "l": 9.5,
+          "c": 10.2,
+          "v": 5000,
+          "source_time": "2025-01-07T15:00:00+08:00",
+          "available_at": "2025-01-07T16:00:00+08:00",
+          "tradable": true,
+          "suspended": false,
+          "st": false,
+          "no_price_limit": false,
+          "limit_up": 11.0,
+          "limit_down": 9.0,
+          "corporate_actions_checked": true
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "example_only": true,
+    "description": "虚构格式样例，仅供隔离验证；不是真实行情，不用于策略绩效或晋升。",
+    "source": "format_fixture_not_market_data",
+    "fetched_at": "2025-01-08T12:00:00+08:00",
+    "calendar": [
+      "2025-01-06",
+      "2025-01-07"
+    ],
+    "corporate_actions": [],
+    "instrument_history": [
+      {
+        "symbol": "600000.SS",
+        "valid_from": "2020-01-01",
+        "valid_to": null,
+        "available_at": "2020-01-01T00:00:00+08:00"
+      }
+    ],
+    "coverage": {
+      "start": "2025-01-06",
+      "end": "2025-01-07",
+      "symbols": [
+        "600000.SS"
+      ],
+      "corporate_actions_complete": true,
+      "instrument_history_complete": true
+    }
+  }
+}

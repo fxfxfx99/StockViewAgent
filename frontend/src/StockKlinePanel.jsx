@@ -1,13 +1,14 @@
-import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
-import { App as AntApp, Card, Spin, Typography, Alert } from "antd";
+import { App as AntApp, Button, Card, Spin, Alert } from "antd";
+import { DownOutlined, LineChartOutlined } from "@ant-design/icons";
+import { useThemeMode } from "./ThemeModeProvider.jsx";
 import * as api from "./api";
-import { buildCandleVolumeChartOption } from "./klineChartOption.js";
+import { buildCandleVolumeChartOption, candlePaletteFromStyles } from "./klineChartOption.js";
 import { SUB_INDICATORS } from "./klineIndicators.js";
 import { qk } from "./hooks/queryKeys.js";
 
-const { Text } = Typography;
 const SUB_IND_KEY = "sva_kline_sub_indicator";
 
 /** 导出当前 bundle 中 K 线为 CSV（逐根 OHLCV） */
@@ -101,6 +102,20 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
 ) {
   const { message } = AntApp.useApp();
   const qc = useQueryClient();
+  const { mode } = useThemeMode();
+  const panelRef = useRef(null);
+  const [palette, setPalette] = useState(undefined);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsId = useId();
+
+  useEffect(() => {
+    // ThemeModeProvider applies data-theme in its effect. Read after that commit
+    // so canvas tokens and the surrounding CSS always use the same appearance.
+    const frame = requestAnimationFrame(() => {
+      if (panelRef.current) setPalette(candlePaletteFromStyles(getComputedStyle(panelRef.current)));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mode]);
   const [subIndicator, setSubIndicator] = useState(() => {
     try {
       const saved = localStorage.getItem(SUB_IND_KEY);
@@ -165,6 +180,7 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
     if (!candles.length) return null;
     return buildCandleVolumeChartOption({
       candles,
+      palette,
       aggregateFromDaily: false,
       viewMode: "1d",
       defaultShowBars: 50,
@@ -185,9 +201,9 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
       },
       volumeAxisFormatter: volAxisLabel,
     });
-  }, [bundle, interval, subIndicator]);
+  }, [bundle, interval, subIndicator, palette]);
 
-  const m = bundle?.metrics;
+  const m = bundle?.metrics || {};
 
   const metrics = m
     ? [
@@ -250,76 +266,70 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
       ]
     : [];
 
-  const body = (
-    <>
-      <Spin spinning={loading}>
-        {metrics.length ? (
-          <div className="sva-metrics">
-            {metrics.map((item) => (
-              <div
-                key={item.key}
-                className={`sva-metric${item.emphasis ? " is-emphasis" : ""}`}
-              >
-                <span className="sva-metric__label">{item.label}</span>
-                <span
-                  className={`sva-metric__value${
-                    item.tone === "up" ? " is-up" : item.tone === "down" ? " is-down" : ""
-                  }`}
-                >
-                  {item.value}
-                  {item.unit ? <span className="sva-metric__unit">{item.unit}</span> : null}
-                </span>
-                {item.sub ? <span className="sva-metric__sub">{item.sub}</span> : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
+  const primary = metrics.find((item) => item.key === "price");
+  const change = metrics.find((item) => item.key === "chg");
+  const coreKeys = ["open", "high", "low", "vol", "turn"];
+  const coreMetrics = coreKeys.map((key) => metrics.find((item) => item.key === key));
+  const detailMetrics = metrics.filter((item) => !["price", "chg", ...coreKeys].includes(item.key));
+  const renderMetric = (item) => <div className="market-quote-stat" key={item.key}>
+    <dt>{item.label}</dt>
+    <dd className={item.tone ? `is-${item.tone}` : undefined}>{item.value}</dd>
+    {item.sub ? <span className="market-quote-stat__note">{item.sub}</span> : null}
+  </div>;
 
-        {chartOption ? (
-          <div className="sva-chart-wrap">
-            <div className="sva-subind-picker">
-              <select
-                className="sva-subind-select"
-                value={subIndicator}
-                aria-label="副图指标"
-                onChange={(e) => onSubIndicatorChange(e.target.value)}
-              >
-                {SUB_INDICATORS.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+  const body = (
+    <div className="market-kline" ref={panelRef}>
+      <Spin spinning={loading}>
+        <div className="market-quote-summary">
+          <div className="market-quote-price">
+            <div className="market-quote-price__value">{primary.value}
+              {primary.unit ? <span>{primary.unit}</span> : null}
             </div>
-            <ReactECharts option={chartOption} style={{ height: chartHeight, width: "100%" }} notMerge lazyUpdate />
+            <div className={`market-quote-price__change${change.tone ? ` is-${change.tone}` : ""}`}>
+              {m.latest_close != null ? <><span>{change.value}</span><span className="market-quote-price__label">涨跌幅</span></> : "等待行情数据"}
+            </div>
           </div>
-        ) : (
-          !loading && <Text type="secondary">暂无数据</Text>
-        )}
+          <dl className="market-quote-core">{coreMetrics.map(renderMetric)}</dl>
+          <Button type="text" size="small" className="market-quote-details-toggle"
+            aria-expanded={detailsOpen} aria-controls={detailsId}
+            onClick={() => setDetailsOpen((value) => !value)}>
+            行情详情 <DownOutlined rotate={detailsOpen ? 180 : 0} />
+          </Button>
+        </div>
+        <div className="market-quote-details" id={detailsId} hidden={!detailsOpen}>
+          <dl>{detailMetrics.map(renderMetric)}</dl>
+        </div>
+
+        <div className="market-chart-caption">
+          <span>{interval === "1wk" ? "周线走势" : interval === "1mo" ? "月线走势" : "日线走势"}</span>
+          <label className="market-indicator-control">
+            <span>副图</span>
+            <select value={subIndicator} aria-label="副图指标" onChange={(e) => onSubIndicatorChange(e.target.value)}>
+              {SUB_INDICATORS.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+            </select>
+          </label>
+        </div>
+        {chartOption ? (
+          <div className="market-canvas" aria-label={`${displayName || klineSymbol} K 线及技术指标`}>
+            <ReactECharts option={chartOption} style={{ height: chartHeight, width: "100%" }} notMerge lazyUpdate autoResize />
+          </div>
+        ) : <div className="market-chart-empty" style={{ minHeight: chartHeight }} role="status">
+          <LineChartOutlined aria-hidden="true" />
+          <strong>{loading ? "正在读取行情" : err ? "行情暂不可用" : "暂无行情数据"}</strong>
+          <span>{loading ? "行情就绪后将在这里显示" : err ? "可稍后刷新重试" : "刷新或选择其他股票查看"}</span>
+        </div>}
       </Spin>
 
-      {err ? (
-        <Alert type="error" showIcon style={{ marginTop: 10 }} message={err} />
-      ) : bundle?.cache_stale && bundle?.data_as_of ? (
-        <p className="sva-data-asof is-stale">数据截至 {bundle.data_as_of}（缓存）</p>
-      ) : bundle?.data_as_of ? (
-        <p className="sva-data-asof">数据截至 {bundle.data_as_of}</p>
-      ) : null}
-    </>
+      {err ? <Alert type="error" showIcon className="market-data-alert" message={err} /> : null}
+      {bundle?.data_as_of ? <p className={`market-data-asof${bundle.cache_stale ? " is-stale" : ""}`}>
+        <span className="market-data-asof__dot" aria-hidden="true" />
+        数据截至 {bundle.data_as_of}{bundle.cache_stale ? " · 缓存数据" : ""}
+      </p> : null}
+    </div>
   );
 
   void hideChrome;
-  void displayName;
-
-  if (embedded) {
-    return <div className="ex-stock-kline-embedded">{body}</div>;
-  }
-
-  return (
-    <Card variant="borderless" title="K 线">
-      {body}
-    </Card>
-  );
+  return embedded ? body : <Card variant="borderless" title="K 线">{body}</Card>;
 });
 
 export default StockKlinePanel;

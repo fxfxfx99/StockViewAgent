@@ -1,15 +1,26 @@
 import asyncio
+import atexit
 import logging
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 
 from app.config import settings
+from app.storage.data_portability import data_directory_lock
+from app.storage.storage_bootstrap import initialize_local_storage
+
+# Includes import-time database initialization and draining background threads,
+# so an offline migration cannot race with any stage of this API process.
+_api_data_lifetime = ExitStack()
+_api_data_lifetime.enter_context(data_directory_lock(settings.data_dir))
+atexit.register(_api_data_lifetime.close)
+initialize_local_storage()
 from app.middlewares.error_handler import ErrorHandlerMiddleware, register_exception_handlers
 from app.middlewares.trusted_origin import TrustedOriginMiddleware
 from app.routers import (
     admin,
     analysis,
+    autopilot,
     auth,
     decision_signals,
     kline_learning,
@@ -17,6 +28,8 @@ from app.routers import (
     market,
     news,
     quant,
+    research,
+    runtime,
     settings_integrations,
     settings_llm,
     stock_picker_agents,
@@ -46,6 +59,9 @@ async def lifespan(app: FastAPI):
     company_updates_task: asyncio.Task | None = None
     comments_worker_task = asyncio.create_task(xueqiu_comments_service.worker_loop())
     comments_scheduler_task: asyncio.Task | None = None
+    if settings.enable_research_worker:
+        from app.services import local_autopilot
+        local_autopilot.reconcile_all(startup=True)
     data_asset_manager.refresh_catalog_from_disk()
     if settings.enable_scheduler:
         scheduler_task = asyncio.create_task(kline_insight_scheduler.kline_insight_scheduler_loop())
@@ -108,6 +124,7 @@ app = FastAPI(
         {"name": "stocks", "description": "全市场股票搜索补全"},
         {"name": "transaction-agent", "description": "TransactionAgent 多策略交易观点（数据接口已对齐本系统）"},
         {"name": "quant", "description": "量化交易：策略制定、模板化回测、绩效报告"},
+        {"name": "research", "description": "本地研究实验室：数据快照、策略版本、实验与前向模拟"},
         {"name": "decision-signals", "description": "决策信号生命周期与 1/3/5/10 日后验复盘"},
         {"name": "stock-picker-agents", "description": "可新增、编辑、启停和执行的用户自定义选股 Agent"},
         {"name": "xueqiu", "description": "雪球可选补充：公司信息、讨论摘要等（需 Cookie 或匿名 warm-up）"},
@@ -145,6 +162,9 @@ app.include_router(transaction_agent.router)
 app.include_router(decision_signals.router)
 app.include_router(stock_picker_agents.router)
 app.include_router(quant.router)
+app.include_router(research.router)
+app.include_router(runtime.router)
+app.include_router(autopilot.router)
 app.include_router(xueqiu.router)
 
 

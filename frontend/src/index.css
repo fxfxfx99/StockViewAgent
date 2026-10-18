@@ -55,96 +55,97 @@
   }
 }
 
+/* Shared macOS-inspired surfaces. Native system fonts and restrained materials. */
 :root,
 [data-theme="dark"] {
-  --sva-bg: #000000;
-  --sva-surface: rgba(28, 28, 30, 0.78);
-  --sva-surface-elevated: rgba(44, 44, 46, 0.82);
-  --sva-fill: rgba(118, 118, 128, 0.24);
-  --sva-fill-hover: rgba(118, 118, 128, 0.36);
-  --sva-separator: rgba(255, 255, 255, 0.08);
-  --sva-separator-strong: rgba(255, 255, 255, 0.12);
-  --sva-text: rgba(255, 255, 255, 0.92);
-  --sva-text-secondary: rgba(235, 235, 245, 0.6);
-  --sva-text-tertiary: rgba(235, 235, 245, 0.45);
-  --sva-accent: #0a84ff;
-  --sva-accent-hover: #409cff;
-  --sva-accent-soft: rgba(10, 132, 255, 0.14);
-  --sva-header-bg: rgba(28, 28, 30, 0.78);
-  --sva-sidebar-bg: rgba(28, 28, 30, 0.55);
-  --sva-shadow: 0 8px 32px rgba(0, 0, 0, 0.28);
-  --sva-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.22);
-  --sva-link: #64d2ff;
-  --sva-link-hover: #9ee2ff;
-  --sva-stock-up: #ff453a;
-  --sva-stock-down: #30d158;
-  --sva-stock-flat: #64d2ff;
+  color-scheme: dark;
+  --sva-bg: #202226;
+  --sva-surface: #282a2f;
+  --sva-panel-bg: #282a2f;
+  --sva-surface-elevated: #33363c;
+  --sva-fill: rgba(153, 163, 180, 0.10);
+  --sva-fill-hover: rgba(153, 163, 180, 0.17);
+  --sva-separator: #393c43;
+  --sva-separator-strong: #484c55;
+  --sva-text: #eef0f5;
+  --sva-text-secondary: #b0b6c3;
+  --sva-text-tertiary: #929aa9;
+  --sva-accent: #419cff;
+  --sva-accent-hover: #70b5ff;
+  --sva-accent-soft: rgba(65, 156, 255, 0.16);
+  --sva-header-bg: rgba(40, 42, 47, 0.94);
+  --sva-sidebar-bg: #24262b;
+  --sva-shadow: 0 10px 32px rgba(0, 0, 0, 0.18);
+  --sva-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.18);
+  --sva-link: #69afff;
+  --sva-link-hover: #9acaff;
+  --sva-stock-up: #ff6b67;
+  --sva-stock-down: #57ca85;
+  --sva-stock-flat: #b0b6c3;
   --sva-on-accent: #ffffff;
-  --sva-gradient-a: rgba(10, 132, 255, 0.08);
-  --sva-gradient-b: rgba(100, 210, 255, 0.05);
-  --sva-seg-active-bg: rgba(255, 255, 255, 0.16);
+  --sva-seg-active-bg: #4a4e57;
   --sva-seg-active-text: #ffffff;
-  --sva-seg-hover-text: rgba(255, 255, 255, 0.92);
-  --sva-row-hover: rgba(148, 163, 184, 0.06);
-  --sva-subind-bg: rgba(20, 28, 42, 0.88);
-  --sva-subind-hover-bg: rgba(30, 40, 58, 0.95);
-  --sva-subind-option-bg: #1a2438;
-  --sva-subind-option-text: #e2e8f0;
-  --sva-subind-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  --sva-warning-border: rgba(255, 214, 10, 0.22);
-  --sva-warning-bg: rgba(255, 214, 10, 0.08);
-  --sva-accent-border: rgba(10, 132, 255, 0.35);
-  --sva-source-bg: rgba(15, 23, 42, 0.42);
-  --sva-chart-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-  --sva-stale: rgba(251, 191, 36, 0.85);
-  --sva-radius: 12px;
-  --sva-radius-sm: 10px;
-  --sva-header-height: 52px;
-  --sva-font: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", system-ui, -apple-system, sans-serif;
-  --sva-font-display: "SF Pro Display", "PingFang SC", system-ui, -apple-system, sans-serif;
+  --sva-seg-hover-text: #eef0f5;
+  --sva-row-hover: rgba(153, 163, 180, 0.08);
+  --sva-subind-bg: #30333a;
+  --sva-subind-hover-bg: #3a3e46;
+  --sva-subind-option-bg: #30333a;
+  --sva-subind-option-text: #eef0f5;
+  --sva-subind-shadow: 0 1px 2px rgba(0, 0, 0, 0.20);
+  --sva-warning-border: rgba(231, 169, 59, 0.30);
+  --sva-warning-bg: rgba(231, 169, 59, 0.09);
+  --sva-accent-border: rgba(65, 156, 255, 0.35);
+  --sva-source-bg: rgba(153, 163, 180, 0.06);
+  --sva-chart-shadow: none;
+  --sva-stale: #e7b96b;
+  --sva-radius: 10px;
+  --sva-radius-sm: 8px;
+  --sva-header-height: 60px;
+  --sva-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+  --sva-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Segoe UI", sans-serif;
 }
 
 [data-theme="light"] {
-  --sva-bg: #f5f5f7;
+  color-scheme: light;
+  --sva-bg: #f5f6f8;
   --sva-surface: #ffffff;
+  --sva-panel-bg: #ffffff;
   --sva-surface-elevated: #ffffff;
-  --sva-fill: rgba(120, 120, 128, 0.16);
-  --sva-fill-hover: rgba(120, 120, 128, 0.22);
-  --sva-separator: rgba(60, 60, 67, 0.12);
-  --sva-separator-strong: rgba(60, 60, 67, 0.18);
-  --sva-text: rgba(0, 0, 0, 0.88);
-  --sva-text-secondary: rgba(60, 60, 67, 0.66);
-  --sva-text-tertiary: rgba(60, 60, 67, 0.48);
+  --sva-fill: #f0f2f5;
+  --sva-fill-hover: #e8ebf0;
+  --sva-separator: #e4e7ec;
+  --sva-separator-strong: #d4d9e1;
+  --sva-text: #1d2027;
+  --sva-text-secondary: #626c7e;
+  --sva-text-tertiary: #7a8496;
   --sva-accent: #007aff;
-  --sva-accent-hover: #0066d6;
-  --sva-accent-soft: rgba(0, 122, 255, 0.1);
-  --sva-header-bg: rgba(255, 255, 255, 0.92);
-  --sva-sidebar-bg: rgba(255, 255, 255, 0.92);
-  --sva-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.06);
-  --sva-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --sva-link: #007aff;
-  --sva-link-hover: #0056b3;
-  --sva-stock-up: #ff3b30;
-  --sva-stock-down: #34c759;
-  --sva-stock-flat: #007aff;
+  --sva-accent-hover: #0064d6;
+  --sva-accent-soft: #e4eeff;
+  --sva-header-bg: rgba(248, 249, 251, 0.94);
+  --sva-sidebar-bg: #eff1f4;
+  --sva-shadow: 0 4px 24px rgba(27, 39, 60, 0.07);
+  --sva-shadow-sm: 0 1px 3px rgba(27, 39, 60, 0.06);
+  --sva-link: #0069dc;
+  --sva-link-hover: #0053b0;
+  --sva-stock-up: #d94b48;
+  --sva-stock-down: #20854b;
+  --sva-stock-flat: #626c7e;
   --sva-on-accent: #ffffff;
-  --sva-gradient-a: rgba(0, 122, 255, 0.05);
-  --sva-gradient-b: rgba(90, 200, 250, 0.04);
   --sva-seg-active-bg: #ffffff;
-  --sva-seg-active-text: rgba(0, 0, 0, 0.88);
-  --sva-seg-hover-text: rgba(0, 0, 0, 0.88);
-  --sva-row-hover: rgba(0, 0, 0, 0.04);
-  --sva-subind-bg: rgba(255, 255, 255, 0.96);
-  --sva-subind-hover-bg: rgba(242, 242, 247, 0.98);
+  --sva-seg-active-text: #1d2027;
+  --sva-seg-hover-text: #1d2027;
+  --sva-row-hover: #f5f7fa;
+  --sva-subind-bg: #ffffff;
+  --sva-subind-hover-bg: #f0f2f5;
   --sva-subind-option-bg: #ffffff;
-  --sva-subind-option-text: rgba(0, 0, 0, 0.88);
-  --sva-subind-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --sva-warning-border: rgba(255, 149, 0, 0.35);
-  --sva-warning-bg: rgba(255, 149, 0, 0.1);
-  --sva-accent-border: rgba(0, 122, 255, 0.28);
-  --sva-source-bg: rgba(120, 120, 128, 0.08);
-  --sva-chart-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 6px 16px rgba(0, 0, 0, 0.04);
-  --sva-stale: #ff9500;
+  --sva-subind-option-text: #1d2027;
+  --sva-subind-shadow: 0 1px 3px rgba(27, 39, 60, 0.06);
+  --sva-warning-border: #eed9ae;
+  --sva-warning-bg: #fff9ec;
+  --sva-accent-border: #bfd6fb;
+  --sva-source-bg: #f7f8fa;
+  --sva-chart-shadow: none;
+  --sva-stale: #9a680e;
 }
 
 html {
@@ -159,22 +160,13 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--sva-font);
-  background:
-    radial-gradient(1200px 600px at 12% -8%, var(--sva-gradient-a), transparent 55%),
-    radial-gradient(900px 500px at 88% 0%, var(--sva-gradient-b), transparent 50%),
-    var(--sva-bg);
+  background: var(--sva-bg);
   color: var(--sva-text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   transition: background 0.25s ease, color 0.2s ease;
 }
 
-[data-theme="light"] body {
-  background:
-    radial-gradient(900px 420px at 8% -12%, var(--sva-gradient-a), transparent 58%),
-    radial-gradient(700px 360px at 92% -8%, var(--sva-gradient-b), transparent 55%),
-    var(--sva-bg);
-}
 
 a {
   color: var(--sva-link);
@@ -1629,3 +1621,7 @@ a:hover {
     margin-left: 0;
   }
 }
+
+/* Research entry is styled before its lazy route is loaded. */
+.sva-research-link { font-size: 13px; white-space: nowrap; padding: 6px 10px; border-radius: 8px; color: var(--sva-link); }
+.sva-research-link:hover { background: var(--sva-accent-soft); }

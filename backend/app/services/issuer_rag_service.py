@@ -16,6 +16,7 @@ import httpx
 
 from app.config import settings
 from app.services.issuer_document_extract import extract_text_for_issuer
+from app.services.llm_client import _llm_attempt, _response_usage
 from app.storage.llm_runtime import load_runtime
 
 CHUNK_SIZE = 800
@@ -196,33 +197,37 @@ def _embed_batch(texts: list[str]) -> tuple[list[list[float]] | None, str | None
             with httpx.Client(timeout=120.0) as c:
                 r = None
                 for idx, url in enumerate(urls):
-                    r = c.post(
-                        url,
-                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                        json={"model": model, "input": texts},
-                    )
-                    if r.status_code < 400:
-                        break
-                    try:
-                        body = r.json()
-                        err = body.get("error", body)
-                        msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                    except Exception:
-                        msg = (r.text or "")[:500]
-                    err_s = f"Embeddings HTTP {r.status_code}: {msg}"
-                    if r.status_code == 404 and idx + 1 < len(urls):
-                        continue
-                    return None, err_s
+                    with _llm_attempt("embedding", api_base=url, model=model) as event:
+                        r = c.post(
+                            url,
+                            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                            json={"model": model, "input": texts},
+                        )
+                        if r.status_code < 400:
+                            data = r.json()
+                            event["usage"] = _response_usage(data)
+                            arr = data.get("data") or []
+                            arr.sort(key=lambda x: int(x.get("index", 0)))
+                            out = [x["embedding"] for x in arr if isinstance(x.get("embedding"), list)]
+                            if len(out) != len(texts):
+                                event["error_code"] = "invalid_response"
+                                return None, "Embeddings 返回向量条数与请求不一致"
+                            event.update(status="success", error_code=None)
+                            return out, None
+                        event["error_code"] = f"http_{r.status_code}"
+                        try:
+                            body = r.json()
+                            event["usage"] = _response_usage(body)
+                            err = body.get("error", body)
+                            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                        except Exception:
+                            msg = (r.text or "")[:500]
+                        err_s = f"Embeddings HTTP {r.status_code}: {msg}"
+                        if r.status_code == 404 and idx + 1 < len(urls):
+                            continue
+                        return None, err_s
                 else:
                     return None, _embed_error_user_hint(last_msg)
-                assert r is not None
-                data = r.json()
-                arr = data.get("data") or []
-                arr.sort(key=lambda x: int(x.get("index", 0)))
-                out = [x["embedding"] for x in arr if isinstance(x.get("embedding"), list)]
-                if len(out) != len(texts):
-                    return None, "Embeddings 返回向量条数与请求不一致"
-                return out, None
         except httpx.HTTPError as e:
             return None, f"Embeddings 网络错误: {e!s}"
         except Exception as e:  # noqa: BLE001

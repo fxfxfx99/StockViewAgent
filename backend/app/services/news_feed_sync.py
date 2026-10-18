@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from app.schemas.news import normalize_news
+from app.security.user_context import current_user_id
 from app.services import china_tech_media_feeds, cn_market_news, news_watchlist_matcher, rss_fetcher
 from app.services.news_dedup import deduplicate_news
 from app.storage import news_store, watchlist_store
@@ -34,11 +35,26 @@ async def sync_all_sources_to_archive(
             "archive": news_store.stats(),
         }
 
-    rss_items = await rss_fetcher.fetch_news_for_symbols(sym_list)
-    cn_pack = await cn_market_news.fetch_cn_headlines(limit=120, major_first=True)
+    from app.services.runtime_telemetry import record_collection
+    uid = current_user_id.get() or 0
+    counts = {}
+    media_counts = {}
+    received = 0
+    try:
+        rss_items = await rss_fetcher.fetch_news_for_symbols(sym_list, collection_stats=counts)
+        received += counts.get("records_received", len(rss_items))
+        cn_pack = await cn_market_news.fetch_cn_headlines(limit=120, major_first=True, record_activity=False)
+        received += cn_pack.get("records_received", len(cn_pack.get("items") or []))
+        tech_pack = await china_tech_media_feeds.fetch_tech_media_feeds(limit=100, per_feed=50, record_activity=False, collection_stats=media_counts)
+        received += tech_pack.get("records_received", 0)
+    except Exception:
+        received += media_counts.get("records_received", 0)
+        record_collection("news_archive", "public_news", records_received=received, status="failed", error_code="source_unavailable", user_id=uid)
+        raise
     cn_items = cn_pack.get("items") or []
-    tech_pack = await china_tech_media_feeds.fetch_tech_media_feeds(limit=100, per_feed=50)
-    tech_items = tech_pack.get("items") or []
+    # The display payload includes old media cache entries; archive only rows
+    # explicitly identified by the collector as coming from this network call.
+    tech_items = tech_pack.get("network_items") or []
 
     cutoff = time.time() - lookback_days * 86400 if lookback_days is not None else None
     normalized: list[dict[str, Any]] = []
@@ -65,7 +81,13 @@ async def sync_all_sources_to_archive(
         row["matched_symbols"] = sorted(evidence)
         row["match_evidence"] = evidence
         enriched.append(row)
-    n = news_store.upsert_many(enriched)
+    saved = {}
+    try:
+        n = news_store.upsert_many(enriched, collection_stats=saved)
+    except Exception:
+        record_collection("news_archive", "public_news", records_received=received, status="failed", error_code="storage_failed", user_id=uid)
+        raise
+    record_collection("news_archive", "public_news", records_received=received, user_id=uid, **saved)
     st = news_store.stats()
     return {
         "upserted": n,

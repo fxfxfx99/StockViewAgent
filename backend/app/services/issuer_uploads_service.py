@@ -1,6 +1,6 @@
 """
 本地上传：上市公司基本信息、财务信息、管理层讨论与分析、知识库。
-目录：项目根 issuer_uploads/（与 kline_learning 并列）
+目录：数据根目录下 issuer_uploads/（与 kline_learning 并列）
 """
 from __future__ import annotations
 

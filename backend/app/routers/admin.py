@@ -56,7 +56,7 @@ class CompanyUniverseRefreshBody(BaseModel):
 
 
 class FundamentalsImportBody(BaseModel):
-    """导入根目录三份 2025 CSV；force=false 时相同源文件会跳过。"""
+    """导入数据目录 imports/company_fundamentals 内三份 2025 CSV；force=false 时相同源文件会跳过。"""
 
     force: bool = False
 
@@ -138,7 +138,7 @@ def admin_data_assets(_: Annotated[UserRecord, Depends(require_admin)]):
 
 @router.post("/data-assets/refresh")
 def admin_refresh_data_assets(_: Annotated[UserRecord, Depends(require_admin)]):
-    """重新扫描 backend/data 并刷新 backend/data/_managed/catalog.json。"""
+    """重新扫描当前数据目录并刷新 _managed/catalog.json。"""
     return data_asset_manager.refresh_catalog_from_disk()
 
 
@@ -153,7 +153,7 @@ async def admin_import_company_fundamentals_2025(
     _: Annotated[UserRecord, Depends(require_admin)],
     body: FundamentalsImportBody | None = None,
 ):
-    """导入项目根目录的财务指标/管理层讨论/上市公司基本信息 2025 CSV。"""
+    """导入数据目录 imports/company_fundamentals 内的财务指标/管理层讨论/上市公司基本信息 2025 CSV。"""
     b = body or FundamentalsImportBody()
     return await asyncio.to_thread(
         company_fundamentals_store.import_local_2025_files,

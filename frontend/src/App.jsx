@@ -3,15 +3,15 @@ import { useAuth } from "./AuthContext.jsx";
 import dayjs from "dayjs";
 import {
   Layout,
-  Typography,
   Card,
-  Space,
   Alert,
   App as AntApp,
   Spin,
   DatePicker,
   Button,
+  Tabs,
 } from "antd";
+import { DownloadOutlined, MenuUnfoldOutlined, ReloadOutlined } from "@ant-design/icons";
 import * as api from "./api";
 import { qk, watchlistProfileKey } from "./hooks/queryKeys.js";
 import { useAppUrlState } from "./hooks/useAppUrlState.js";
@@ -19,12 +19,11 @@ import { useWatchlistServerState } from "./hooks/useWatchlistServerState.js";
 import * as LazyPanels from "./lazyPanels.jsx";
 import WatchlistProfilePanel from "./WatchlistProfilePanel.jsx";
 import WatchlistSidebar from "./WatchlistSidebar.jsx";
-import { ConfigConsoleButton, SetupOnboardingBanner } from "./ConfigConsole.jsx";
-import { useSetupStatus } from "./hooks/useSetupStatus.js";
-import ThemeModeToggle from "./ThemeModeToggle.jsx";
+import { ConfigConsoleButton } from "./ConfigConsole.jsx";
+import AppToolbar from "./AppToolbar.jsx";
+import "./MarketWorkspace.css";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
-const { Header, Content } = Layout;
-const { Text } = Typography;
+const { Content } = Layout;
 
 const SIDEBAR_KEY = "sva_watch_sider_collapsed";
 const KLINE_INTERVALS = [
@@ -94,6 +93,8 @@ export default function App() {
   const [stockIndexLoading, setStockIndexLoading] = useState(false);
   const [profilesRefreshing, setProfilesRefreshing] = useState(false);
   const [klineInterval, setKlineInterval] = useState("1d");
+  const [mobileWatchlistOpen, setMobileWatchlistOpen] = useState(false);
+  const [isCompact, setIsCompact] = useState(() => window.matchMedia("(max-width: 900px)").matches);
   const klineRef = useRef(null);
   const stockSearchTimer = useRef(null);
   const stockSearchVersion = useRef(0);
@@ -104,7 +105,6 @@ export default function App() {
       return false;
     }
   });
-  const { data: setupStatus } = useSetupStatus();
 
   const focusSymbol = chartSymbol ?? symbols[0] ?? "";
   const klineBusy = useIsFetching({ queryKey: qk.kline(focusSymbol, KLINE_RANGE, klineInterval) }) > 0;
@@ -112,6 +112,18 @@ export default function App() {
     () => securityLabel(focusSymbol, watchProfiles[focusSymbol]),
     [focusSymbol, watchProfiles]
   );
+  const focusName = watchProfiles[focusSymbol]?.name || focusSymbol || "选择一只股票";
+  const focusMarket = { SS: "沪市 A 股", SZ: "深市 A 股", BJ: "北交所 A 股" }[focusSymbol.split(".")[1]] || "A 股";
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const update = () => {
+      setIsCompact(media.matches);
+      if (!media.matches) setMobileWatchlistOpen(false);
+    };
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const setCollapsed = useCallback((v) => {
     setSiderCollapsed(v);
@@ -243,6 +255,7 @@ export default function App() {
           fetchStockOptions("");
         }
         setChartSymbol(sym);
+        setMobileWatchlistOpen(false);
       };
       if (!symbols.includes(sym)) {
         await persistSymbols(
@@ -320,33 +333,101 @@ export default function App() {
     }
   };
 
-  return (
-    <Layout className="sva-layout">
-      <Header className="sva-header">
-        <span className="sva-brand">StockViewAgent</span>
-        <Space size={4} className="sva-header-actions">
-          <ThemeModeToggle />
-          <ConfigConsoleButton isAdmin={user?.role === "admin"} />
-          {authRequired ? (
-            <>
-              <Text className="sva-header-user" title={user?.username}>{user?.display_name || user?.username}</Text>
-              <Button type="text" size="small" onClick={logout}>退出</Button>
-            </>
-          ) : null}
-        </Space>
-      </Header>
+  const panels = [
+    {
+      key: "decision",
+      label: "决策分析",
+      children: <>
+        <div className="market-analysis-context">
+          <span>多策略观点与研究依据</span>
+          <label className="market-analysis-date">
+            <span>分析日期</span>
+            <DatePicker
+              size="small"
+              variant="borderless"
+              value={asOf ? dayjs(asOf) : null}
+              onChange={(d) => setAsOf(d ? d.format("YYYY-MM-DD") : null)}
+              allowClear
+              placeholder="最新"
+              aria-label="决策分析日期"
+              disabledDate={(current) => current && current > dayjs().endOf("day")}
+            />
+          </label>
+        </div>
+        <PanelSuspense>
+          <LazyPanels.TransactionAgentPanelLazy
+            key={`${focusSymbol}:${asOf || ""}`}
+            symbol={focusSymbol}
+            displayName={focusSecurityLabel}
+            asOf={asOf}
+          />
+        </PanelSuspense>
+      </>,
+    },
+    {
+      key: "news",
+      label: "关联新闻",
+      children: <PanelSuspense>
+        <LazyPanels.NewsInterpretationPanelLazy key={focusSymbol} symbol={focusSymbol} displayName={focusSecurityLabel} />
+      </PanelSuspense>,
+    },
+    {
+      key: "discussion",
+      label: "市场讨论",
+      children: <PanelSuspense>
+        <LazyPanels.XueqiuCommentsPanelLazy key={`${user?.id}:${focusSymbol}`} symbol={focusSymbol} displayName={focusSecurityLabel} />
+      </PanelSuspense>,
+    },
+    {
+      key: "company",
+      label: "公司资料",
+      children: <Card
+        size="small"
+        title="公司信息"
+        variant="borderless"
+        className="ex-section-card sva-panel"
+        extra={<Button type="text" size="small" icon={<ReloadOutlined />}
+          loading={profilesRefreshing || profilesLoading}
+          onClick={() => void refreshWatchProfilesAll()}>刷新</Button>}
+      >
+        <WatchlistProfilePanel
+          key={focusSymbol}
+          symbols={symbols}
+          profiles={watchProfiles}
+          loading={profilesLoading}
+          refreshing={profilesRefreshing}
+          onRefreshAll={refreshWatchProfilesAll}
+          onProfilesUpdate={setWatchProfiles}
+          singleSymbol={focusSymbol}
+          embedded
+        />
+      </Card>,
+    },
+  ];
 
-      <SetupOnboardingBanner setupStatus={setupStatus} />
+  return (
+    <Layout className="sva-layout market-page">
+      <AppToolbar
+        active="market"
+        settingsAction={<ConfigConsoleButton isAdmin={user?.role === "admin"} />}
+        user={user}
+        authRequired={authRequired}
+        onLogout={logout}
+        leadingAction={isCompact ? <Button type="text" icon={<MenuUnfoldOutlined />}
+          aria-label="打开自选股" aria-expanded={mobileWatchlistOpen}
+          onClick={() => setMobileWatchlistOpen(true)} /> : null}
+      />
 
       {bootLoading ? (
-        <div className="sva-boot">
-          <Spin size="large" />
-        </div>
+        <div className="sva-boot"><Spin size="large" aria-label="加载工作区" /></div>
       ) : (
-        <div className="sva-shell">
+        <div className={`market-shell${siderCollapsed ? " is-sidebar-collapsed" : ""}`}>
           <WatchlistSidebar
             collapsed={siderCollapsed}
             onCollapsedChange={setCollapsed}
+            mobile={isCompact}
+            mobileOpen={mobileWatchlistOpen}
+            onMobileClose={() => setMobileWatchlistOpen(false)}
             symbols={symbols}
             watchProfiles={watchProfiles}
             priceContext={priceContext}
@@ -360,7 +441,7 @@ export default function App() {
             stockOptions={stockOptions}
             fetchStockOptions={fetchStockOptions}
             selectedSymbol={focusSymbol}
-            onSelectSymbol={(sym) => setChartSymbol(sym)}
+            onSelectSymbol={(sym) => { setChartSymbol(sym); setMobileWatchlistOpen(false); }}
             onAddFromSearch={addFromSearch}
             onRemoveSymbol={removeSymbol}
             onRefreshQuotes={() => invalidatePriceContext()}
@@ -368,163 +449,53 @@ export default function App() {
             reloadWatchlist={refetchWatchlist}
           />
 
-          <Content className="ex-app-content sva-main">
-            {authError ? (
-              <Alert
-                type="error"
-                showIcon
-                message={authError}
-                action={<Button size="small" onClick={() => void refreshMe()}>重新连接</Button>}
-                className="sva-alert"
-              />
-            ) : null}
-            {error || watchlistError ? (
-              <Alert
-                type="error"
-                message={error || watchlistError}
-                closable
-                onClose={() => setError("")}
-                className="sva-alert"
-              />
-            ) : null}
+          <Content className="market-main">
+            {authError ? <Alert type="error" showIcon message={authError}
+              action={<Button size="small" onClick={() => void refreshMe()}>重新连接</Button>}
+              className="market-alert" /> : null}
+            {error || watchlistError ? <Alert type="error" showIcon message={error || watchlistError}
+              closable onClose={() => setError("")} className="market-alert" /> : null}
 
-            <div className="sva-toolbar">
-              <div className="sva-toolbar__left">
-                <span className="sva-toolbar__sym">
-                  {focusSymbol ? focusSecurityLabel : "—"}
-                </span>
-              </div>
-              <div className="sva-toolbar__right">
-                <label className="sva-field">
-                  <span className="sva-field__label">节点</span>
-                  <DatePicker
-                    size="small"
-                    variant="borderless"
-                    value={asOf ? dayjs(asOf) : null}
-                    onChange={(d) => setAsOf(d ? d.format("YYYY-MM-DD") : null)}
-                    allowClear
-                    placeholder="最新"
-                    disabledDate={(current) => current && current > dayjs().endOf("day")}
-                    className="sva-datepicker"
-                  />
-                </label>
-
-                <div className="sva-seg" role="group" aria-label="K线周期">
-                  {KLINE_INTERVALS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`sva-seg__item${klineInterval === opt.value ? " is-active" : ""}`}
-                      onClick={() => setKlineInterval(opt.value)}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+            <div className="market-workspace">
+              <div className="market-security-toolbar">
+                <div className="market-security-heading">
+                  <h1 title={focusName}>{focusName}</h1>
+                  <p>{focusSymbol ? <><span>{focusSymbol}</span><span aria-hidden="true"> · </span>{focusMarket}</> : "从自选股开始查看行情与研究"}</p>
                 </div>
-
-                <button
-                  type="button"
-                  className="sva-pill"
-                  disabled={!focusSymbol || klineBusy}
-                  onClick={() => klineRef.current?.refresh?.()}
-                >
-                  查询
-                </button>
-                <button
-                  type="button"
-                  className="sva-pill sva-pill--quiet"
-                  disabled={!focusSymbol}
-                  onClick={() => klineRef.current?.download?.()}
-                >
-                  下载 CSV
-                </button>
+                <div className="market-chart-actions">
+                  <div className="market-periods" role="group" aria-label="K线周期">
+                    {KLINE_INTERVALS.map((opt) => <button key={opt.value} type="button"
+                      aria-pressed={klineInterval === opt.value}
+                      className={klineInterval === opt.value ? "is-active" : ""}
+                      onClick={() => setKlineInterval(opt.value)}>{opt.label}</button>)}
+                  </div>
+                  <Button type="text" icon={<ReloadOutlined />} loading={klineBusy}
+                    disabled={!focusSymbol} onClick={() => klineRef.current?.refresh?.()}>刷新</Button>
+                  <Button type="text" icon={<DownloadOutlined />} disabled={!focusSymbol}
+                    onClick={() => klineRef.current?.download?.()} aria-label="导出 K 线 CSV">导出</Button>
+                </div>
               </div>
-            </div>
 
-            <Space direction="vertical" size={10} style={{ width: "100%" }}>
-              <div className="sva-chart-block">
-                {focusSymbol ? (
+              {focusSymbol ? <>
+                <section className="market-chart-section" aria-label={`${focusSecurityLabel}行情`}>
                   <PanelSuspense>
                     <LazyPanels.StockKlinePanelLazy
-                      ref={klineRef}
-                      symbol={focusSymbol}
-                      embedded
-                      hideChrome
-                      chartHeight={456}
-                      displayName={focusSecurityLabel}
-                      range={KLINE_RANGE}
-                      interval={klineInterval}
+                      ref={klineRef} symbol={focusSymbol} embedded hideChrome
+                      chartHeight={isCompact ? 380 : 420}
+                      displayName={focusSecurityLabel} range={KLINE_RANGE} interval={klineInterval}
                     />
                   </PanelSuspense>
-                ) : (
-                  <Text type="secondary">从左侧选择股票</Text>
-                )}
-              </div>
-
-              {focusSymbol ? (
-                <PanelSuspense>
-                  <LazyPanels.TransactionAgentPanelLazy
-                    key={`${focusSymbol}:${asOf || ""}`}
-                    symbol={focusSymbol}
-                    displayName={focusSecurityLabel}
-                    asOf={asOf}
-                  />
-                </PanelSuspense>
-              ) : null}
-
-              {focusSymbol ? (
-                <PanelSuspense>
-                  <LazyPanels.NewsInterpretationPanelLazy
-                    key={focusSymbol}
-                    symbol={focusSymbol}
-                    displayName={focusSecurityLabel}
-                  />
-                </PanelSuspense>
-              ) : null}
-
-              {focusSymbol ? (
-                <PanelSuspense>
-                  <LazyPanels.XueqiuCommentsPanelLazy
-                    key={`${user?.id}:${focusSymbol}`}
-                    symbol={focusSymbol}
-                    displayName={focusSecurityLabel}
-                  />
-                </PanelSuspense>
-              ) : null}
-
-              {focusSymbol ? (
-                <Card
-                  size="small"
-                  title="公司信息"
-                  variant="borderless"
-                  className="ex-section-card sva-panel"
-                  extra={
-                    <button
-                      type="button"
-                      className="sva-pill sva-pill--quiet"
-                      disabled={profilesRefreshing || profilesLoading}
-                      onClick={() => void refreshWatchProfilesAll()}
-                    >
-                      刷新
-                    </button>
-                  }
-                >
-                  <WatchlistProfilePanel
-                    key={focusSymbol}
-                    symbols={symbols}
-                    profiles={watchProfiles}
-                    loading={profilesLoading}
-                    refreshing={profilesRefreshing}
-                    onRefreshAll={refreshWatchProfilesAll}
-                    onProfilesUpdate={setWatchProfiles}
-                    singleSymbol={focusSymbol}
-                    embedded
-                  />
-                </Card>
-              ) : null}
-
-              <p className="sva-footnote">仅供研究参考，不构成投资建议。</p>
-            </Space>
+                </section>
+                <Tabs key={user?.id || "guest"} className="market-analysis-tabs" defaultActiveKey="decision"
+                  destroyOnHidden={false} items={panels} aria-label="个股研究内容" />
+              </> : <div className="market-empty-workspace">
+                <MenuUnfoldOutlined aria-hidden="true" />
+                <h2>从一只股票开始</h2>
+                <p>搜索股票名称或代码，加入自选后查看行情、新闻与研究观点。</p>
+                {isCompact ? <Button type="primary" onClick={() => setMobileWatchlistOpen(true)}>添加自选股</Button> : null}
+              </div>}
+            </div>
+            <p className="market-footnote">本地研究 · 持续积累</p>
           </Content>
         </div>
       )}

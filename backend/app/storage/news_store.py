@@ -1,6 +1,7 @@
 """Deduplicated news events and independently gated per-stock interpretations."""
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -125,7 +126,37 @@ def _resolve_id(conn: sqlite3.Connection, aid: str) -> str:
     return aid
 
 
+def _content_snapshot(item: dict) -> dict:
+    """Stable source content, excluding fetch counters and generated analysis."""
+    fields = ("title", "summary", "content", "source", "symbol_hint")
+    snapshot = {key: item.get(key) or "" for key in fields}
+    snapshot.update(url=item.get("url") or item.get("link") or "",
+                    published_ts=item.get("published_ts"), published=item.get("published") or "",
+                    related_codes=sorted(set(item.get("related_codes") or [])))
+    sources = []
+    for source in item.get("source_articles") or []:
+        row = {key: source.get(key) or "" for key in fields}
+        row.update(url=source.get("url") or source.get("link") or "",
+                   published_ts=source.get("published_ts"),
+                   related_codes=sorted(set(source.get("related_codes") or [])))
+        sources.append(row)
+    snapshot["source_articles"] = sorted(sources, key=lambda x: json.dumps(x, sort_keys=True))
+    return snapshot
+
+
+def _record_content_revision(conn: sqlite3.Connection, item: dict, aid: str, *, origin: str) -> None:
+    snapshot = _content_snapshot(item)
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(encoded.encode()).hexdigest()
+    observed = (item.get("fetched_at") if origin == "archive_write" else item.get("content_observed_at")) or item.get("fetched_at") or item.get("saved_at") or time.time()
+    conn.execute("""INSERT OR IGNORE INTO article_content_revisions
+      (article_id,content_hash,snapshot_json,published_ts,first_observed_at,recorded_at,origin)
+      VALUES(?,?,?,?,?,?,?)""", (aid, digest, encoded, item.get("published_ts"), observed, time.time(), origin))
+
+
 def _write_article(conn: sqlite3.Connection, item: dict, aid: str, symbols: list[str], existing: dict | None = None) -> dict:
+    if existing:
+        _record_content_revision(conn, existing, aid, origin="before_update")
     evidence = news_watchlist_matcher.article_match_evidence(item, symbols)
     fetched = item.get("fetched_at") or time.time()
     observed = (existing or {}).get("content_observed_at") or fetched
@@ -146,7 +177,9 @@ def _write_article(conn: sqlite3.Connection, item: dict, aid: str, symbols: list
           item["id"], fetched, observed, json.dumps(item.get("related_codes") or []),
           json.dumps(item.get("source_articles") or [], ensure_ascii=False), json.dumps(evidence, ensure_ascii=False)))
     _save_aliases(conn, item, aid)
-    return _row_data(conn.execute("SELECT * FROM articles WHERE id=?", [aid]).fetchone())
+    saved = _row_data(conn.execute("SELECT * FROM articles WHERE id=?", [aid]).fetchone())
+    _record_content_revision(conn, saved, aid, origin="archive_write")
+    return saved
 
 
 def _copy_analysis(conn: sqlite3.Connection, old_id: str, aid: str) -> None:
@@ -287,6 +320,17 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, article_id TEXT NOT NULL, stock_code TEXT NOT NULL,
             status TEXT NOT NULL, relevance_score INTEGER, impact_strength INTEGER, sentiment TEXT,
             analysis_json TEXT NOT NULL, analyzed_at REAL NOT NULL, reason TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS article_content_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, article_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL, snapshot_json TEXT NOT NULL, published_ts REAL,
+            first_observed_at REAL NOT NULL, recorded_at REAL NOT NULL, origin TEXT NOT NULL,
+            UNIQUE(article_id,content_hash));
+          CREATE INDEX IF NOT EXISTS idx_news_revision_observed
+            ON article_content_revisions(article_id,first_observed_at,id);
+          CREATE TRIGGER IF NOT EXISTS news_revision_no_update BEFORE UPDATE ON article_content_revisions
+            BEGIN SELECT RAISE(ABORT,'News content revisions are immutable'); END;
+          CREATE TRIGGER IF NOT EXISTS news_revision_no_delete BEFORE DELETE ON article_content_revisions
+            BEGIN SELECT RAISE(ABORT,'News content revisions are immutable'); END;
         """)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(articles)")}
         for name, kind in (("matched_symbols", "TEXT"), ("content", "TEXT"), ("identity_key", "TEXT"),
@@ -297,6 +341,12 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_articles_identity ON articles(identity_key)")
         conn.execute("UPDATE articles SET fetched_at=saved_at WHERE fetched_at IS NULL")
         conn.execute("UPDATE articles SET content_observed_at=fetched_at WHERE content_observed_at IS NULL")
+        if not conn.execute("SELECT 1 FROM news_schema_meta WHERE key='content_revisions_v1'").fetchone():
+            # Snapshot the rows BEFORE legacy reconciliation can merge/overwrite
+            # them. Earlier already-overwritten versions cannot be reconstructed.
+            for row in conn.execute("SELECT * FROM articles").fetchall():
+                _record_content_revision(conn, _row_data(row), row["id"], origin="legacy_backfill")
+            conn.execute("INSERT INTO news_schema_meta VALUES('content_revisions_v1','1')")
         if not conn.execute("SELECT 1 FROM news_schema_meta WHERE key='matching_events_v3'").fetchone():
             _reconcile(conn)
             conn.execute("INSERT INTO news_schema_meta VALUES('matching_events_v3','1')")
@@ -311,6 +361,23 @@ def init_db() -> None:
                     [json.dumps(sorted(evidence)), json.dumps(evidence, ensure_ascii=False), row["id"]],
                 )
             conn.execute("INSERT INTO news_schema_meta VALUES('match_evidence_backfill_v1','1')")
+
+
+def list_content_revisions(article_id: str, *, observed_before: float | None = None,
+                           limit: int = 100) -> list[dict]:
+    """Local observation history, not a certification of historical availability.
+
+    Original duplicate IDs remain queryable; callers can separately query the
+    canonical article. Generated interpretations retain their existing history.
+    """
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute("""SELECT * FROM article_content_revisions WHERE article_id=?
+          AND (? IS NULL OR first_observed_at<=?) ORDER BY first_observed_at DESC,id DESC LIMIT ?""",
+          (article_id, observed_before, observed_before, max(1, min(int(limit), 10000)))).fetchall()
+    return [{**dict(row), "snapshot": json.loads(row["snapshot_json"]),
+             "published_at": utc_iso(row["published_ts"]), "usage": "explanation_and_revision_audit",
+             "historical_availability_verified": False} for row in rows]
 
 
 def _find_existing(conn: sqlite3.Connection, item: dict) -> dict | None:
@@ -337,14 +404,23 @@ def _find_existing(conn: sqlite3.Connection, item: dict) -> dict | None:
     return None
 
 
-def upsert_many(items: list[dict[str, Any]]) -> int:
+def upsert_many(items: list[dict[str, Any]], *, collection_stats: dict | None = None) -> int:
+    """Keep the legacy processed count; optionally report committed content changes.
+
+    The store itself does not emit acquisition events: imports and cache copies
+    use this same API and are not evidence of a network fetch.
+    """
+    if collection_stats is not None:
+        collection_stats.update(records_added=0, bytes_stored=0)
     if not items:
         return 0
     init_db()
     with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         extra = [str(s) for item in items for s in item.get("matched_symbols", []) if isinstance(s, str)]
         symbols = _known_symbols(conn, extra)
         count = 0
+        changed_ids = set()
         for item in items:
             incoming = normalize_news(item)
             if not incoming:
@@ -352,12 +428,17 @@ def upsert_many(items: list[dict[str, Any]]) -> int:
             existing = _find_existing(conn, incoming)
             aid = existing["id"] if existing else incoming["id"]
             merged = news_dedup.merge_news(existing, incoming) if existing else incoming
+            if existing is None or _content_snapshot(existing) != _content_snapshot(merged):
+                changed_ids.add(aid)
             merged["fetched_at"] = max((existing or {}).get("fetched_at") or 0, incoming["fetched_at"])
             _write_article(conn, merged, aid, symbols, existing)
             _save_aliases(conn, incoming, aid)
             item["id"] = aid
             count += 1
-        return count
+    # Publish only after SQLite commits; rolled-back writes cannot increase it.
+    if collection_stats is not None:
+        collection_stats["records_added"] = len(changed_ids)
+    return count
 
 
 def save_analysis(article_id: str, analysis: dict[str, Any]) -> None:

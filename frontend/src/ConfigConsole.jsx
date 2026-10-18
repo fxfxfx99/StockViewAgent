@@ -2,24 +2,30 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
-  Descriptions,
+  Collapse,
   Drawer,
   Form,
   Input,
-  Radio,
+  Select,
   Space,
   Spin,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
   App as AntApp,
 } from "antd";
 import { ReloadOutlined, SettingOutlined } from "@ant-design/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import * as api from "./api.js";
 import { useAuth } from "./AuthContext.jsx";
+import { autopilotPresentation, autopilotQueryKey, inferLlmProvider, normalizeLlmProviders, llmPatchFromForm } from "./autopilotViewModel.js";
+import LocalDataDirectory from "./LocalDataDirectory.jsx";
+import SettingsRuntimePanel from "./SettingsRuntimePanel.jsx";
+import AppToolbar from "./AppToolbar.jsx";
+import "./ConfigConsole.css";
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -38,62 +44,90 @@ const MARKET_OPTIONS = [
   },
   {
     value: "public",
-    label: "仅公开源",
-    hint: "东财/腾讯/百度等，无需 Key；稳定性依赖公开接口",
+    label: "公开行情",
+    hint: "使用东财、腾讯、百度等公开行情接口",
     doc: null,
   },
 ];
 
 export function SetupOnboardingBanner({ setupStatus }) {
-  if (!setupStatus || setupStatus.ready) return null;
+  if (!setupStatus || setupStatus.llm_configured || setupStatus.ready) return null;
   return (
     <Alert
       type="warning"
       showIcon
       banner
       className="sva-setup-banner"
-      message={setupStatus.onboarding_title || "请先完成配置"}
-      description={<Text>{setupStatus.onboarding_message}</Text>}
+      message="配置大模型后即可自动运行"
+      description={<Text>选择供应商并填写 API Key，行情默认使用公开来源。</Text>}
       action={
         <Link to="/setup">
-          <Button type="primary" size="small">打开配置台</Button>
+          <Button type="primary" size="small">打开设置</Button>
         </Link>
       }
     />
   );
 }
 
-export default function ConfigConsole({ open, onClose, isAdmin = false }) {
+export default function ConfigConsole({ open, onClose, isAdmin = false, embedded = false }) {
+  const { user } = useAuth();
+  return <ConfigConsoleContent key={user?.id ?? "local"} open={open} onClose={onClose} isAdmin={isAdmin} userId={user?.id} embedded={embedded} />;
+}
+
+function ConfigSurface({ embedded, children, ...drawerProps }) {
+  return embedded
+    ? <section className="sva-config-console sva-config-embedded" aria-label="设置">{children}</section>
+    : <Drawer {...drawerProps}>{children}</Drawer>;
+}
+
+function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
   const { message } = AntApp.useApp();
   const qc = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [integrations, setIntegrations] = useState(null);
+  const [providers, setProviders] = useState(() => normalizeLlmProviders([]));
+  const [presetsUnavailable, setPresetsUnavailable] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [testingKlineshare, setTestingKlineshare] = useState(false);
   const [testingTushare, setTestingTushare] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveMode, setSaveMode] = useState(null);
+  const [activation, setActivation] = useState(null);
+  const [tab, setTab] = useState("config");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [form] = Form.useForm();
+  const advancedActive = open && tab === "config" && isAdmin && advancedOpen;
   const centerQuery = useQuery({
-    queryKey: ["settings", "data-center"],
+    queryKey: ["settings", "data-center", userId],
     queryFn: api.getDataCenter,
-    enabled: open && isAdmin,
+    enabled: advancedActive,
     // 仅轮询后台任务状态，避免重载配置表单覆盖尚未保存的输入。
-    refetchInterval: (query) => query.state.data?.refresh_running ? 2_000 : false,
+    refetchInterval: (query) => advancedActive && query.state.data?.refresh_running ? 2_000 : false,
   });
   const center = centerQuery.data;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal) => {
     setLoading(true);
+    setActivation(null);
     try {
-      const ig = await api.getSettingsIntegrations();
+      const [integrationsResult, presetsResult] = await Promise.allSettled([
+        api.getSettingsIntegrations({ signal }), api.getLlmProviderPresets({ signal }),
+      ]);
+      if (signal.aborted) return;
+      if (integrationsResult.status === "rejected") throw integrationsResult.reason;
+      const ig = integrationsResult.value;
+      const options = normalizeLlmProviders(presetsResult.status === "fulfilled" ? presetsResult.value.providers : []);
+      setProviders(options);
+      setPresetsUnavailable(presetsResult.status === "rejected");
       setIntegrations(ig);
       const llm = ig?.llm || {};
       const market = ig?.market_data || {};
       form.setFieldsValue({
+        llm_provider: inferLlmProvider(llm, options),
         llm_api_key: "",
         llm_api_base: llm.api_base || "",
         llm_model: llm.model || "",
-        market_data_provider: market.provider === "unset" ? undefined : market.provider,
+        market_data_provider: !market.provider || market.provider === "unset" ? "public" : market.provider,
         klineshare_api_key: "",
         tushare_token: "",
         xueqiu_cookies: "",
@@ -102,14 +136,17 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
         adata_proxy_url: "",
       });
     } catch (e) {
-      message.error(api.getApiErrorMessage(e));
+      if (!signal.aborted) message.error(api.getApiErrorMessage(e));
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [form, message]);
 
   useEffect(() => {
-    if (open) void load();
+    if (!open) return;
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [open, load]);
 
   const refreshDataCenter = async () => {
@@ -117,7 +154,7 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
     try {
       const state = await api.refreshDataCenter();
       message.success("已触发后台数据更新");
-      qc.setQueryData(["settings", "data-center"], (prev) => ({
+      qc.setQueryData(["settings", "data-center", userId], (prev) => ({
         ...prev,
         refresh_running: true,
         last_startup_refresh: state,
@@ -154,29 +191,31 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
     }
   };
 
-  const save = async () => {
+  const save = async (startAutomatically = true) => {
     setSaving(true);
+    setSaveMode(startAutomatically ? "activate" : "advanced");
+    setActivation(null);
+    let saved = false;
     try {
-      const v = await form.validateFields();
+      const advancedFields = ["market_data_provider", "klineshare_api_key", "tushare_token", "xueqiu_cookies", "adata_proxy_enabled", "adata_proxy_ip", "adata_proxy_url"];
+      await form.validateFields(startAutomatically ? undefined : advancedFields);
+      const v = form.getFieldsValue(true);
       const body = {};
       if (v.market_data_provider) body.market_data_provider = v.market_data_provider;
       if (v.klineshare_api_key?.trim()) body.klineshare_api_key = v.klineshare_api_key.trim();
       if (v.tushare_token?.trim()) body.tushare_token = v.tushare_token.trim();
       if (isAdmin) {
-        body.adata_proxy_enabled = v.adata_proxy_enabled;
+        if (typeof v.adata_proxy_enabled === "boolean") body.adata_proxy_enabled = v.adata_proxy_enabled;
         if (v.adata_proxy_ip?.trim()) body.adata_proxy_ip = v.adata_proxy_ip.trim();
         if (v.adata_proxy_url?.trim()) body.adata_proxy_url = v.adata_proxy_url.trim();
         if (v.xueqiu_cookies !== undefined && v.xueqiu_cookies !== "") {
           body.xueqiu_cookies = v.xueqiu_cookies;
         }
       }
-      const llmPatch = {};
-      if (v.llm_api_key?.trim()) llmPatch.api_key = v.llm_api_key.trim();
-      if (v.llm_api_base?.trim()) llmPatch.api_base = v.llm_api_base.trim();
-      if (v.llm_model?.trim()) llmPatch.model = v.llm_model.trim();
-      if (Object.keys(llmPatch).length) body.llm = llmPatch;
+      if (startAutomatically) body.llm = llmPatchFromForm(v, integrations?.llm, providers);
 
       const ig = await api.putSettingsIntegrations(body);
+      saved = true;
       setIntegrations(ig);
       form.setFieldsValue({
         llm_api_key: "",
@@ -186,7 +225,6 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
         adata_proxy_ip: "",
         adata_proxy_url: "",
       });
-      message.success("配置已保存");
       await qc.invalidateQueries({ queryKey: ["settings", "setup-status"] });
       for (const queryKey of [
         ["market"],
@@ -197,11 +235,25 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
       ]) {
         void qc.invalidateQueries({ queryKey });
       }
+      if (startAutomatically) {
+        await api.updateResearchConfig({ enabled: true, paused: false });
+        const status = await api.reconcileAutopilot();
+        qc.setQueryData(autopilotQueryKey(userId), status);
+        void qc.invalidateQueries({ queryKey: ["watchlist", userId] });
+        void qc.invalidateQueries({ queryKey: ["research", userId] });
+        const view = autopilotPresentation(status);
+        setActivation({ type: view.tone === "warning" || view.label === "需关注" ? "warning" : "success", message: `配置已保存 · ${view.label}`, description: view.description });
+      } else {
+        message.success("高级设置已保存");
+      }
     } catch (e) {
       if (e?.errorFields) return;
-      message.error(api.getApiErrorMessage(e));
+      const detail = e?.response || e?.code ? api.getApiErrorMessage(e) : e.message || "请检查配置后重试。";
+      if (saved && startAutomatically) setActivation({ type: "warning", message: "配置已保存，自动启动待重试", description: "再次点击开启按钮，或前往研究实验室查看状态。" });
+      else message.error(detail);
     } finally {
       setSaving(false);
+      setSaveMode(null);
     }
   };
 
@@ -212,6 +264,13 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
   const startup = center?.last_startup_refresh;
 
   const marketProvider = Form.useWatch("market_data_provider", form);
+  const llmProvider = Form.useWatch("llm_provider", form);
+
+  const changeProvider = (value) => {
+    const provider = providers.find((entry) => entry.value === value);
+    if (provider?.api_base) form.setFieldsValue({ llm_api_base: provider.api_base, llm_model: provider.model });
+    form.setFieldValue("llm_api_key", "");
+  };
 
   const marketDoc = useMemo(
     () => MARKET_OPTIONS.find((o) => o.value === marketProvider),
@@ -219,8 +278,9 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
   );
 
   return (
-    <Drawer
-      title="配置台"
+    <ConfigSurface
+      embedded={embedded}
+      title="设置"
       placement="right"
       width={560}
       open={open}
@@ -228,102 +288,89 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
       className="sva-config-console"
       destroyOnHidden
     >
-      <Spin spinning={loading}>
+      <Tabs
+        className="sva-settings-tabs"
+        activeKey={tab}
+        onChange={setTab}
+        destroyOnHidden={false}
+        items={[{
+          key: "config",
+          label: "连接与数据",
+          forceRender: true,
+          children: <Spin spinning={loading}>
         <Form form={form} layout="vertical" size="small">
-        <Space direction="vertical" size={16} style={{ width: "100%" }}>
-          <Alert
-            type="info"
-            showIcon
-            message="自托管首次使用"
-            description="请配置大模型 API（OpenAI 兼容）与行情信息接口。推荐 KlineShare；也可选 Tushare 或仅公开源。"
-          />
-
-          <section className="sva-admin-section">
-            <Title level={5} style={{ margin: 0 }}>大模型 API</Title>
-            <Descriptions size="small" column={1} style={{ marginTop: 8 }} bordered>
-              <Descriptions.Item label="状态">
-                {llm?.key_configured ? (
-                  <Tag color="green">已配置 ···{llm.key_suffix}</Tag>
-                ) : (
-                  <Tag color="orange">未配置</Tag>
-                )}
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {llm?.model} @ {llm?.api_base}
-                </Text>
-              </Descriptions.Item>
-            </Descriptions>
-            <div style={{ marginTop: 10 }}>
-              <Form.Item name="llm_api_key" label="API Key（留空不修改）">
-                <Input.Password placeholder="sk-..." autoComplete="off" />
-              </Form.Item>
-              <Form.Item name="llm_api_base" label="API Base">
-                <Input placeholder="https://api.openai.com/v1" />
-              </Form.Item>
-              <Form.Item name="llm_model" label="Model">
-                <Input placeholder="gpt-4o-mini / moonshot-v1-32k" />
-              </Form.Item>
-            </div>
+        <Space direction="vertical" size={22} className="sva-settings-stack">
+          <section className="sva-config-welcome">
+            <Title level={3}>连接大模型</Title>
+            <Paragraph type="secondary">
+              保存后自动采集公开行情、验证策略并积累模拟记录。
+            </Paragraph>
           </section>
 
-          <section className="sva-admin-section">
-            <Title level={5} style={{ margin: 0 }}>行情信息接口</Title>
-            <Paragraph type="secondary" style={{ fontSize: 12, margin: "6px 0" }}>
-              选择一家提供商并填写对应密钥。K 线默认走公开源链，配置后将优先使用所选提供商。
+          <section className="sva-config-model">
+            <div className="sva-settings-fields">
+            <Form.Item name="llm_provider" label="大模型供应商" rules={[{ required: true, message: "请选择供应商" }]}>
+              <Select options={providers.map(({ value, label }) => ({ value, label }))} onChange={changeProvider} />
+            </Form.Item>
+            {presetsUnavailable ? <Paragraph type="secondary">供应商列表暂不可用，可手动填写接口地址与模型。</Paragraph> : null}
+            <Form.Item
+              name="llm_api_key"
+              label="API Key"
+              rules={[{ required: !llm?.key_configured, whitespace: true, message: "请填写 API Key" }]}
+              extra={llm?.key_configured ? "密钥已保存。留空沿用，更换服务地址时填写新密钥。" : "密钥保存在本机。"}
+            >
+              <Input.Password placeholder={llm?.key_configured ? "留空沿用现有密钥" : "粘贴供应商提供的 API Key"} autoComplete="new-password" visibilityToggle={false} />
+            </Form.Item>
+            {llmProvider === "custom" ? (
+              <>
+                <Form.Item name="llm_api_base" label="API Base" rules={[{ required: true, whitespace: true, message: "请填写 API Base" }]}>
+                  <Input placeholder="https://your-provider.example/v1" autoComplete="off" />
+                </Form.Item>
+                <Form.Item name="llm_model" label="模型名称" rules={[{ required: true, whitespace: true, message: "请填写模型名称" }]}>
+                  <Input placeholder="填写供应商支持的模型 ID" autoComplete="off" />
+                </Form.Item>
+              </>
+            ) : null}
+            </div>
+            <div className="sva-settings-primary-action">
+            <Button type="primary" disabled={loading || !integrations || saving} loading={saving && saveMode === "activate"} onClick={() => void save(true)}>
+              保存并开启自动运行
+            </Button>
+            </div>
+            <Paragraph className="sva-config-note" type="secondary">
+              首次准备示例自选，可随时调整。模型按研究预算调用，结果保存在本机。
             </Paragraph>
-            <Descriptions size="small" column={1} bordered>
-              <Descriptions.Item label="当前选择">
-                {market?.provider && market.provider !== "unset" ? (
-                  <Tag color="blue">{market.provider}</Tag>
-                ) : (
-                  <Tag color="orange">未选择</Tag>
-                )}
-                {market?.configured ? <Tag color="green">已就绪</Tag> : <Tag>待配置</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="KlineShare">
-                {klineshare?.configured ? (
-                  <Tag color="green">Key ···{klineshare.key_suffix}</Tag>
-                ) : (
-                  <Tag>未配置</Tag>
-                )}
-              </Descriptions.Item>
-              <Descriptions.Item label="Tushare">
-                {tushare?.configured ? (
-                  <Tag color="green">Token ···{tushare.token_suffix}</Tag>
-                ) : (
-                  <Tag>未配置</Tag>
-                )}
-              </Descriptions.Item>
-            </Descriptions>
-            <div style={{ marginTop: 10 }}>
+            {activation ? <Alert showIcon {...activation} action={activation.type === "success" ? <Button size="small" onClick={() => setTab("runtime")}>查看运行状态</Button> : null} /> : null}
+          </section>
+
+          <Collapse
+            className="sva-config-advanced"
+            ghost
+            onChange={(keys) => setAdvancedOpen(keys.includes("advanced"))}
+            items={[{ key: "advanced", label: "高级设置（可选）", children: (
+              <Space direction="vertical" size={18} className="sva-settings-stack">
+          <section className="sva-admin-section sva-settings-group">
+            <Title level={5}>行情来源</Title>
+            <Paragraph type="secondary" style={{ fontSize: 12, margin: "6px 0" }}>
+              默认使用公开行情，也可添加已有的付费行情账户。
+            </Paragraph>
+            <div className="sva-settings-source-state"><Text type="secondary">当前：{market?.provider && market.provider !== "unset" ? market.provider : "公开行情"}</Text><Text type="secondary">KlineShare {klineshare?.configured ? "已配置" : "可选"}</Text><Text type="secondary">Tushare {tushare?.configured ? "已配置" : "可选"}</Text></div>
+            <div className="sva-settings-fields sva-settings-fields--inset">
               <Form.Item name="market_data_provider" label="行情提供商">
-                <Radio.Group>
-                  <Space direction="vertical">
-                    {MARKET_OPTIONS.map((o) => (
-                      <Radio key={o.value} value={o.value}>
-                        {o.label}
-                        {o.doc ? (
-                          <a href={o.doc} target="_blank" rel="noreferrer" style={{ marginLeft: 8, fontSize: 12 }}>
-                            文档
-                          </a>
-                        ) : null}
-                      </Radio>
-                    ))}
-                  </Space>
-                </Radio.Group>
+                <Select options={MARKET_OPTIONS.map(({ value, label }) => ({ value, label }))} />
               </Form.Item>
-              {marketDoc?.hint ? (
-                <Paragraph type="secondary" style={{ fontSize: 12 }}>{marketDoc.hint}</Paragraph>
-              ) : null}
               {marketProvider === "klineshare" ? (
-                <Form.Item name="klineshare_api_key" label="KlineShare API Key（留空不修改）">
-                  <Input.Password placeholder="从 KlineShare 用户中心复制" autoComplete="off" />
+                <Form.Item name="klineshare_api_key" label="KlineShare Key" extra="留空保留已保存的密钥。">
+                  <Input.Password placeholder="从 KlineShare 用户中心复制" autoComplete="new-password" visibilityToggle={false} />
                 </Form.Item>
               ) : null}
               {marketProvider === "tushare" ? (
-                <Form.Item name="tushare_token" label="Tushare Token（留空不修改）">
-                  <Input.Password placeholder="个人 Token" autoComplete="off" />
+                <Form.Item name="tushare_token" label="Tushare Token" extra="留空保留已保存的密钥。">
+                  <Input.Password placeholder="个人 Token" autoComplete="new-password" visibilityToggle={false} />
                 </Form.Item>
               ) : null}
+            </div>
+              {marketDoc?.hint ? <Paragraph type="secondary" className="sva-settings-helper">{marketDoc.hint}{marketDoc.doc ? <> <a href={marketDoc.doc} target="_blank" rel="noreferrer">查看文档</a></> : null}</Paragraph> : null}
               <Space wrap>
                 {marketProvider === "klineshare" ? (
                   <Button loading={testingKlineshare} onClick={() => void testKlineshare()}>
@@ -336,15 +383,15 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
                   </Button>
                 ) : null}
               </Space>
-            </div>
           </section>
 
           {isAdmin ? (
             <>
-              <section className="sva-admin-section">
+              <LocalDataDirectory userId={userId} active={advancedActive} />
+              <section className="sva-admin-section sva-settings-group">
                 {centerQuery.error ? <Alert type="warning" showIcon message={api.getApiErrorMessage(centerQuery.error)} /> : null}
                 <div className="sva-admin-section__head">
-                  <Text strong>数据中心</Text>
+                  <Text strong>数据维护</Text>
                   <Button
                     size="small"
                     icon={<ReloadOutlined />}
@@ -387,15 +434,15 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
                 />
               </section>
 
-              <section className="sva-admin-section">
-                <Text strong>高级集成（管理员）</Text>
-                <div style={{ marginTop: 8 }}>
+              <section className="sva-admin-section sva-settings-group">
+                <Text strong>连接与代理</Text><Paragraph type="secondary" className="sva-settings-helper">管理员设置，按需配置。</Paragraph>
+                <div className="sva-settings-fields sva-settings-fields--inset">
                   <Form.Item
                     name="xueqiu_cookies"
-                    label="雪球登录 Cookie（可选回退，留空不修改）"
-                    extra="默认由服务自动获取并更新雪球 Cookie，无需手动配置。仅在雪球要求登录或人工验证时，完成登录或验证后填写有效的登录 Cookie 作为回退；手动提供的登录状态失效后需更新。"
+                    label="雪球 Cookie"
+                    extra="Cookie 默认自动更新。登录或人工验证时可填写，留空沿用现有配置。"
                   >
-                    <Input.TextArea rows={2} placeholder="通常无需填写；自动会话不可用时可提供登录 Cookie" />
+                    <Input.TextArea rows={2} placeholder="粘贴登录 Cookie（可选）" />
                   </Form.Item>
                   <Form.Item name="adata_proxy_enabled" label="行情 HTTP 代理" valuePropName="checked">
                     <Switch />
@@ -411,24 +458,22 @@ export default function ConfigConsole({ open, onClose, isAdmin = false }) {
             </>
           ) : null}
 
-          <Button type="primary" block disabled={loading || !integrations} loading={saving} onClick={() => void save()}>
-            保存全部配置
-          </Button>
-
-          <Alert
-            type="info"
-            showIcon
-            message="本地存储"
-            description={
-              integrations?.storage
-                ? `用户凭据与集成：${integrations.storage.integrations_file}`
-                : "backend/data/"
-            }
+          <div className="sva-settings-secondary-action"><Button disabled={loading || !integrations || saving} loading={saving && saveMode === "advanced"} onClick={() => void save(false)}>
+            保存高级设置
+          </Button></div>
+              </Space>
+            ) }]}
           />
         </Space>
         </Form>
-      </Spin>
-    </Drawer>
+          </Spin>,
+        }, {
+          key: "runtime",
+          label: "运行日志",
+          children: open && tab === "runtime" ? <SettingsRuntimePanel userId={userId} onNavigate={onClose} /> : null,
+        }]}
+      />
+    </ConfigSurface>
   );
 }
 
@@ -439,12 +484,12 @@ export function ConfigConsoleButton({ isAdmin = false }) {
     <>
       <Button
         type="text"
-        className="sva-header-settings"
+        className="sva-header-settings sva-settings-trigger"
         icon={<SettingOutlined />}
         onClick={() => setOpen(true)}
-        aria-label="配置台"
+        aria-label="设置"
       >
-        配置台
+        设置
       </Button>
       <ConfigConsole open={open} onClose={() => setOpen(false)} isAdmin={isAdmin} />
     </>
@@ -453,18 +498,17 @@ export function ConfigConsoleButton({ isAdmin = false }) {
 
 /** 独立配置页（深链 /setup） */
 export function SetupPage() {
-  const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, authRequired, logout } = useAuth();
   return (
-    <div className="sva-setup-page">
-      <Paragraph>
-        <Link to="/">← 返回主界面</Link>
-      </Paragraph>
+    <div className="sva-setup-layout">
+      <AppToolbar active="settings" user={user} authRequired={authRequired} onLogout={logout} />
+      <main className="sva-setup-page">
       <ConfigConsole
         open
-        onClose={() => navigate("/")}
+        embedded
         isAdmin={user?.role === "admin"}
       />
+      </main>
     </div>
   );
 }

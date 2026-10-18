@@ -212,8 +212,8 @@ export async function searchStocks(q, limit = 15) {
   return data;
 }
 
-export async function getSettingsIntegrations() {
-  const { data } = await client.get("/settings/integrations");
+export async function getSettingsIntegrations({ signal } = {}) {
+  const { data } = await client.get("/settings/integrations", { signal });
   return data;
 }
 
@@ -224,6 +224,28 @@ export async function putSettingsIntegrations(body) {
 
 export async function getSetupStatus() {
   const { data } = await client.get("/settings/setup-status", { timeout: 15000 });
+  return data;
+}
+
+export async function getAutopilotStatus({ signal } = {}) {
+  const { data } = await client.get("/autopilot/status", { signal, timeout: 15000 });
+  return data;
+}
+
+export async function getRuntimeOverview({ period = "today", signal } = {}) {
+  const { data } = await client.get("/runtime/overview", {
+    params: { period }, signal, timeout: 15_000,
+  });
+  return data;
+}
+
+export async function getLlmProviderPresets({ signal } = {}) {
+  const { data } = await client.get("/settings/llm/presets", { signal, timeout: 15000 });
+  return data;
+}
+
+export async function reconcileAutopilot() {
+  const { data } = await client.post("/autopilot/reconcile", {}, { timeout: 30000 });
   return data;
 }
 
@@ -244,6 +266,16 @@ export async function getDataCenter() {
 
 export async function refreshDataCenter() {
   const { data } = await client.post("/settings/data-center/refresh", {}, { timeout: 30000 });
+  return data;
+}
+
+export async function getDataAssets({ signal } = {}) {
+  const { data } = await client.get("/admin/data-assets", { signal, timeout: 60_000 });
+  return data;
+}
+
+export async function refreshDataAssets() {
+  const { data } = await client.post("/admin/data-assets/refresh", {}, { timeout: 60_000 });
   return data;
 }
 
@@ -295,5 +327,53 @@ export async function analyzeNewsForSymbol(symbol, limit = NEWS_ANALYSIS_BATCH_S
     { symbol, limit, persist, lookback_days: 30 },
     { timeout: NEWS_TASK_TIMEOUT_MS }
   );
+  return data;
+}
+
+/** Local research jobs return immediately; progress is read from the queue. */
+export async function getResearchOverview({ signal } = {}) {
+  const { data } = await client.get("/research/overview", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function startResearchRun(kind, payload = {}, idempotencyKey) {
+  const { data } = await client.post("/research/runs", {
+    kind, payload, ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+  }, { timeout: 15_000 });
+  return data;
+}
+
+export async function getResearchJob(id, { signal } = {}) {
+  const { data } = await client.get(`/research/jobs/${encodeURIComponent(id)}`, { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function getResearchExperiment(id, { signal } = {}) {
+  const { data } = await client.get(`/research/experiments/${encodeURIComponent(id)}`, { signal, timeout: 30_000 });
+  return data;
+}
+
+export async function getResearchStrategy(id, { signal } = {}) {
+  const { data } = await client.get(`/research/strategies/${encodeURIComponent(id)}`, { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function getResearchSnapshot(id, { signal } = {}) {
+  const { data } = await client.get(`/research/snapshots/${encodeURIComponent(id)}`, { signal, timeout: 30_000 });
+  return data;
+}
+
+export async function createResearchStrategy(spec) {
+  const { data } = await client.post("/research/strategies", { spec }, { timeout: 15_000 });
+  return data;
+}
+
+export async function importResearchSnapshot(payload) {
+  const { data } = await client.post("/research/import", payload, { timeout: 120_000 });
+  return data;
+}
+
+export async function updateResearchConfig(patch) {
+  const { data } = await client.patch("/research/config", patch, { timeout: 15_000 });
   return data;
 }

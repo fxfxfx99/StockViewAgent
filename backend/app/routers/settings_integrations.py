@@ -248,30 +248,25 @@ def integrations_payload(user_id: int) -> dict:
 
 def setup_status_payload(user_id: int) -> dict[str, Any]:
     from app.services import klineshare_service, tushare_service
+    from app.services import local_autopilot
 
-    llm_ok = settings.any_llm_key_configured
+    llm_ok = local_autopilot.llm_configured(user_id)
     market = _market_data_block(user_id)
-    market_ok = bool(market.get("configured"))
-    provider = market.get("provider") or "unset"
+    provider = market.get("provider") or "public"
+    provider = "public" if provider == "unset" else provider
+    market_ok = bool(market.get("configured")) or provider == "public"
     hints: list[str] = []
     if not llm_ok:
         hints.append("配置大模型 API Key、Base 与 Model（OpenAI 兼容）")
-    if not market_ok:
-        if provider == "unset":
-            hints.append("选择行情提供商：推荐 KlineShare，或 Tushare / 仅公开源")
-        elif provider == "klineshare":
-            hints.append("填写并测试 KlineShare API Key")
-        elif provider == "tushare":
-            hints.append("填写并测试 Tushare Token")
     return {
-        "ready": llm_ok and market_ok,
+        "ready": llm_ok,
         "llm_configured": llm_ok,
         "market_data_configured": market_ok,
         "market_data_provider": provider,
         "klineshare_configured": klineshare_service.is_configured(),
         "tushare_configured": tushare_service.is_configured(),
-        "onboarding_title": "首次使用请先完成配置",
-        "onboarding_message": "请先自行配置大模型 API 与行情信息接口，再使用 K 线解读、Transaction Agent 等能力。",
+        "onboarding_title": "填写大模型配置即可自动运行",
+        "onboarding_message": "公开行情源默认可用。保存大模型 API 后自动采集、研究和模拟；付费行情接口可按需添加。",
         "onboarding_hints": hints,
         "config_console_path": "/setup",
         "docs": {
@@ -395,5 +390,8 @@ def put_integrations(body: IntegrationsUpdate, user: Annotated[UserRecord, Depen
 
     if llm_update is not None:
         merge_user_credentials(user.id, {"llm": llm_update})
+    if settings.enable_research_worker:
+        from app.services import local_autopilot
+        local_autopilot.reconcile(user.id)
 
     return integrations_payload(user.id)

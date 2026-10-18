@@ -64,14 +64,26 @@ async def news_feed(
         sym_list = wl
     if not sym_list:
         sym_list = ["600519.SS"]
-    items = await rss_fetcher.fetch_news_for_symbols(sym_list)
+    from app.services.runtime_telemetry import record_collection
+    counts = {}
+    try:
+        items = await rss_fetcher.fetch_news_for_symbols(sym_list, collection_stats=counts)
+    except Exception:
+        record_collection("news_archive", "rss_and_symbol", status="failed", error_code="source_unavailable", user_id=user.id)
+        raise
     wl_hints, name_hints = news_watchlist_matcher.load_watchlist_match_hints()
     display_items = (
         news_watchlist_matcher.enrich_items_with_matches(items, wl_hints, name_hints) if items else []
     )
     saved = 0
+    stored = {}
     if save and display_items:
-        saved = news_store.upsert_many(display_items)
+        try:
+            saved = news_store.upsert_many(display_items, collection_stats=stored)
+        except Exception:
+            record_collection("news_archive", "rss_and_symbol", records_received=counts.get("records_received", len(items)), status="failed", error_code="storage_failed", user_id=user.id)
+            raise
+    record_collection("news_archive", "rss_and_symbol", records_received=counts.get("records_received", len(items)), user_id=user.id, **stored)
     st = news_store.stats()
     return {
         "watchlist": wl,

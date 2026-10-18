@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from app.deps.auth import get_current_user
+from app.security.user_context import current_user_id
 from app.services import (
     kline_pipeline,
     kline_sources_registry,
@@ -16,6 +17,7 @@ from app.services import (
     market_fund_flow_service,
     market_source_policy,
     mytt_compute,
+    research_data,
 )
 from app.storage import kline_bundle_cache, market_history_cache
 
@@ -51,6 +53,16 @@ async def get_kline(
         raise HTTPException(status_code=400, detail=f"range 必须是 {_RANGES} 之一")
     if interval not in _INTERVALS:
         raise HTTPException(status_code=400, detail=f"interval 必须是 {_INTERVALS} 之一")
+
+    if interval == "1d":
+        try:
+            return await research_data.fetch_bundle(current_user_id.get() or 0, sym, range_param, interval)
+        except research_data.MarketDataValidationError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     try:
         bundle = await kline_pipeline.fetch_a_share_kline_with_fallbacks(sym, range_param, interval)

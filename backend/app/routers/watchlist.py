@@ -78,17 +78,29 @@ def _background_tushare_fetch(symbols: list[str]) -> None:
 async def _refresh_f10_only(ordered: list[str]) -> dict[str, str]:
     """仅拉东方财富 F10 并写入 profile_store（不向量化上传文件）。"""
     errors: dict[str, str] = {}
+    from app.services.runtime_telemetry import record_collection
+    from app.security.user_context import current_user_id
+    uid = current_user_id.get() or 0
     for sym in ordered:
+        previous = profile_store.get_entry(sym)
+        received = added = 0
+        code = None
         try:
             auto, err = await asyncio.to_thread(company_profile_em.fetch_company_survey, sym)
+            received = int(not err and any(auto.values()))
             lk = a_share_stocks.lookup_by_yahoo_symbol(sym)
             if lk and not (auto.get("name") or "").strip():
                 auto["name"] = (lk.get("name") or "").strip()
             profile_store.upsert_auto(sym, auto, err)
+            added = int(bool(received) and profile_store.get_entry(sym).get("auto") != previous.get("auto"))
             if err:
                 errors[sym] = err
+                code = "source_unavailable"
         except Exception as e:  # noqa: BLE001
             errors[sym] = f"异常：{e!s}"
+            code = "storage_failed" if received else "source_unavailable"
+        record_collection("company_profile", "eastmoney_f10", records_received=received, records_added=added,
+                          status="failed" if code else "success", error_code=code, user_id=uid)
         await asyncio.sleep(0.12)
     return errors
 

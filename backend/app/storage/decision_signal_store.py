@@ -101,6 +101,28 @@ def upsert_outcome(signal_id: str, payload: dict[str, Any]) -> None:
     with _conn() as conn:
         conn.execute("""INSERT OR REPLACE INTO decision_signal_outcome
           (signal_id,horizon_days,engine_version,eval_status,base_price,end_price,return_pct,direction_correct,unable_reason,evaluated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?)""", (signal_id, payload["horizon_days"], "decision-signal-v1", payload["eval_status"],
+          VALUES (?,?,?,?,?,?,?,?,?,?)""", (signal_id, payload["horizon_days"], payload.get("engine_version", "decision-signal-v1"), payload["eval_status"],
           payload.get("base_price"), payload.get("end_price"), payload.get("return_pct"), payload.get("direction_correct"),
           payload.get("unable_reason"), time.time()))
+
+
+def pending_signals(user_id: int, *, engine_version: str, symbol: str | None = None,
+                    after_id: str = "", limit: int = 200) -> list[dict[str, Any]]:
+    """Keyset pagination includes old unfinished signals, not just recent records.
+
+    The service determines each signal's horizons; the final sentinel marks all
+    horizons complete. Old engine outcomes do not count as new-engine evidence.
+    """
+    init_db()
+    clauses = ["s.user_id=?", "s.id>?", "s.status NOT IN ('invalidated','archived')",
+               "NOT EXISTS (SELECT 1 FROM decision_signal_outcome o WHERE o.signal_id=s.id "
+               "AND o.engine_version=? AND o.horizon_days=0 AND o.eval_status='complete')"]
+    args: list[Any] = [int(user_id), after_id, engine_version]
+    if symbol:
+        clauses.append("s.symbol=?")
+        args.append(symbol.upper())
+    args.append(max(1, min(limit, 500)))
+    with _conn() as conn:
+        return [_decode(row) for row in conn.execute(
+            f"SELECT s.* FROM decision_signal s WHERE {' AND '.join(clauses)} ORDER BY s.id LIMIT ?", args
+        ).fetchall()]

@@ -73,10 +73,11 @@ def _load_state() -> dict[str, Any]:
 
 
 def _save_state(state: dict[str, Any]) -> None:
+    from app.storage import data_asset_manager
     p = _state_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     state["schema"] = _SCHEMA
-    p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    data_asset_manager.atomic_write_json(p, state, kind="news_source_health", key="cn_headline_sources", source="maintenance")
 
 
 def _load_override_rss() -> list[dict[str, Any]]:
@@ -225,6 +226,14 @@ def builtin_source_rows() -> list[dict[str, Any]]:
                 "priority": o["priority"],
             }
         )
+    from app.services.source_autopilot import discovered_news_sources
+    known_urls = {r.get("url") for r in rows}
+    known_ids = {r["id"] for r in rows}
+    for row in discovered_news_sources():
+        if row["url"] not in known_urls and row["id"] not in known_ids:
+            rows.append(row)
+            known_urls.add(row["url"])
+            known_ids.add(row["id"])
     return rows
 
 
@@ -250,17 +259,21 @@ async def _probe_em(client: httpx.AsyncClient, fast_column: str) -> int:
         return 0
 
 
-async def _probe_rss(client: httpx.AsyncClient, url: str, referer: str) -> int:
+async def _probe_rss(client: httpx.AsyncClient, url: str, referer: str, *, automatic: bool = False) -> int:
     headers: dict[str, str] = {}
     if referer:
         headers["Referer"] = referer
     try:
+        if automatic:
+            from app.services.source_autopilot import fetch_discovered_news_document
+            document = await fetch_discovered_news_document(url)
+            return len(feedparser.parse(document).entries)
         r = await client.get(url, follow_redirects=True, headers=headers or None)
         if r.status_code != 200:
             return 0
         d = feedparser.parse(r.content)
         return len(getattr(d, "entries", None) or [])
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ValueError, OSError):
         return 0
 
 
@@ -286,7 +299,8 @@ async def _run_maintenance_body() -> dict[str, Any]:
             if kind == "eastmoney_json":
                 n = await _probe_em(client, row["fast_column"])
             elif kind == "rss":
-                n = await _probe_rss(client, row["url"], row.get("referer") or "")
+                n = await _probe_rss(client, row["url"], row.get("referer") or "",
+                                     automatic=sid.startswith("auto_rss_"))
             prev = health.get(sid) if isinstance(health.get(sid), dict) else {}
             fail_days = int(prev.get("fail_days") or 0)
             if n > 0:

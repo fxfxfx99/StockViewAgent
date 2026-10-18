@@ -56,7 +56,9 @@ _MAJOR_INDEX_PROVIDER_SYMBOLS = {
 
 
 def _record_source_health(source_id: str, ok: bool, detail: str = "") -> None:
-    market_source_cache.record_health(source_id, ok=ok, detail=(detail or "")[:500])
+    market_source_cache.record_health(
+        source_id, ok=ok, detail="validated" if ok else "invalid_payload" if detail == "invalid_payload" else "request_failed"
+    )
 
 
 async def fetch_major_index_kline_with_fallbacks(index_key: str, range_param: str, interval: str) -> dict:
@@ -178,120 +180,28 @@ async def fetch_a_share_kline_with_fallbacks(symbol: str, range_param: str, inte
     """
     sym = symbol.strip().upper()
 
-    async def _try_daily_http_chain(note: str) -> dict | None:
-        if not market_extra_http.interval_allows_secondary_kline(interval):
-            return None
-        n = (note or "")[:600]
-        try:
-            out = await asyncio.to_thread(
-                market_extra_http.fetch_kline_bundle_secondary_sync, sym, range_param, interval
-            )
-            _record_source_health("tencent_kline_fallback", True)
-            return await _attach_source_and_enrich(out, "tencent_fallback", n, sym)
-        except Exception as te:
-            _record_source_health("tencent_kline_fallback", False, str(te))
-            n = f"{n}; 腾讯: {te!s}"[:800]
-        try:
-            out = await asyncio.to_thread(free_stockdb_http.fetch_kline_bundle_sync, sym, range_param, interval)
-            _record_source_health("free_stockdb_local", True)
-            return await _attach_source_and_enrich(out, "free_stockdb_local", n, sym)
-        except Exception as fe:
-            _record_source_health("free_stockdb_local", False, str(fe))
-            n = f"{n}; free-stockdb: {fe!s}"[:800]
-        if is_baostock_installed() and kline_sdk_enabled("baostock"):
-            try:
-                out = await asyncio.to_thread(fetch_kline_bundle_baostock_sync, sym, range_param, interval)
-                _record_source_health("baostock_kline_fallback", True)
-                return await _attach_source_and_enrich(out, "baostock_fallback", n, sym)
-            except Exception as bse:
-                _record_source_health("baostock_kline_fallback", False, str(bse))
-                n = f"{n}; Baostock: {bse!s}"[:800]
-        try:
-            out = await asyncio.to_thread(
-                market_extra_http.fetch_kline_bundle_sina_sync, sym, range_param, interval
-            )
-            _record_source_health("sina_kline_fallback", True)
-            return await _attach_source_and_enrich(out, "sina_fallback", n, sym)
-        except Exception as se:
-            _record_source_health("sina_kline_fallback", False, str(se))
-            n = f"{n}; 新浪: {se!s}"[:800]
-        if is_pytdx_installed() and kline_sdk_enabled("pytdx"):
-            try:
-                out = await asyncio.to_thread(fetch_kline_bundle_pytdx_sync, sym, range_param, interval)
-                _record_source_health("pytdx_kline_fallback", True)
-                return await _attach_source_and_enrich(out, "pytdx_fallback", n, sym)
-            except Exception as pe:
-                _record_source_health("pytdx_kline_fallback", False, str(pe))
-                n = f"{n}; Pytdx: {pe!s}"[:800]
-        raise ValueError(n[:900])
-
-    async def _try_minute_chain(note: str) -> dict | None:
-        if not market_extra_http.interval_allows_tencent_minute_kline(interval):
-            return None
-        n = (note or "")[:600]
-        try:
-            out = await asyncio.to_thread(
-                market_extra_http.fetch_kline_bundle_tencent_minute_sync, sym, range_param, interval
-            )
-            _record_source_health("tencent_minute_kline_fallback", True)
-            return await _attach_source_and_enrich(out, "tencent_mkline_fallback", n, sym)
-        except Exception as te:
-            _record_source_health("tencent_minute_kline_fallback", False, str(te))
-            n = f"{n}; 腾讯mkline: {te!s}"[:800]
-        if is_baostock_installed() and kline_sdk_enabled("baostock"):
-            try:
-                out = await asyncio.to_thread(
-                    fetch_kline_bundle_baostock_minute_sync, sym, range_param, interval
-                )
-                _record_source_health("baostock_minute_kline_fallback", True)
-                return await _attach_source_and_enrich(out, "baostock_minute_fallback", n, sym)
-            except Exception as bse:
-                _record_source_health("baostock_minute_kline_fallback", False, str(bse))
-                n = f"{n}; Baostock分钟: {bse!s}"[:800]
-        if is_pytdx_installed() and kline_sdk_enabled("pytdx"):
-            try:
-                out = await asyncio.to_thread(
-                    fetch_kline_bundle_pytdx_minute_sync, sym, range_param, interval
-                )
-                _record_source_health("pytdx_minute_kline_fallback", True)
-                return await _attach_source_and_enrich(out, "pytdx_minute_fallback", n, sym)
-            except Exception as pe:
-                _record_source_health("pytdx_minute_kline_fallback", False, str(pe))
-                n = f"{n}; Pytdx分钟: {pe!s}"[:800]
-        raise ValueError(n[:900])
-
     async def _try_one(source: str, note: str) -> dict | None:
         n = (note or "")[:600]
         if source == "eastmoney":
-            try:
-                out = await eastmoney_market.fetch_kline_bundle(sym, range_param, interval)
-                _record_source_health("eastmoney_kline", True)
-                out.setdefault("kline_source", "eastmoney")
-                return out
-            except Exception as exc:  # noqa: BLE001
-                _record_source_health("eastmoney_kline", False, str(exc))
-                raise
+            out = await eastmoney_market.fetch_kline_bundle(sym, range_param, interval)
+            out.setdefault("kline_source", "eastmoney")
+            return out
         if source == "tencent" and market_extra_http.interval_allows_secondary_kline(interval):
             out = await asyncio.to_thread(market_extra_http.fetch_kline_bundle_secondary_sync, sym, range_param, interval)
-            _record_source_health("tencent_kline_fallback", True)
             return await _attach_source_and_enrich(out, "tencent_fallback", n, sym)
         if source == "baidu" and market_extra_http.interval_allows_secondary_kline(interval):
             out = await asyncio.to_thread(market_extra_http.fetch_kline_bundle_baidu_sync, sym, range_param, interval)
-            _record_source_health("baidu_kline_fallback", True)
             return await _attach_source_and_enrich(out, "baidu_fallback", n, sym)
         if source == "free_stockdb" and market_extra_http.interval_allows_secondary_kline(interval):
             out = await asyncio.to_thread(free_stockdb_http.fetch_kline_bundle_sync, sym, range_param, interval)
-            _record_source_health("free_stockdb_local", True)
             return await _attach_source_and_enrich(out, "free_stockdb_local", n, sym)
         if source == "baostock" and market_extra_http.interval_allows_secondary_kline(interval):
             if not (is_baostock_installed() and kline_sdk_enabled("baostock")):
                 raise RuntimeError("Baostock 未安装或未启用")
             out = await asyncio.to_thread(fetch_kline_bundle_baostock_sync, sym, range_param, interval)
-            _record_source_health("baostock_kline_fallback", True)
             return await _attach_source_and_enrich(out, "baostock_fallback", n, sym)
         if source == "sina" and market_extra_http.interval_allows_secondary_kline(interval):
             out = await asyncio.to_thread(market_extra_http.fetch_kline_bundle_sina_sync, sym, range_param, interval)
-            _record_source_health("sina_kline_fallback", True)
             return await _attach_source_and_enrich(out, "sina_fallback", n, sym)
         if source == "klineshare" and market_extra_http.interval_allows_secondary_kline(interval):
             from app.services import klineshare_service
@@ -299,38 +209,32 @@ async def fetch_a_share_kline_with_fallbacks(symbol: str, range_param: str, inte
             if not klineshare_service.should_use_in_chain():
                 raise RuntimeError("KlineShare 未配置或未选为行情提供商")
             out = await asyncio.to_thread(klineshare_service.fetch_kline_bundle, sym, range_param, interval)
-            _record_source_health("klineshare_kline", True)
             return await _attach_source_and_enrich(out, "klineshare", n, sym)
         if source == "tushare" and market_extra_http.interval_allows_secondary_kline(interval):
             from app.services import tushare_service
             if not tushare_service.is_configured():
                 raise RuntimeError("Tushare Token 未配置")
             out = await asyncio.to_thread(tushare_service.fetch_kline_bundle, sym, range_param, interval)
-            _record_source_health("tushare_kline_fallback", True)
             return await _attach_source_and_enrich(out, "tushare_pro_fallback", n, sym)
         if source == "pytdx" and market_extra_http.interval_allows_secondary_kline(interval):
             if not (is_pytdx_installed() and kline_sdk_enabled("pytdx")):
                 raise RuntimeError("Pytdx 未安装或未启用")
             out = await asyncio.to_thread(fetch_kline_bundle_pytdx_sync, sym, range_param, interval)
-            _record_source_health("pytdx_kline_fallback", True)
             return await _attach_source_and_enrich(out, "pytdx_fallback", n, sym)
         if source == "tencent_minute" and market_extra_http.interval_allows_tencent_minute_kline(interval):
             out = await asyncio.to_thread(
                 market_extra_http.fetch_kline_bundle_tencent_minute_sync, sym, range_param, interval
             )
-            _record_source_health("tencent_minute_kline_fallback", True)
             return await _attach_source_and_enrich(out, "tencent_mkline_fallback", n, sym)
         if source == "baostock_minute" and market_extra_http.interval_allows_tencent_minute_kline(interval):
             if not (is_baostock_installed() and kline_sdk_enabled("baostock")):
                 raise RuntimeError("Baostock 未安装或未启用")
             out = await asyncio.to_thread(fetch_kline_bundle_baostock_minute_sync, sym, range_param, interval)
-            _record_source_health("baostock_minute_kline_fallback", True)
             return await _attach_source_and_enrich(out, "baostock_minute_fallback", n, sym)
         if source == "pytdx_minute" and market_extra_http.interval_allows_tencent_minute_kline(interval):
             if not (is_pytdx_installed() and kline_sdk_enabled("pytdx")):
                 raise RuntimeError("Pytdx 未安装或未启用")
             out = await asyncio.to_thread(fetch_kline_bundle_pytdx_minute_sync, sym, range_param, interval)
-            _record_source_health("pytdx_minute_kline_fallback", True)
             return await _attach_source_and_enrich(out, "pytdx_minute_fallback", n, sym)
         return None
 
@@ -340,9 +244,13 @@ async def fetch_a_share_kline_with_fallbacks(symbol: str, range_param: str, inte
         and not market_extra_http.interval_allows_secondary_kline(interval)
         else market_source_policy.kline_daily_chain()
     )
+    from app.services import source_autopilot
+    capability = "daily" if market_extra_http.interval_allows_secondary_kline(interval) else "minute"
+    chain = source_autopilot.ordered_sources(capability, chain)
     detail = ""
     first_error: Exception | None = None
     health_ids = {
+        "eastmoney": "eastmoney_kline",
         "tencent": "tencent_kline_fallback",
         "baidu": "baidu_kline_fallback",
         "free_stockdb": "free_stockdb_local",
@@ -359,17 +267,22 @@ async def fetch_a_share_kline_with_fallbacks(symbol: str, range_param: str, inte
         try:
             out = await _try_one(source, detail)
             if out is not None:
+                source_autopilot.validate_kline_bundle(out)
+                source_autopilot.record_outcome(capability, source, ok=True)
+                _record_source_health(health_ids[source], True)
                 return out
         except Exception as exc:  # noqa: BLE001
+            reason = "invalid_payload" if isinstance(exc, ValueError) else "request_failed"
+            source_autopilot.record_outcome(capability, source, ok=False, reason=reason)
             if first_error is None:
                 first_error = exc
             if source in health_ids:
-                _record_source_health(health_ids[source], False, str(exc))
+                _record_source_health(health_ids[source], False, reason)
             label = source
-            detail = f"{detail}; {label}: {exc!s}"[:900] if detail else f"{label}: {exc!s}"[:900]
+            detail = f"{detail}; {label}: {reason}" if detail else f"{label}: {reason}"
             continue
     if first_error is None:
         raise ValueError("没有可用于当前周期的 K 线数据源")
     if isinstance(first_error, ValueError):
-        raise ValueError(detail or str(first_error)) from first_error
-    raise RuntimeError(detail or str(first_error)) from first_error
+        raise ValueError(detail) from None
+    raise RuntimeError(detail) from None

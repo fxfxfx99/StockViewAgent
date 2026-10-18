@@ -1,13 +1,12 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   AutoComplete,
   Button,
-  Collapse,
+  Drawer,
   Input,
   Space,
   Spin,
   Tooltip,
-  Typography,
   Upload,
   App as AntApp,
 } from "antd";
@@ -19,21 +18,25 @@ import {
   MenuUnfoldOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 import * as api from "./api.js";
 
-const { Text } = Typography;
-
 function fmtPct(v) {
-  if (v == null || Number.isNaN(Number(v))) return "—";
+  if (v == null || String(v).trim() === "" || !Number.isFinite(Number(v))) return "—";
   const n = Number(v);
   const s = `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
   return s;
 }
 
 function pctTone(v) {
-  if (v == null || Number.isNaN(Number(v))) return "";
+  if (v == null || String(v).trim() === "" || !Number.isFinite(Number(v))) return "";
   return Number(v) >= 0 ? "is-up" : "is-down";
+}
+
+function fmtPrice(value) {
+  if (value == null || String(value).trim() === "" || !Number.isFinite(Number(value))) return "—";
+  return Number(value).toFixed(2);
 }
 
 function shortCode(symbol) {
@@ -48,6 +51,9 @@ function shortCode(symbol) {
 export default function WatchlistSidebar({
   collapsed,
   onCollapsedChange,
+  mobile = false,
+  mobileOpen = false,
+  onMobileClose,
   symbols,
   watchProfiles,
   priceContext,
@@ -70,6 +76,8 @@ export default function WatchlistSidebar({
 }) {
   const { message } = AntApp.useApp();
   const [batchText, setBatchText] = useState("");
+  const [batchOpen, setBatchOpen] = useState(false);
+  const batchId = useId();
   const [importLoading, setImportLoading] = useState(false);
   const [xlsxLoading, setXlsxLoading] = useState(false);
   const editingDisabled = disabled || loadingList || savingList || importLoading || xlsxLoading;
@@ -80,8 +88,9 @@ export default function WatchlistSidebar({
         const profile = watchProfiles?.[sym] || {};
         const px = priceContext?.[sym] || {};
         const name = String(profile.name || px.name || "").trim() || shortCode(sym);
-        const changePct = px.change_pct ?? px.pct_chg ?? px.change_1d_pct;
-        return { sym, name, changePct };
+        const changePct = px.latest_change_pct ?? px.change_pct ?? px.pct_chg ?? px.change_1d_pct;
+        const price = px.latest_price ?? px.last_close;
+        return { sym, name, changePct, price };
       }),
     [symbols, watchProfiles, priceContext]
   );
@@ -128,174 +137,109 @@ export default function WatchlistSidebar({
     return false;
   };
 
-  if (collapsed) {
-    return (
-      <aside className="sva-watch-sider sva-watch-sider--collapsed">
-        <Tooltip title="展开" placement="right">
-          <Button
-            type="text"
-            className="sva-watch-sider__toggle"
-            icon={<MenuUnfoldOutlined />}
-            onClick={() => onCollapsedChange(false)}
-          />
-        </Tooltip>
-        <div className="sva-watch-sider__rail-label">
-          <span>股票列表</span>
-          <span className="sva-watch-sider__rail-count">{symbols.length}</span>
-        </div>
-      </aside>
-    );
+  if (collapsed && !mobile) {
+    return <aside className="market-watchlist market-watchlist--collapsed" aria-label="已收起的自选股">
+      <Tooltip title="展开自选股" placement="right">
+        <Button type="text" icon={<MenuUnfoldOutlined />} aria-label="展开自选股"
+          onClick={() => onCollapsedChange(false)} />
+      </Tooltip>
+      <span className="market-watchlist__rail-title">自选</span>
+      <span className="market-watchlist__count">{symbols.length}</span>
+    </aside>;
   }
 
-  return (
-    <aside className="sva-watch-sider">
-      <div className="sva-watch-sider__head">
-        <span className="sva-watch-sider__title">
-          股票列表
-          <em>{symbols.length}</em>
-        </span>
-        <Tooltip title="收起">
-          <Button type="text" size="small" icon={<MenuFoldOutlined />} onClick={() => onCollapsedChange(true)} />
-        </Tooltip>
+  const content = <aside className={`market-watchlist${mobile ? " market-watchlist--drawer" : ""}`} aria-label="自选股列表">
+    {!mobile ? <div className="market-watchlist__heading">
+      <h2>自选股 <span>{symbols.length}</span></h2>
+      <Tooltip title="收起自选股">
+        <Button type="text" size="small" icon={<MenuFoldOutlined />} aria-label="收起自选股"
+          onClick={() => onCollapsedChange(true)} />
+      </Tooltip>
+    </div> : null}
+
+    <div className="market-watchlist__search">
+      <AutoComplete
+        value={draft}
+        disabled={editingDisabled}
+        options={stockOptions}
+        onSearch={fetchStockOptions}
+        filterOption={false}
+        onChange={(v) => setDraft(String(v || ""))}
+        onSelect={(v) => onAddFromSearch(v, { clearDraft: true })}
+        className="market-watchlist__autocomplete"
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            // Let AutoComplete submit its keyboard-highlighted option once.
+            if (e.target.getAttribute("aria-activedescendant")) return;
+            e.preventDefault();
+            onAddFromSearch(draft, { clearDraft: true });
+          }
+        }}
+      >
+        <Input prefix={<SearchOutlined aria-hidden="true" />} placeholder="搜索名称或代码"
+          aria-label="搜索股票名称或代码" allowClear />
+      </AutoComplete>
+      <Button icon={<PlusOutlined />} aria-label="添加股票" disabled={editingDisabled}
+        loading={savingList || stockIndexLoading}
+        onClick={() => onAddFromSearch(draft, { clearDraft: true })} />
+    </div>
+
+    <Spin spinning={loadingList || stockIndexLoading} wrapperClassName="market-watchlist__list-wrap">
+      <div className="market-watchlist__list">
+        {!rows.length ? <div className="market-watchlist__empty">
+          <SearchOutlined aria-hidden="true" />
+          <strong>还没有自选股</strong>
+          <p>搜索名称或代码添加，也可批量导入。</p>
+        </div> : rows.map((row) => {
+          const active = row.sym === selectedSymbol;
+          return <div key={row.sym} className={`market-watchlist__row${active ? " is-active" : ""}`}>
+            <button type="button" className="market-watchlist__select" aria-pressed={active}
+              aria-label={`${row.name} ${row.sym}`} onClick={() => onSelectSymbol(row.sym)}>
+              <span className="market-watchlist__identity">
+                <span className="market-watchlist__name" title={row.name}>{row.name}</span>
+                <span className="market-watchlist__symbol">{row.sym}</span>
+              </span>
+              <span className={`market-watchlist__quote ${pctTone(row.changePct)}`}>
+                <span className="market-watchlist__price">{fmtPrice(row.price)}</span>
+                <span className="market-watchlist__change">{fmtPct(row.changePct)}</span>
+              </span>
+            </button>
+            <Tooltip title={`移除 ${row.name}`}>
+              <Button type="text" size="small" danger disabled={editingDisabled}
+                aria-label={`移除 ${row.name}`} className="market-watchlist__remove" icon={<DeleteOutlined />}
+                onClick={(e) => { e.stopPropagation(); onRemoveSymbol(row.sym); }} />
+            </Tooltip>
+          </div>;
+        })}
       </div>
+    </Spin>
 
-      <div className="sva-watch-sider__search">
-        <AutoComplete
-          value={draft}
-          disabled={editingDisabled}
-          options={stockOptions}
-          onSearch={fetchStockOptions}
-          filterOption={false}
-          onChange={(v) => setDraft(String(v || ""))}
-          onSelect={(v) => onAddFromSearch(v, { clearDraft: true })}
-          className="sva-watch-sider__ac"
-          placeholder="代码 / 简称"
-          allowClear
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              // 下拉选项存在键盘焦点时由 AutoComplete 的 onSelect 统一处理。
-              if (e.target.getAttribute("aria-activedescendant")) return;
-              e.preventDefault();
-              onAddFromSearch(draft, { clearDraft: true });
-            }
-          }}
-        />
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          aria-label="添加股票"
-          disabled={editingDisabled}
-          loading={savingList || stockIndexLoading}
-          onClick={() => onAddFromSearch(draft, { clearDraft: true })}
-        />
+    <footer className="market-watchlist__footer">
+      <div className="market-watchlist__actions">
+        <Button icon={<ReloadOutlined />} loading={priceContextLoading} disabled={disabled || !symbols.length}
+          onClick={() => void onRefreshQuotes?.()}>刷新行情</Button>
+        <Button icon={<ImportOutlined />} aria-expanded={batchOpen} aria-controls={batchId}
+          onClick={() => setBatchOpen((value) => !value)}>批量导入</Button>
       </div>
-
-      <div className="sva-watch-sider__actions">
-        <Button
-          size="small"
-          icon={<ReloadOutlined />}
-          loading={priceContextLoading}
-          disabled={disabled || !symbols.length}
-          onClick={() => void onRefreshQuotes?.()}
-        >
-          行情
-        </Button>
-        <Button size="small" disabled={disabled} loading={stockIndexLoading} onClick={() => void onRebuildUniverse?.()}>
-          检索库
-        </Button>
+      <div className="market-watchlist__import" id={batchId} hidden={!batchOpen}>
+        <Input.TextArea value={batchText} onChange={(e) => setBatchText(e.target.value)}
+          autoSize={{ minRows: 3, maxRows: 5 }} placeholder="600519 000001，或粘贴多行代码"
+          aria-label="批量导入股票代码" disabled={editingDisabled} />
+        <Space size={8} wrap>
+          <Button size="small" type="primary" icon={<ImportOutlined />} loading={importLoading}
+            disabled={editingDisabled} onClick={() => void runBatchImport()}>合并到自选</Button>
+          <Upload accept=".xlsx" disabled={editingDisabled} showUploadList={false} beforeUpload={beforeUploadXlsx}>
+            <Button size="small" icon={<FileExcelOutlined />} loading={xlsxLoading} disabled={editingDisabled}>Excel</Button>
+          </Upload>
+        </Space>
+        <p>仅合并新代码 · Excel 最大 2 MB</p>
       </div>
+      <Button className="market-watchlist__index" type="text" size="small" disabled={disabled}
+        loading={stockIndexLoading} onClick={() => void onRebuildUniverse?.()}>更新股票检索库</Button>
+    </footer>
+  </aside>;
 
-      <Spin spinning={loadingList || stockIndexLoading} className="sva-watch-sider__list-spin">
-        <div className="sva-watch-sider__list">
-          {!rows.length ? (
-            <Text type="secondary" className="sva-watch-sider__empty">
-              股票列表为空
-            </Text>
-          ) : (
-            rows.map((row) => {
-              const active = row.sym === selectedSymbol;
-              return (
-                <div
-                  key={row.sym}
-                  className={`sva-watch-sider__row${active ? " is-active" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onSelectSymbol(row.sym)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onSelectSymbol(row.sym);
-                    }
-                  }}
-                >
-                  <div className="sva-watch-sider__row-main">
-                    <span className="sva-watch-sider__name">{row.name}</span>
-                    <span className="sva-watch-sider__code">{shortCode(row.sym)}</span>
-                  </div>
-                  <div className="sva-watch-sider__row-meta">
-                    <span className={`sva-watch-sider__pct ${pctTone(row.changePct)}`}>
-                      {fmtPct(row.changePct)}
-                    </span>
-                    <Button
-                      type="text"
-                      size="small"
-                      danger
-                      disabled={editingDisabled}
-                      aria-label={`移除 ${row.name}`}
-                      className="sva-watch-sider__del"
-                      icon={<DeleteOutlined />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveSymbol(row.sym);
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </Spin>
-
-      <Collapse
-        ghost
-        size="small"
-        className="sva-watch-sider__batch"
-        items={[
-          {
-            key: "batch",
-            label: "批量添加",
-            children: (
-              <div>
-                <Input.TextArea
-                  value={batchText}
-                  onChange={(e) => setBatchText(e.target.value)}
-                  autoSize={{ minRows: 2, maxRows: 5 }}
-                  placeholder="600519 000001 或粘贴多行"
-                />
-                <Space wrap size={6} style={{ marginTop: 8 }}>
-                  <Button
-                    size="small"
-                    type="primary"
-                    ghost
-                    icon={<ImportOutlined />}
-                    loading={importLoading}
-                    disabled={editingDisabled}
-                    onClick={() => void runBatchImport()}
-                  >
-                    合并
-                  </Button>
-                  <Upload accept=".xlsx" disabled={editingDisabled} showUploadList={false} beforeUpload={beforeUploadXlsx}>
-                    <Button size="small" icon={<FileExcelOutlined />} loading={xlsxLoading}>
-                      Excel
-                    </Button>
-                  </Upload>
-                </Space>
-              </div>
-            ),
-          },
-        ]}
-      />
-    </aside>
-  );
+  return mobile ? <Drawer title={`自选股 · ${symbols.length}`} placement="left" open={mobileOpen}
+    onClose={onMobileClose} width="min(320px, calc(100vw - 28px))" rootClassName="market-watchlist-drawer"
+    styles={{ body: { padding: 0 } }} destroyOnHidden={false}>{content}</Drawer> : content;
 }

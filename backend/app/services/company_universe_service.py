@@ -5,6 +5,7 @@ import asyncio
 import time
 from typing import Any
 
+from app.security.user_context import current_user_id
 from app.services import a_share_stocks, company_profile_em
 from app.storage import universe_company_store
 
@@ -23,36 +24,48 @@ async def refresh_symbols(
     skipped = 0
     updated = 0
     now = time.time()
+    from app.services.runtime_telemetry import record_collection
+    uid = current_user_id.get() or 0
 
     for sym in symbols:
         u = sym.strip().upper()
         if not u:
             continue
+        prev = universe_company_store.get_symbol(u)
         if skip_fresh_days > 0:
-            prev = universe_company_store.get_symbol(u)
             if prev and not prev.get("fetch_error"):
                 ts = int(prev.get("em_fetched_at") or 0)
                 if ts and (now - ts) / 86400.0 < skip_fresh_days:
                     skipped += 1
                     await asyncio.sleep(sleep_sec)
                     continue
+        received = added = 0
+        code = None
         try:
             auto, err = await asyncio.to_thread(company_profile_em.fetch_company_survey, u)
+            received = int(not err and any(auto.values()))
             lk = a_share_stocks.lookup_by_yahoo_symbol(u)
             if lk and not (auto.get("name") or "").strip():
                 auto["name"] = (lk.get("name") or "").strip()
             universe_company_store.upsert_symbol(u, auto, err)
+            saved = universe_company_store.get_symbol(u) or {}
+            added = int(bool(received) and saved.get("auto") != (prev or {}).get("auto"))
             if err:
                 errors[u] = err
+                code = "source_unavailable"
             else:
                 updated += 1
         except Exception as e:  # noqa: BLE001
+            code = "storage_failed" if received else "source_unavailable"
             errors[u] = f"异常：{e!s}"
             universe_company_store.upsert_symbol(
                 u,
                 {"name": "", "org_name": "", "main_business": "", "industry": "", "intro": ""},
                 errors[u],
             )
+        finally:
+            record_collection("company_profile", "eastmoney_f10", records_received=received, records_added=added,
+                              status="failed" if code else "success", error_code=code, user_id=uid)
         await asyncio.sleep(sleep_sec)
 
     meta = universe_company_store.meta()

@@ -10,6 +10,7 @@ from app.storage import profile_store
 _SYMBOL_RE = re.compile(r"^[A-Z0-9.^]{1,16}$")
 
 _LEGACY_FILE = "watchlist.json"
+DEFAULT_SYMBOLS = ("600519.SS", "000001.SZ", "600036.SS", "000333.SZ", "601318.SS")
 
 
 def _watchlists_dir() -> Path:
@@ -39,11 +40,11 @@ def load_symbols(user_id: int) -> list[str]:
     if not p.exists():
         data_asset_manager.atomic_write_json(
             p,
-            {"symbols": ["600519.SS", "000001.SZ"]},
+            {"symbols": list(DEFAULT_SYMBOLS)},
             kind="watchlist",
             key=str(user_id),
             source="default",
-            item_count=2,
+            item_count=len(DEFAULT_SYMBOLS),
             backup=False,
         )
     raw = json.loads(p.read_text(encoding="utf-8"))

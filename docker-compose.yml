@@ -8,6 +8,7 @@ services:
       - backend/.env
     environment:
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      STOCKVIEW_DATA_DIR: /app/data # 容器内唯一数据根；API 与 worker 必须挂载同一卷。
       ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-false}
     volumes:
       - stockviewagent_data:/app/data
@@ -17,6 +18,24 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+  research-worker:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    command: ["python", "-m", "app.research_worker"]
+    env_file:
+      - backend/.env
+    environment:
+      ENABLE_RESEARCH_WORKER: ${ENABLE_RESEARCH_WORKER:-true}
+      STOCKVIEW_DATA_DIR: /app/data # 搬迁持久卷时保持此容器内路径一致。
+      ENABLE_SCHEDULER: "false"
+      ENABLE_STARTUP_DATA_CHECK: "false"
+    volumes:
+      - stockviewagent_data:/app/data
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
   frontend:
     build:
       context: .

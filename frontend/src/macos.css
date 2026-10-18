@@ -1,0 +1,104 @@
+.sva-app-toolbar {
+  height: var(--sva-header-height);
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 20px;
+  padding: 0 24px;
+  background: var(--sva-header-bg);
+  border-bottom: 1px solid var(--sva-separator);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  position: relative;
+  z-index: 5;
+}
+
+.sva-app-toolbar__leading,
+.sva-app-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sva-app-toolbar__actions { justify-content: flex-end; }
+.sva-app-toolbar__actions .sva-header-settings { margin: 0; }
+.sva-app-toolbar__actions .ant-btn { height: 32px; min-width: 32px; }
+.sva-toolbar-divider { height: 20px; width: 1px; background: var(--sva-separator-strong); margin: 0 4px; }
+
+.sva-app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sva-text);
+  white-space: nowrap;
+  font-family: var(--sva-font-display);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.45px;
+}
+.sva-app-brand:hover { color: var(--sva-text); }
+.sva-app-brand__mark { width: 29px; height: 29px; flex-shrink: 0; color: var(--sva-accent); }
+
+.sva-app-nav {
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  gap: 3px;
+  background: var(--sva-fill);
+  border: 1px solid var(--sva-separator);
+  border-radius: 9px;
+}
+.sva-app-nav a {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 20px;
+  border-radius: 6px;
+  color: var(--sva-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.sva-app-nav a:hover { color: var(--sva-text); background: var(--sva-row-hover); }
+.sva-app-nav a.is-active { color: #fff; background: #007aff; box-shadow: 0 1px 3px rgba(0, 91, 195, 0.18); }
+.sva-app-nav .anticon { font-size: 14px; }
+
+/* Consistent native-feeling focus, selection and compact controls. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--sva-accent-border);
+  outline-offset: 2px;
+}
+::selection { background: var(--sva-accent-soft); color: var(--sva-text); }
+.ant-btn-default:not(:disabled) { box-shadow: 0 1px 2px rgba(26, 37, 57, 0.04); }
+.ant-drawer-content, .ant-modal-content { font-family: var(--sva-font); }
+.ant-drawer-header { background: var(--sva-header-bg); }
+.ant-tabs-tab-btn:focus-visible { outline: 2px solid var(--sva-accent); outline-offset: 4px; }
+.ant-input, .ant-input-affix-wrapper, .ant-select-selector, .ant-picker { font-variant-numeric: tabular-nums; }
+.ant-typography pre, pre.research-json { tab-size: 2; }
+.ant-empty-description { color: var(--sva-text-secondary); }
+
+@media (max-width: 760px) {
+  .sva-app-toolbar {
+    height: auto;
+    min-height: 100px;
+    grid-template-columns: 1fr auto;
+    gap: 8px 10px;
+    padding: 11px 14px 10px;
+  }
+  .sva-app-toolbar__leading { grid-column: 1; grid-row: 1; }
+  .sva-app-toolbar__actions { grid-column: 2; grid-row: 1; gap: 3px; }
+  .sva-app-brand { font-size: 16px; gap: 7px; }
+  .sva-app-brand__mark { width: 25px; height: 25px; }
+  .sva-app-nav { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
+  .sva-app-nav a { flex: 1; padding: 5px 12px; }
+  .sva-toolbar-divider { margin: 0 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

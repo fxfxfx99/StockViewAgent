@@ -438,7 +438,9 @@ def _apply_knowledge_context(view: dict[str, Any]) -> dict[str, Any]:
     meta["knowledge_sources"] = len(knowledge)
     meta["rag_context"] = [k.get("summary") for k in knowledge if k.get("summary")]
     out["metadata"] = meta
-    out["confidence"] = round(min(0.95, float(out.get("confidence") or 0.5) + min(len(knowledge), 3) * 0.03), 2)
+    # Source coverage is explanatory evidence, not measured predictive accuracy.
+    # Adding documents must never manufacture statistical confidence.
+    meta["knowledge_coverage"] = {"source_count": len(knowledge), "performance_validated": False}
     if knowledge:
         first_points = knowledge[0].get("key_points") or []
         if first_points:

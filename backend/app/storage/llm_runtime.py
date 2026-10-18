@@ -1,12 +1,18 @@
-"""前端保存的大模型配置（OpenAI 兼容），存 backend/data/llm_runtime.json。"""
+"""前端保存的大模型配置，跟随当前数据目录；旧位置由统一迁移器处理。"""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
-_BACKEND = Path(__file__).resolve().parent.parent
-_FILE = _BACKEND / "data" / "llm_runtime.json"
+from app.config import settings
+
+_LEGACY_FILE = Path(__file__).resolve().parent.parent / "data" / "llm_runtime.json"
+# Explicit overrides remain useful to isolated callers/tests. The default must
+# be resolved per operation, never pinned to a checkout at module-import time.
+_FILE: Path | None = None
 _MISSING = object()
 
 
@@ -21,18 +27,45 @@ def normalize_openai_api_base(url: str) -> str:
     return s
 
 
-def _mkdir() -> None:
-    _FILE.parent.mkdir(parents=True, exist_ok=True)
+def _mkdir() -> Path:
+    path = Path(_FILE) if _FILE is not None else settings.data_dir / "llm_runtime.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def load_runtime() -> dict[str, Any]:
-    _mkdir()
-    if not _FILE.exists():
+    path = _mkdir()
+    if not path.exists():
         return {}
     try:
-        return json.loads(_FILE.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+def _write_runtime(value: dict[str, Any]) -> None:
+    """Replace complete credentials atomically; interrupted writes retain old keys."""
+    path = _mkdir()
+    if path.exists():
+        try:
+            if not isinstance(json.loads(path.read_text(encoding="utf-8")), dict):
+                raise ValueError("invalid configuration")
+        except (OSError, ValueError):
+            raise ValueError("现有模型配置无法读取，保留原文件；请先修复或恢复备份") from None
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".llm-runtime-", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            os.chmod(temporary, 0o600)
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def save_runtime_merge(
@@ -61,8 +94,7 @@ def save_runtime_merge(
     if embedding_api_base is not _MISSING:
         raw_eb = (embedding_api_base or "").strip() if isinstance(embedding_api_base, str) else ""
         cur["embedding_api_base"] = normalize_openai_api_base(raw_eb) if raw_eb else ""
-    _mkdir()
-    _FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_runtime(cur)
     return cur
 
 
@@ -71,8 +103,7 @@ def save_runtime_unified(data: dict[str, Any]) -> dict[str, Any]:
     from app.services.llm_runtime_unify import unify_llm_runtime_fields
 
     unified = unify_llm_runtime_fields(dict(data))
-    _mkdir()
-    _FILE.write_text(json.dumps(unified, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_runtime(unified)
     return unified
 
 

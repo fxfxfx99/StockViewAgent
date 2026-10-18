@@ -1,4 +1,4 @@
-"""K线助手：本地资料 + Prompt + LLM。目录：项目根 kline_learning/"""
+"""K线助手：本地资料 + Prompt + LLM。目录：数据根目录下 kline_learning/"""
 from __future__ import annotations
 
 import asyncio

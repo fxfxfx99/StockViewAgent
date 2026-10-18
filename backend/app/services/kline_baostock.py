@@ -79,7 +79,7 @@ def _rows_to_daily_candles(rows: list[list[str]]) -> list[dict[str, Any]]:
             ts = market_timestamp(dt)
         except (ValueError, TypeError, IndexError):
             continue
-        v = int(round(vol * 100.0))
+        v = int(round(vol))
         candles.append(
             {
                 "t": ts,
@@ -130,7 +130,7 @@ def _rows_to_minute_candles(rows: list[list[str]]) -> list[dict[str, Any]]:
             amt = float(row[7]) if len(row) > 7 else 0.0
         except (ValueError, TypeError, IndexError):
             continue
-        v = int(round(vol * 100.0))
+        v = int(round(vol))
         candles.append(
             {
                 "t": ts,
@@ -194,6 +194,9 @@ def _bundle_from_candles(
         "range": range_param,
         "interval": interval,
         "interval_effective": eff,
+        "price_basis": "raw",
+        "volume_unit": "shares",
+        "adjustflag": "3",
         "candles": candles,
         "metrics": metrics,
     }
@@ -215,7 +218,7 @@ def _bs_frequency_minute(interval: str) -> str | None:
 
 
 def fetch_kline_bundle_baostock_sync(symbol: str, range_param: str, interval: str) -> dict[str, Any]:
-    """日/周/月；前复权 adjustflag=3。"""
+    """日/周/月；不复权 adjustflag=3。"""
     sym = symbol.strip().upper()
     code = _yahoo_to_bs_code(sym)
     bs = _ensure_baostock()
@@ -240,7 +243,7 @@ def fetch_kline_bundle_baostock_sync(symbol: str, range_param: str, interval: st
         interval,
         eff,
         candles,
-        "Baostock query_history_k_data_plus（前复权，HTTP 主源失败兜底）",
+        "Baostock query_history_k_data_plus（不复权，HTTP 主源失败兜底）",
     )
 
 
@@ -254,7 +257,7 @@ def fetch_kline_bundle_baostock_minute_sync(symbol: str, range_param: str, inter
     start = _start_date_str(range_param)
     end = datetime.now(SHANGHAI_TZ).strftime("%Y-%m-%d")
     fields = "date,time,open,high,low,close,volume,amount"
-    rs = bs.query_history_k_data_plus(code, fields, start_date=start, end_date=end, frequency=fq)
+    rs = bs.query_history_k_data_plus(code, fields, start_date=start, end_date=end, frequency=fq, adjustflag="3")
     rows = _query_all(rs)
     candles = _rows_to_minute_candles(rows)
     eff = interval.strip().lower()

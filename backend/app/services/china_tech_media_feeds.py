@@ -93,9 +93,10 @@ async def _fetch_one(
     return out
 
 
-async def fetch_tech_media_feeds(
+async def _fetch_tech_media_feeds(
     limit: int = 40,
     per_feed: int = 25,
+    *, collection_stats: dict,
 ) -> dict[str, Any]:
     limit = max(1, min(limit, 120))
     per_feed = max(8, min(per_feed, 55))
@@ -109,6 +110,7 @@ async def fetch_tech_media_feeds(
             await asyncio.sleep(0.12)
 
     fetch_meta = {lab: len(g) for (lab, _, _), g in zip(TECH_MEDIA_FEEDS, groups)}
+    collection_stats["records_received"] = sum(fetch_meta.values())
 
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -119,8 +121,8 @@ async def fetch_tech_media_feeds(
             seen.add(it["link"])
             merged.append(it)
 
-    if merged:
-        tech_media_store.upsert_and_prune(merged, keep=100)
+    added = tech_media_store.upsert_and_prune(merged, keep=100) if merged else 0
+    collection_stats["records_added"] = added
 
     stored = tech_media_store.list_recent(100)
     stored.sort(
@@ -140,6 +142,10 @@ async def fetch_tech_media_feeds(
 
     return {
         "items": stored[:limit],
+        # Acquisition callers must not count the cached display list as a fetch.
+        "network_items": merged,
+        "records_received": sum(fetch_meta.values()),
+        "records_added": added,
         "feeds": [{"label": a, "url": b} for a, b, _ in TECH_MEDIA_FEEDS],
         "fetched_at": int(time.time()),
         "stored_cap": 100,
@@ -147,3 +153,17 @@ async def fetch_tech_media_feeds(
         "fetch_meta": fetch_meta,
         "warnings": warnings,
     }
+
+
+async def fetch_tech_media_feeds(limit: int = 40, per_feed: int = 25, *, record_activity: bool = True, collection_stats: dict | None = None) -> dict[str, Any]:
+    from app.services.runtime_telemetry import record_collection
+    counts = collection_stats if collection_stats is not None else {}
+    try:
+        result = await _fetch_tech_media_feeds(limit, per_feed, collection_stats=counts)
+    except Exception:
+        if record_activity:
+            record_collection("tech_news", "tech_media_rss", status="failed", error_code="collection_failed", **counts)
+        raise
+    if record_activity:
+        record_collection("tech_news", "tech_media_rss", records_received=result["records_received"], records_added=result["records_added"])
+    return result

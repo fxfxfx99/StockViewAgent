@@ -2,9 +2,11 @@
 
 本机安装与配置台步骤见 [LOCAL_SETUP.md](./LOCAL_SETUP.md)。
 
-本文档说明后端数据能力，供 Transaction Agent、Research Agent、启动预热与脚本调用。
+本文档说明后端数据能力，供 Transaction Agent、研究实验室、基本面 Research Agent、启动预热与脚本调用。
 
 前端单页调用部分 API（见 `frontend/src/api.js`）；完整路由可通过 OpenAPI / 脚本访问。
+
+首次启动只需选择大模型供应商并保存 API Key；免费公开行情默认使用。KlineShare、Tushare 等账号是高级可选项，不阻断首次配置。新账户由本地自动运行流程准备 5 只示例自选，已有或主动清空的列表保持不变。
 
 ## 配置优先级（通用）
 
@@ -29,9 +31,17 @@
 
 自检：`GET /api/market/source-health`。链路说明：`backend/docs/KLINE_DATA_SOURCES.md`。
 
+### 来源自动维护
+
+`source_autopilot.py` 将健康状态保存在研究账本，按**账户与日线/分钟能力**隔离。请求成功还须通过 OHLC、成交量、时间顺序与数值检查；最近 24 小时验证成功的内置来源优先。连续 3 次失败后进入从 5 分钟起的递增冷却，期间跳过，期满重新探测；成功后恢复。维护任务还轮转复测少量公开行情源，不替用户添加付费凭据或启用未知提供商。
+
+新闻发现仅访问内置信任域名：人民网、中新网、新浪及金融界等站点，从页面的 RSS/Atom 声明寻找候选。请求与重定向均校验域名和公网地址，解析结果至少有两个有效条目及近期发布时间才加入；每日复核，连续 3 次失败后从活动清单停用。公开新闻定义跨账户共享，定义版本、证据哈希和路由/新增/停用事件保留在 `research.sqlite3`。
+
+首页 `GET /api/autopilot/status` 提供来源健康摘要，`POST /api/autopilot/reconcile` 协调账户任务。该流程只维护内置适配器的调用顺序和经验证的来源定义，不生成执行任意爬虫代码、不自动安装适配器，也不执行 `git pull`。自动选择“健康”来源只说明接口数据可读，仍不能代替历史时点和严格回测质量检查。
+
 **Transaction Agent** 每次 `GET /api/transaction-agent/views/{symbol}` 拉取 K 线、资金流、基本面快照（优先缓存）。
 
-传入 `as_of=YYYY-MM-DD` 时按上海时区截取当日及之前的 K 线、个股和市场资金序列，`data_as_of` 返回实际最后一根 K 线日期。历史节点不使用当前估值、财务或经营讨论快照：本地财务库只有报告期，无法证明当时已公告。缺失项会在策略详情的数据限制中说明；当前前复权因子与策略规则仍可能影响结果，因此不等同于严格的时点回测。
+传入 `as_of=YYYY-MM-DD` 时按上海时区截取当日及之前的 K 线、个股和市场资金序列，`data_as_of` 返回实际最后一根 K 线日期。历史节点不使用当前估值、财务或经营讨论快照：报告期不能证明当时已公告，缺少可靠发布时间和可得时间的记录不能作为时点因子。缺失项会在策略详情的数据限制中说明；当前前复权因子与策略规则仍可能影响结果，因此不等同于严格的时点回测。
 
 ## 股票列表与公司资料
 
@@ -59,6 +69,14 @@
 
 路由前缀：`/api/news/*`。
 
+### 新闻与财务修订留痕
+
+`news.db` 的 `article_content_revisions` 按内容哈希保存初稿及内容变化，含正文、来源、发布时间、首次观测时间；原 `articles` 继续提供最新视图。Python `news_store.list_content_revisions(article_id, observed_before=...)` 可审阅本地观测历史。抓取时间变化或重复导入不会制造相同内容的新版本，原有模型解读历史单独保留。
+
+`company_fundamentals.db` 的 `company_record_revisions` 保存基础资料、财务指标、经营讨论的完整原始行、内容与行哈希、来源文件、观测时间及源数据明确给出的公告/可用时间。Python `company_fundamentals_store.list_revisions(symbol, dataset=..., observed_before=...)` 支持按本地观测时间检查版本；最新查询接口保持不变。经营讨论正文也随版本保存。
+
+缺少发布时间时留空，不把 `EndDate` / `Accper` 或导入时间当成公告时间；只有公告日期、没有时区与具体时间时也不补造可用时刻。旧数据库升级时保留当时仍存在的最新行，不能恢复升级前已被覆盖的内容。这些修订数据标记为解释和审计用途，不自动加入严格量价回测或宣称历史可得性已验证。
+
 ## LLM 与解读任务
 
 | 能力 | 配置 | 说明 |
@@ -78,9 +96,21 @@
 - `/api/decision-signals/*` — 基于 Transaction Agent 输出的信号沉淀
 - `/api/stock-picker-agents/*` — 自定义选股 Agent
 
-## Research Agent（无 HTTP 路由）
+## 研究实验室：持久行情与验证证据
 
-`app/services/research_agent/` 提供完整研究流水线（基本面、估值、新闻、风险等），数据来自：
+前端 `/research` 与 `/api/research/*` 使用独立研究 worker。`research_data.py` 复用行情管线和图表缓存，将原始 JSON、带来源与时点的 Parquet、校验 manifest 保存为不可变批次；`research_store.py` 以 SQLite WAL 保存账户隔离的策略、实验、快照、任务和预算。旧快照保留原引用，新修订只影响新快照。
+
+首次按 5 年日线采集；已有足够覆盖时转为近期增量，覆盖不足继续补采。离线缓存会标记陈旧，来源、复权口径或成交量单位变化会隔离分支。Baostock `adjustflag=3` 为不复权，成交量按股保存；不能与前复权数据无标记拼接。
+
+当前行情提供者返回 OHLCV，并不自动证明完整的历史停牌/ST、涨跌停、证券存续、公司行动及信息可得时间。因此自动行情快照通常用于探索，不直接取得严格晋升资格。可信历史数据可经 `POST /api/research/import` 导入；完整字段、格式样例、覆盖检查及税前分红模拟限制见 [研究实验室说明](RESEARCH_LAB.md#严格数据与可信导入)。
+
+GitHub 学习入口固定在 `research_generation.py`，读取 Qlib、RD-Agent、Freqtrade、vn.py 的指定公开文档，保留 commit、内容哈希和知识卡。资料只用于提出待验证假设，不运行远程代码，也不把仓库宣传或示例收益作为本地实验结论。
+
+资产目录会扫描研究 SQLite 与所有不可变批次，但 JSON 写入前备份不是完整研究备份；恢复必须同时保留数据库、原始 JSON、Parquet 和 manifest，见 [备份与恢复](RESEARCH_LAB.md#备份与恢复)。
+
+## 基本面 Research Agent（Python 接口）
+
+`app/services/research_agent/` 提供基本面、估值、新闻、风险等研究流水线，与上述策略实验室是两个入口，数据来自：
 
 - `research_agent/data_bundle.py`（K 线、Yahoo 基本面、issuer RAG）
 - `issuer_rag_service` + 本地上传 `issuer_uploads/`

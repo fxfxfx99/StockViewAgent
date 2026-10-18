@@ -4,12 +4,14 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import json
 import logging
 import threading
 import time
 from typing import Any
 
 from app.config import settings
+from app.security.user_context import current_user_id
 from app.services import xueqiu_http, xueqiu_pipeline
 from app.storage import company_updates_store, watchlist_store
 
@@ -18,6 +20,31 @@ _SECTIONS = ("company", "major_events", "news")
 _FORCE_MIN_INTERVAL_SEC = 30
 _locks_guard = threading.Lock()
 _symbol_locks: dict[str, threading.Lock] = {}
+
+
+def _content_key(value):
+    if isinstance(value, dict):
+        return {key: _content_key(item) for key, item in value.items() if key not in {"fetched_at", "content_observed_at", "saved_at"}}
+    if isinstance(value, list):
+        return [_content_key(item) for item in value]
+    return value
+
+
+def _collection_counts(fresh, previous):
+    received = added = 0
+    for field in _SECTIONS:
+        if (fresh.get("section_errors") or {}).get(field) or field in (fresh.get("stale_fields") or []):
+            continue
+        if (fresh.get("sources") or {}).get(field) not in {"雪球", "东方财富"}:
+            continue  # Unknown/local provenance cannot establish a network fetch.
+        value = fresh.get(field)
+        incoming = value if isinstance(value, list) else [value] if value else []
+        prior = previous.get(field)
+        old = prior if isinstance(prior, list) else [prior] if prior else []
+        key = lambda row: json.dumps(_content_key(row), sort_keys=True, ensure_ascii=False)
+        received += len(incoming)
+        added += len({key(row) for row in incoming} - {key(row) for row in old})
+    return received, added
 
 
 def refresh_interval_sec() -> int:
@@ -124,6 +151,8 @@ def get_company_bundle(symbol: str, force: bool = False) -> dict[str, Any]:
         return xueqiu_pipeline.run_company_bundle(symbol)
 
     with _symbol_lock(symbol):
+        from app.services.runtime_telemetry import record_collection
+        uid = current_user_id.get() or 0
         now = int(time.time())
         fingerprint = _fingerprint()
         record = company_updates_store.load(symbol)
@@ -157,10 +186,21 @@ def get_company_bundle(symbol: str, force: bool = False) -> dict[str, Any]:
             "fingerprint": fingerprint,
             "bundle": _merge_result(fresh, previous, int(time.time())),
         }
+        received, added = _collection_counts(fresh, previous)
+        failed = any((fresh.get("section_errors") or {}).values())
+        status = "failed" if failed else "success"
+        error_code = "partial_source_failure" if failed and received else "source_unavailable" if failed else None
+        stored_bytes = 0
         try:
             company_updates_store.save(symbol, record)
+            if received:
+                stored_bytes = len((json.dumps(record, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
         except OSError:
             logger.exception("公司资料缓存写入失败 symbol=%s", symbol)
+            added = 0
+            status, error_code = "failed", "storage_failed"
+        record_collection("company_profile", "company_sources", records_received=received, records_added=added,
+                          bytes_stored=stored_bytes, status=status, error_code=error_code, user_id=uid)
         return _response(record, cached=False)
 
 

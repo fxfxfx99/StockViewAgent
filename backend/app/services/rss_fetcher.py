@@ -95,7 +95,7 @@ def _symbol_feed_jobs(symbols: list[str]) -> list[tuple[str, str, str | None]]:
     return jobs
 
 
-async def fetch_news_for_symbols(symbols: list[str]) -> list[dict[str, Any]]:
+async def fetch_news_for_symbols(symbols: list[str], *, collection_stats: dict | None = None) -> list[dict[str, Any]]:
     sym_list = [s.strip().upper() for s in symbols if s and s.strip()]
     sym_jobs = _symbol_feed_jobs(sym_list)
     global_jobs = [(url, label, None) for label, url in GLOBAL_FEEDS]
@@ -121,6 +121,8 @@ async def fetch_news_for_symbols(symbols: list[str]) -> list[dict[str, Any]]:
             continue
         max_e = 18 if sym else 30
         merged.extend(_parse_feed(body, label, sym, max_entries=max_e))
+    if collection_stats is not None:
+        collection_stats["records_received"] = len(merged)
 
     by_id: dict[str, dict[str, Any]] = {}
     for it in merged:

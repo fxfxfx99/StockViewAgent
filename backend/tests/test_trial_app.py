@@ -118,6 +118,11 @@ def test_allowlist_covers_frontend_api_contract(client):
     for method, _quote, path in calls:
         path = path.replace("${encodeURIComponent(symbol)}", "000001.SZ")
         response = client.request(method.upper(), "/api" + path)
+        # The persistent research worker belongs to the local deployment. Adding
+        # its authenticated UI must not silently expose it on the public trial.
+        if path.startswith(("/research/", "/autopilot/", "/runtime/", "/admin/data-assets", "/settings/llm")):
+            assert response.status_code == 404
+            continue
         assert response.status_code == 200, (method, path, response.text)
         assert response.json()["path"] == "/api" + path
         assert response.headers["cache-control"] == "no-store"

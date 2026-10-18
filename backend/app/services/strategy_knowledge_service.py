@@ -777,13 +777,14 @@ def _filter_strategy_notes(strategy: str, points: list[str], risks: list[str]) -
 
 def ingest_local_transaction_agent_kb() -> dict[str, Any]:
     seed_sources()
-    notes = settings.data_dir.parent / "app" / "resources" / "transaction_agent" / "notes" / "strategy_kb_notes.md"
+    notes = Path(__file__).resolve().parent.parent / "resources" / "transaction_agent" / "notes" / "strategy_kb_notes.md"
+    source_ref = "resource://stockviewagent/transaction_agent/notes/strategy_kb_notes.md"
     count = 0
     store.upsert_source(
         {
             "id": "transaction_agent_local_notes",
             "title": "TransactionAgent local strategy notes",
-            "url": str(notes),
+            "url": source_ref,
             "source_type": "local_notes",
             "publisher": "StockViewAgent TransactionAgent",
             "language": "zh",
@@ -809,7 +810,7 @@ def ingest_local_transaction_agent_kb() -> dict[str, Any]:
                         "key_points": _summarize_excerpt(excerpt, strategy, "本地策略笔记")["key_points"],
                         "risks": _summarize_excerpt(excerpt, strategy, "本地策略笔记")["risks"],
                         "content_excerpt": excerpt[:_MAX_EXCERPT_CHARS],
-                        "url": str(notes),
+                        "url": source_ref,
                         "quality_score": 0.7,
                     }
                 )
@@ -857,7 +858,7 @@ def synthesize_strategy(strategy: str) -> dict[str, Any]:
         risks = ["公开资料不足时降低策略置信度，避免过度拟合单一信号。"]
     summary = (
         f"{strategy} 强化摘要：综合 {len(items)} 条知识项，优先用于补充信号解释、"
-        "不做条件、风险提示和评分置信度。"
+        "不做条件和风险提示；资料覆盖不代表策略效果已经验证。"
     )
     store.upsert_item(
         {
@@ -868,7 +869,7 @@ def synthesize_strategy(strategy: str) -> dict[str, Any]:
             "key_points": points[:8],
             "risks": risks[:5],
             "content_excerpt": "\n".join([f"- {x}" for x in points[:8] + risks[:5]]),
-            "quality_score": 0.92 if len(items) >= 3 else 0.72,
+            "quality_score": 0.5,  # Unvalidated synthesis, independent of document count.
         }
     )
     return {

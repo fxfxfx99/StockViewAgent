@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useLayoutEffect, useMemo, useState } from "react";
 import { App as AntApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { appDarkTheme, appLightTheme, THEME_STORAGE_KEY } from "./appTheme.js";
@@ -8,16 +8,17 @@ const ThemeModeContext = createContext(null);
 function readStoredMode() {
   try {
     const v = localStorage.getItem(THEME_STORAGE_KEY);
-    return v === "light" ? "light" : "dark";
+    if (v === "light" || v === "dark") return v;
   } catch {
-    return "dark";
+    /* Private browsing may disable storage; system appearance still works. */
   }
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function ThemeModeProvider({ children }) {
   const [mode, setMode] = useState(readStoredMode);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.setAttribute("data-theme", mode);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, mode);
