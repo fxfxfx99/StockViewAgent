@@ -100,6 +100,7 @@ API 文档：<http://127.0.0.1:8001/docs>
 | `KLINESHARE_API_KEY` | 行情（也可只在配置台填写） |
 | `TUSHARE_TOKEN` | 行情 / 宏观兜底 |
 | `ENABLE_SCHEDULER` | 本地默认可开；多副本部署只让一个实例为 `true` |
+| `ENABLE_DATA_COLLECTION` | 默认 `true`，在 API 内运行中央公共数据采集队列；自动排队另受 `ENABLE_SCHEDULER` 和数据中心页面开关控制 |
 | `ENABLE_RESEARCH_WORKER` | 默认 `true`，控制独立研究 worker 的调度和执行；与 `ENABLE_SCHEDULER` 分开 |
 | `STOCKVIEW_DATA_DIR` | 数据根目录，可写入 `backend/.env` 或通过 shell `export` 指定；相对路径以 `backend/` 为基准，修改后重启全部服务 |
 | `SVA_OPEN_BROWSER` | 启动器环境变量，设为 `false` 可禁止自动打开浏览器，与 `--no-browser` 等效 |
@@ -109,6 +110,12 @@ API 文档：<http://127.0.0.1:8001/docs>
 
 完整列表见 `backend/.env.example`。数据源分层说明见 [DATA_SOURCES.md](./DATA_SOURCES.md)。
 
+### 数据中心与自动采集
+
+管理员访问 `/data` 可浏览分类文件、来源状态和任务队列，调整自动采集、股票轮询、每日额度、磁盘下限与公共资料 RAG。默认开启中央采集，每天最多启动 120 个逻辑任务，每个股票类任务最多 10 个标的，剩余空间低于 1 GiB 时暂停领取任务；一个逻辑任务可能请求多项上游数据。采集本身不调用模型。
+
+`ENABLE_DATA_COLLECTION=true`（默认）在 API 内启动中央采集 worker；`ENABLE_SCHEDULER` 控制自动排队。页面关闭自动采集后，手动任务仍可处理；设 `ENABLE_DATA_COLLECTION=false` 并重启会停止中央 worker，日历在 `ENABLE_SCHEDULER=true` 时回退独立监控。缓存自动回收另有开关，默认关闭，回收区仍占用磁盘。完整来源、开关含义、PIT 限制与清理流程见 [数据中心说明](DATA_CENTER.md)。
+
 ## 本地数据目录与搬迁
 
 默认数据根目录是 `backend/data/`。API、研究 worker 与启动监督器使用同一 `STOCKVIEW_DATA_DIR`；shell 环境变量优先于 `backend/.env`，相对路径始终相对项目的 `backend/`，与执行命令时所在目录无关。配置在进程启动时确定，修改后需重启。
@@ -116,12 +123,15 @@ API 文档：<http://127.0.0.1:8001/docs>
 | 根目录内的位置 | 内容 |
 |---|---|
 | `research.sqlite3`、`research/`、其它业务数据库 | 策略、实验、队列、模拟账户、运行用量、新闻及财务修订 |
+| `tracking.sqlite3` | 关注判断、历史修订、冻结证据、人工复盘、变化游标与阅读反馈 |
+| `data_center.sqlite3`、`datasets/` | 采集任务、预算、来源状态、公开数据不可变批次与检索修订 |
 | `issuer_uploads/`、`kline_learning/` | 上传原件、资料清单、提示词与资料索引 |
 | `imports/company_fundamentals/` | 财务、管理层讨论和公司基本信息 CSV 原件 |
 | `users.db`、`watchlists/`、配置 JSON | 账户、自选股、已保存的 LLM 和行情 API 配置 |
 | `runtime/logs/`、`runtime/pids/` | 本地服务日志、监督器状态和 PID |
 | `INDEX.md`、`_managed/catalog.json` | 分类说明与相对路径文件索引 |
 | `_managed/backups/`、`_managed/legacy/` | 部分 JSON 历史版本与旧目录冲突归档 |
+| `_managed/cache/`、`_managed/quarantine/` | 缓存策略、清理预览、可恢复回收文件与操作记录 |
 
 设置 → 连接与数据 → 高级设置 → **本地数据目录** 可查看实际位置、总大小、文件数和分类，并刷新索引。索引刷新只扫描已有文件；分类中的“可重建”不表示系统会自动删除缓存。
 

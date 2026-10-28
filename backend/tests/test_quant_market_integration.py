@@ -65,8 +65,13 @@ def test_recorded_optimization_consumes_holdout_once_and_reuses_saved_result(mon
         assert first["holdout_status"] == "evaluated"
         assert sum(t == holdout_start for t in calls) == 1
         calls.clear()
+        # Adding read-side provenance to legacy rows, or fetching them in a new
+        # immutable batch, must reuse the same already-consumed holdout result.
+        for bar in bars:
+            bar["batch_id"] = "new-acquisition-batch"
         again = asyncio.run(quant.optimize_backtest_from_market(**_optimize()))
         assert again["reused_result"] and again["holdout_evaluation_count"] == 0
+        assert again["request_id"] == first["request_id"]
         assert again["best"] == first["best"] and not calls
         altered = asyncio.run(quant.optimize_backtest_from_market(**_optimize(param_grid={"fast": [4], "slow": [6]})))
         assert altered["holdout_status"] == "already_consumed"

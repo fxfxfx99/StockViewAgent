@@ -126,4 +126,12 @@ def build_programmatic_citations(
             }
         )
 
+    for source in (bundle.get("economic_calendar") or {}).get("evidence_sources") or []:
+        out.append({
+            "id": source["source_id"], "title": str(source.get("title") or ""),
+            "source_type": "other", "time": source.get("published_at"),
+            "url": source.get("url"), "source_label": str(source.get("source") or "全球经济金融事件日历"),
+            "excerpt": str(source.get("text") or "")[:500],
+        })
+
     return out

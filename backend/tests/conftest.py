@@ -8,6 +8,7 @@ _TEST_ROOT = tempfile.TemporaryDirectory(prefix="stockviewagent-tests-")
 os.environ["STOCKVIEW_DATA_DIR"] = _TEST_ROOT.name
 os.environ["ENABLE_RESEARCH_WORKER"] = "false"
 os.environ["ENABLE_SCHEDULER"] = "false"
+os.environ["ENABLE_DATA_COLLECTION"] = "false"
 os.environ["COMPANY_AUTO_REFRESH_ENABLED"] = "false"
 for _name in (
     "OPENAI_API_KEY",

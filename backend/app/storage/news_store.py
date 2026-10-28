@@ -16,6 +16,11 @@ from app.services.news_priority import classify_priority
 from app.storage import watchlist_store
 
 
+_ARTICLE_WITH_REVISION = """SELECT a.*,
+    (SELECT CAST(r.id AS TEXT) FROM article_content_revisions r
+     WHERE r.article_id=a.id ORDER BY r.id DESC LIMIT 1) AS revision_id FROM articles a """
+
+
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
     path = getattr(settings, "database_path", settings.data_dir / "news.db")
@@ -148,10 +153,42 @@ def _record_content_revision(conn: sqlite3.Connection, item: dict, aid: str, *, 
     snapshot = _content_snapshot(item)
     encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(encoded.encode()).hexdigest()
+    latest = conn.execute("SELECT content_hash FROM article_content_revisions WHERE article_id=? ORDER BY id DESC LIMIT 1", (aid,)).fetchone()
+    if latest and latest[0] == digest:
+        return
     observed = (item.get("fetched_at") if origin == "archive_write" else item.get("content_observed_at")) or item.get("fetched_at") or item.get("saved_at") or time.time()
-    conn.execute("""INSERT OR IGNORE INTO article_content_revisions
+    conn.execute("""INSERT INTO article_content_revisions
       (article_id,content_hash,snapshot_json,published_ts,first_observed_at,recorded_at,origin)
       VALUES(?,?,?,?,?,?,?)""", (aid, digest, encoded, item.get("published_ts"), observed, time.time(), origin))
+
+
+def _migrate_revision_sequence(conn: sqlite3.Connection) -> bool:
+    """Keep old citation IDs while allowing a corrected article to return to A.
+
+    Version identity is an observation sequence, not just the distinct contents
+    ever seen. The migration and restoration of immutability are one transaction.
+    """
+    legacy = any(index["unique"] and [column["name"] for column in conn.execute(
+        "SELECT name FROM pragma_index_info(?) ORDER BY seqno", (index["name"],))] == ["article_id", "content_hash"]
+        for index in conn.execute("PRAGMA index_list(article_content_revisions)"))
+    if not legacy:
+        return False
+    sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name='article_content_revisions'").fetchone()
+    conn.execute("""CREATE TABLE article_content_revisions_sequence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, article_id TEXT NOT NULL,
+        content_hash TEXT NOT NULL, snapshot_json TEXT NOT NULL, published_ts REAL,
+        first_observed_at REAL NOT NULL, recorded_at REAL NOT NULL, origin TEXT NOT NULL)""")
+    conn.execute("INSERT INTO article_content_revisions_sequence SELECT * FROM article_content_revisions ORDER BY id")
+    conn.execute("DROP TABLE article_content_revisions")
+    conn.execute("ALTER TABLE article_content_revisions_sequence RENAME TO article_content_revisions")
+    if sequence:
+        conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='article_content_revisions'", (sequence[0],))
+    conn.execute("CREATE INDEX idx_news_revision_observed ON article_content_revisions(article_id,first_observed_at,id)")
+    conn.execute("""CREATE TRIGGER news_revision_no_update BEFORE UPDATE ON article_content_revisions
+        BEGIN SELECT RAISE(ABORT,'News content revisions are immutable'); END""")
+    conn.execute("""CREATE TRIGGER news_revision_no_delete BEFORE DELETE ON article_content_revisions
+        BEGIN SELECT RAISE(ABORT,'News content revisions are immutable'); END""")
+    return True
 
 
 def _write_article(conn: sqlite3.Connection, item: dict, aid: str, symbols: list[str], existing: dict | None = None) -> dict:
@@ -323,8 +360,7 @@ def init_db() -> None:
           CREATE TABLE IF NOT EXISTS article_content_revisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT, article_id TEXT NOT NULL,
             content_hash TEXT NOT NULL, snapshot_json TEXT NOT NULL, published_ts REAL,
-            first_observed_at REAL NOT NULL, recorded_at REAL NOT NULL, origin TEXT NOT NULL,
-            UNIQUE(article_id,content_hash));
+            first_observed_at REAL NOT NULL, recorded_at REAL NOT NULL, origin TEXT NOT NULL);
           CREATE INDEX IF NOT EXISTS idx_news_revision_observed
             ON article_content_revisions(article_id,first_observed_at,id);
           CREATE TRIGGER IF NOT EXISTS news_revision_no_update BEFORE UPDATE ON article_content_revisions
@@ -332,6 +368,9 @@ def init_db() -> None:
           CREATE TRIGGER IF NOT EXISTS news_revision_no_delete BEFORE DELETE ON article_content_revisions
             BEGIN SELECT RAISE(ABORT,'News content revisions are immutable'); END;
         """)
+        conn.execute("BEGIN IMMEDIATE")
+        migrated = _migrate_revision_sequence(conn)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_news_revision_sequence ON article_content_revisions(article_id,id)")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(articles)")}
         for name, kind in (("matched_symbols", "TEXT"), ("content", "TEXT"), ("identity_key", "TEXT"),
                            ("fetched_at", "REAL"), ("content_observed_at", "REAL"), ("related_codes", "TEXT"),
@@ -361,6 +400,12 @@ def init_db() -> None:
                     [json.dumps(sorted(evidence)), json.dumps(evidence, ensure_ascii=False), row["id"]],
                 )
             conn.execute("INSERT INTO news_schema_meta VALUES('match_evidence_backfill_v1','1')")
+        if migrated:
+            # An old store may already have returned to a prior body while the
+            # uniqueness constraint suppressed its final observation. Preserve
+            # that current body's recorded observation, never backdate a fetch.
+            for row in conn.execute("SELECT * FROM articles").fetchall():
+                _record_content_revision(conn, _row_data(row), row["id"], origin="sequence_migration")
 
 
 def list_content_revisions(article_id: str, *, observed_before: float | None = None,
@@ -508,7 +553,7 @@ def _as_news(row: Any, analyses: list[dict] | None = None, symbol: str | None = 
 
 
 def _stock_items(conn: sqlite3.Connection, symbol: str, *, since_ts: float | None = None) -> list[dict]:
-    rows = conn.execute("""SELECT a.* FROM articles a WHERE a.duplicate_of IS NULL AND
+    rows = conn.execute(_ARTICLE_WITH_REVISION + """WHERE a.duplicate_of IS NULL AND
       (EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(a.match_evidence) THEN a.match_evidence ELSE '{}' END) e WHERE e.key=?)
        OR EXISTS(SELECT 1 FROM article_stock_analysis s WHERE s.article_id=a.id AND s.stock_code=? AND s.relevance_score>=?))""",
       [symbol, symbol, _threshold()]).fetchall()
@@ -552,7 +597,7 @@ def list_archive(limit: int = 40, offset: int = 0, symbol: str | None = None,
         if symbol:
             items = _stock_items(conn, symbol, since_ts=since_ts)
         else:
-            rows = conn.execute("SELECT * FROM articles WHERE duplicate_of IS NULL").fetchall()
+            rows = conn.execute(_ARTICLE_WITH_REVISION + "WHERE a.duplicate_of IS NULL").fetchall()
             items = [_as_news(row, _analysis_rows(conn, row["id"])) for row in rows
                      if since_ts is None or (row["published_ts"] or 0) >= since_ts]
         if lookback_days is not None:
@@ -631,9 +676,9 @@ def list_pending(symbols: list[str], limit: int = 10, *, max_age_days: int | Non
     cutoff = now - max_days * 86400 if max_days > 0 else 0
     with _connect() as conn:
         if max_age_days is not None:
-            rows = conn.execute("SELECT * FROM articles WHERE duplicate_of IS NULL AND published_ts BETWEEN ? AND ? ORDER BY published_ts DESC,saved_at DESC", [cutoff, now]).fetchall()
+            rows = conn.execute(_ARTICLE_WITH_REVISION + "WHERE a.duplicate_of IS NULL AND published_ts BETWEEN ? AND ? ORDER BY published_ts DESC,saved_at DESC", [cutoff, now]).fetchall()
         else:
-            rows = conn.execute("SELECT * FROM articles WHERE duplicate_of IS NULL AND (published_ts IS NULL OR published_ts>=?) ORDER BY published_ts DESC,saved_at DESC", [cutoff]).fetchall()
+            rows = conn.execute(_ARTICLE_WITH_REVISION + "WHERE a.duplicate_of IS NULL AND (published_ts IS NULL OR published_ts>=?) ORDER BY published_ts DESC,saved_at DESC", [cutoff]).fetchall()
         selected = []
         for row in rows:
             if row["id"] in (exclude_ids or set()):

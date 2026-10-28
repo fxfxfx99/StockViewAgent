@@ -55,7 +55,7 @@
   justify-content: center;
   align-items: center;
   gap: 7px;
-  padding: 7px 20px;
+  padding: 7px 14px;
   border-radius: 6px;
   color: var(--sva-text-secondary);
   font-size: 13px;
@@ -81,7 +81,7 @@
 .ant-typography pre, pre.research-json { tab-size: 2; }
 .ant-empty-description { color: var(--sva-text-secondary); }
 
-@media (max-width: 760px) {
+@media (max-width: 1240px) {
   .sva-app-toolbar {
     height: auto;
     min-height: 100px;
@@ -94,8 +94,20 @@
   .sva-app-brand { font-size: 16px; gap: 7px; }
   .sva-app-brand__mark { width: 25px; height: 25px; }
   .sva-app-nav { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
-  .sva-app-nav a { flex: 1; padding: 5px 12px; }
+  .sva-app-nav a { flex: 1; padding: 5px 8px; }
   .sva-toolbar-divider { margin: 0 2px; }
+}
+
+@media (max-width: 600px) {
+  .sva-app-nav { gap: 1px; }
+  .sva-app-nav a { min-width: 0; gap: 5px; padding-inline: 5px; font-size: 11px; }
+  .sva-app-nav .anticon { display: none; }
+}
+
+@media (max-width: 420px) {
+  .sva-app-nav { gap: 1px; }
+  .sva-app-nav a { min-width: 0; gap: 4px; padding-inline: 4px; font-size: 11px; }
+  .sva-app-nav .anticon { font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

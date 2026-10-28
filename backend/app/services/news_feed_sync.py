@@ -91,6 +91,8 @@ async def sync_all_sources_to_archive(
     st = news_store.stats()
     return {
         "upserted": n,
+        "records_received": received,
+        "records_added": saved.get("records_added", 0),
         "merged_unique": len(enriched),
         "symbols_queried": sym_list,
         "lookback_days": lookback_days,

@@ -250,10 +250,13 @@ def test_corrupt_discovered_rows_do_not_break_the_registry():
     assert svc.discovered_news_sources() == []
 
 
-def test_first_queued_job_is_collection_before_optional_maintenance(monkeypatch):
+def test_local_tracking_precedes_collection_and_optional_maintenance(monkeypatch):
     from app.services import local_autopilot as auto
     from app.services.market_time import SHANGHAI_TZ
     monkeypatch.setattr(settings, "enable_research_worker", True)
     result = auto.reconcile(91, now=datetime(2026, 10, 19, 17, tzinfo=SHANGHAI_TZ))
-    assert result["queued_jobs"][0]["kind"] == "collect"
+    assert result["queued_jobs"][0]["kind"] == "watch_review"
+    first = ResearchStore().claim_job("test", user_id=91)
+    assert first["kind"] == "watch_review"
+    ResearchStore().complete_job(91, first["id"], first["lease_token"], {})
     assert ResearchStore().claim_job("test", user_id=91)["kind"] == "collect"

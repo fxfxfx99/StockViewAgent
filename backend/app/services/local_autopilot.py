@@ -1,7 +1,7 @@
 """Local, user-scoped setup and queue reconciliation; no model or network calls."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
 import re
@@ -105,17 +105,21 @@ def _ensure_job(user_id, kind, payload, logical_key, now):
         return previous
     failed = previous and (previous["status"] == "failed" or
                            (previous["status"] == "completed" and (previous.get("result") or {}).get("status") in _RETRY_RESULTS))
+    continuation = bool(kind == "watch_review" and previous and previous["status"] == "completed"
+                        and (previous.get("result") or {}).get("status") == "partial"
+                        and not (previous.get("result") or {}).get("errors"))
     if previous and not failed:
         return previous
     activated = bool(previous and (previous.get("result") or {}).get("status") == "configuration_required" and llm_configured(user_id))
-    if failed and not activated and now - previous["updated_at"] < REPAIR_COOLDOWN_SECONDS:
+    if failed and not activated and not continuation and now - previous["updated_at"] < REPAIR_COOLDOWN_SECONDS:
         return previous
     # Coalesce an active prior-day/manual task with identical scoped inputs.
     for job in store.list_jobs(user_id, limit=100):
         if job["kind"] == kind and job["status"] in _ACTIVE and job["payload"] == payload:
             store.set_state(user_id, state_key, job["id"])
             return job
-    suffix = f":activated:{previous['id']}" if activated else f":repair:{int(now // REPAIR_COOLDOWN_SECONDS)}" if failed else ""
+    suffix = (f":continue:{previous['id']}" if continuation else f":activated:{previous['id']}" if activated
+              else f":repair:{int(now // REPAIR_COOLDOWN_SECONDS)}" if failed else "")
     job = store.queue_job(user_id, kind, payload, f"autopilot:{logical_key}{suffix}", max_attempts=3)
     store.set_state(user_id, state_key, job["id"])
     return job
@@ -133,6 +137,10 @@ def reconcile(user_id, *, now=None, startup=False):
     symbols = watchlist["research_symbols"]
     jobs = {}
     day, week = now.date().isoformat(), now.strftime("%G-W%V")
+    # The latest Shanghai close is also the catch-up cycle after downtime.
+    # This local-only maintenance has no dependency on prices, models or research.
+    close_day = now.date() if (now.hour, now.minute) >= (16, 30) else (now - timedelta(days=1)).date()
+    jobs["watch_review"] = _ensure_job(user_id, "watch_review", {}, f"watch_review:{close_day.isoformat()}", at)
     # Clearing a watchlist stops new research, but cannot abandon existing paper
     # holdings and their future liquidation or corporate-action accounting.
     from app.services import research_paper
@@ -180,7 +188,7 @@ def status(user_id):
     configured = llm_configured(user_id)
     last = store.get_state(user_id, "autopilot_last", {})
     jobs = {kind: _public_job(store.get_job(user_id, last.get("jobs", {}).get(kind, "")))
-            for kind in ("collect", "github", "research", "paper", "source_maintenance")}
+            for kind in ("collect", "github", "research", "paper", "source_maintenance", "watch_review")}
     heartbeat = store.get_state(0, "worker_heartbeat", {}) or {}
     healthy = heartbeat.get("status") in {"idle", "busy"} and time.time() - heartbeat.get("seen_at", 0) < 150
     worker = {"status": heartbeat.get("status", "offline") if healthy else "offline", "healthy": healthy,
@@ -197,7 +205,7 @@ def status(user_id):
     elif not watchlist["research_symbols"]:
         phase, action = "waiting_watchlist", "添加 A 股自选标的后自动继续"
     elif config["paused"]:
-        phase, action = "paused", "研究已暂停；数据采集和模拟账本维护继续"
+        phase, action = "paused", "研究已暂停；关注判断、数据采集和模拟账本维护继续"
     elif not configured:
         phase, action = "waiting_llm", "保存大模型配置后自动开始研究；数据采集继续"
     elif not healthy:

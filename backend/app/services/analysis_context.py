@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from app.schemas.news import analysis_input_snapshot, clean_text, utc_iso
+from app.services import event_calendar_context, public_data_context
 from app.services.news_priority import classify_priority
 from app.storage import news_store
 
@@ -97,8 +98,18 @@ def build_analysis_context(item: dict[str, Any], stocks: list[dict]) -> dict:
         }
         background.append(source)
         evidence.append(source)
+    calendar = event_calendar_context.retrieve(
+        "news", " ".join([snapshot["title"], snapshot["content_excerpt"][:1200]]),
+        as_of=cutoff, symbols=[s["stock_code"] for s in stocks],
+        industry=" ".join(str(s.get("industry") or "") for s in stocks),
+    )
+    evidence.extend(calendar.get("evidence_sources") or [])
+    limitations.extend(calendar.get("limitations") or [])
+    public_data = public_data_context.retrieve(snapshot["title"], as_of=cutoff, symbols=[s["stock_code"] for s in stocks])
+    evidence.extend(public_data["evidence_sources"])
+    limitations.extend(public_data["limitations"])
     return {"version": 2, "analysis_asof": utc_iso(now),
             "attention": classify_priority(item),
             "quality": {"text_kind": kind, "publication_date_known": published is not None,
                         "limitations": limitations, "confidence_cap": cap},
-            "news_background": background, "evidence_sources": evidence}
+            "news_background": background, "economic_calendar": calendar, "public_data": public_data, "evidence_sources": evidence}

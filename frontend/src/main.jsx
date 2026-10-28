@@ -14,6 +14,9 @@ import "./index.css";
 import "./macos.css";
 
 const ResearchLab = lazy(() => import("./ResearchLab.jsx"));
+const EconomicCalendar = lazy(() => import("./EconomicCalendar.jsx"));
+const DataCenter = lazy(() => import("./DataCenter.jsx"));
+const TodayPage = lazy(() => import("./TodayPage.jsx"));
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -24,7 +27,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <ErrorBoundary>
               <AuthGate>
                 <Routes>
+                  <Route path="/today" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载今日变化" /></div>}><TodayPage /></Suspense>} />
                   <Route path="/research" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载研究实验室" /></div>}><ResearchLab /></Suspense>} />
+                  <Route path="/calendar" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载全球经济日历" /></div>}><EconomicCalendar /></Suspense>} />
+                  <Route path="/data" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载本地数据中心" /></div>}><DataCenter /></Suspense>} />
                   <Route path="/setup" element={<SetupPage />} />
                   <Route path="/*" element={<App />} />
                 </Routes>

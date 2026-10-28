@@ -958,10 +958,10 @@ def _recorded_market_optimization(user_id: int, bundle: dict, sym: str, range_pa
     from app.storage.research_store import ResearchStore, content_hash
     ledger = ResearchStore()
     bars = bundle.get("candles") or []
-    # Acquisition timestamps do not change prices or execution inputs. Keep
+    # Acquisition timestamps and batch provenance do not change prices or execution inputs. Keep
     # nested action announcements, which *do* affect executability.
     stable_bars = [{key: value for key, value in bar.items()
-                    if key not in {"fetched_at", "source_time", "available_at"}} for bar in bars]
+                    if key not in {"fetched_at", "source_time", "available_at", "batch_id"}} for bar in bars]
     request = {"engine_version": ENGINE_VERSION, "symbol": sym, "range": range_param,
                "interval": interval, "data_hash": content_hash(stable_bars), "parameters": kwargs}
     request_id = content_hash(request)

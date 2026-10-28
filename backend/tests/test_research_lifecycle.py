@@ -181,8 +181,8 @@ def test_schedule_resumes_without_duplicate_jobs(monkeypatch):
     first = schedule_due(now)
     second = schedule_due(now)
     assert {j['id'] for j in first} == {j['id'] for j in second}
-    assert {j['kind'] for j in first} == {'collect', 'source_maintenance', 'github'}
-    assert {j['kind'] for j in store.list_jobs(2)} == {'collect', 'source_maintenance', 'github'}
+    assert {j['kind'] for j in first} == {'collect', 'source_maintenance', 'github', 'watch_review'}
+    assert {j['kind'] for j in store.list_jobs(2)} == {'collect', 'source_maintenance', 'github', 'watch_review'}
     assert not any(j['kind'] == 'collect' for j in store.list_jobs(1))  # explicit empty list
 
 
@@ -212,7 +212,7 @@ def test_morning_restart_catchup_does_not_consume_evening_tick(monkeypatch):
     (settings.data_dir / 'watchlists').mkdir()
     (settings.data_dir / 'watchlists' / '1.json').write_text('{"symbols": ["600519.SS"]}')
     morning = schedule_due(datetime(2026, 10, 19, 9, tzinfo=SHANGHAI_TZ), startup=True)
-    assert {j['kind'] for j in morning} == {'collect', 'source_maintenance', 'github'}
+    assert {j['kind'] for j in morning} == {'collect', 'source_maintenance', 'github', 'watch_review'}
     collected = store.claim_job('test-worker', user_id=1, kinds=['collect'])
     store.complete_job(1, collected['id'], collected['lease_token'], {'status': 'collected'})
     evening = schedule_due(datetime(2026, 10, 19, 17, tzinfo=SHANGHAI_TZ))

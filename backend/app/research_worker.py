@@ -43,8 +43,11 @@ def schedule_due(now=None, *, startup=False):
 
 
 async def dispatch(job):
-    from app.services import decision_signal_service, research_generation, research_paper, research_service
     uid, kind, payload = job["user_id"], job["kind"], job["payload"]
+    if kind == "watch_review":
+        from app.services import tracking_service
+        return await asyncio.to_thread(tracking_service.refresh, uid)
+    from app.services import decision_signal_service, research_generation, research_paper, research_service
     if kind == "collect":
         return await research_service.collect_data(uid, payload)
     if kind == "research":

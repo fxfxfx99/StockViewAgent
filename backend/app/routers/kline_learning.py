@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.deps.auth import get_current_user, require_admin
-from app.services import eastmoney_market, kline_pipeline, kline_learning_service as kls
+from app.services import eastmoney_market, event_calendar_context, public_data_context, kline_pipeline, kline_learning_service as kls
 from app.storage import kline_insight_store
 from app.storage.users_store import UserRecord
 
@@ -130,6 +130,10 @@ async def analyze_market(body: AnalyzeMarketBody, _: Annotated[UserRecord, Depen
     except KeyError as e:
         raise HTTPException(400, f"提示词模板占位符与参数不匹配: {e!s}") from e
 
+    calendar = event_calendar_context.retrieve("kline", f"{index_label} 全球经济金融 利率 通胀 货币政策 风险")
+    user_msg += event_calendar_context.prompt_evidence(calendar)
+    public_data = public_data_context.retrieve(f"{index_label} 通胀 经济 汇率")
+    user_msg = public_data_context.prompt_evidence(public_data) + user_msg
     analysis, err = await asyncio.to_thread(kls.llm_structured_interpret, pr["market_system"], user_msg)
     if err:
         raise HTTPException(502, err)
@@ -141,6 +145,8 @@ async def analyze_market(body: AnalyzeMarketBody, _: Annotated[UserRecord, Depen
         "interval": body.interval,
         "interpretation": text,
         "analysis": analysis,
+        "economic_calendar": calendar,
+        "public_data": public_data,
         "model": settings.kline_llm_model,
     }
 
@@ -172,11 +178,17 @@ async def market_chat(body: MarketChatBody, _: Annotated[UserRecord, Depends(get
         "不要编造实时价格或新闻，不承诺收益，不给出确定性买卖指令。若数据不足要明确说明。"
     )
     user_msg = f"{context}\n\n用户问题：{body.question.strip()}"
+    calendar = event_calendar_context.retrieve("kline", f"{index_label} {body.question.strip()}")
+    user_msg += event_calendar_context.prompt_evidence(calendar)
+    public_data = public_data_context.retrieve(body.question.strip())
+    user_msg = public_data_context.prompt_evidence(public_data) + user_msg
     text, err = await asyncio.to_thread(kls.llm_interpret, system, user_msg)
     if err:
         raise HTTPException(502, err)
     return {
         "answer": text,
+        "economic_calendar": calendar,
+        "public_data": public_data,
         "question": body.question.strip(),
         "index_key": index_key,
         "index_label": index_label,
@@ -223,5 +235,7 @@ async def analyze(body: AnalyzeBody, user: Annotated[UserRecord, Depends(get_cur
         out.get("interpretation") or "",
         source="manual",
         model=str(out.get("model") or settings.kline_llm_model),
+        economic_calendar=out.get("economic_calendar"),
+        public_data=out.get("public_data"),
     )
     return out

@@ -5,7 +5,7 @@ import asyncio
 import time
 from typing import Any
 
-from app.services import kline_pipeline, tushare_service
+from app.services import event_calendar_context, kline_pipeline, tushare_service
 from app.services.research_agent.normalizer import is_a_share
 from app.services.research_agent.providers.yahoo_fundamentals import fetch_quote_fundamentals_sync
 from app.services.yahoo_market import fetch_kline_bundle
@@ -90,6 +90,7 @@ async def collect_for_symbol(
     user_query: str,
     *,
     include_secondary: str | None = None,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     log: dict[str, Any] = {"data_sources_used": [], "errors": [], "started_at": time.time()}
     sym = symbol.strip().upper()
@@ -105,8 +106,12 @@ async def collect_for_symbol(
     news_task = asyncio.to_thread(_news, sym, log)
     rag_task = asyncio.to_thread(_issuer_rag, sym, user_query, log)
     yf_task = asyncio.to_thread(_yahoo_fundamentals, sym, log)
+    calendar_task = asyncio.to_thread(event_calendar_context.retrieve, "research", user_query, user_id=user_id, symbols=[sym])
 
-    tushare_pack, news_rows, rag_chunks, yf = await asyncio.gather(tushare_task, news_task, rag_task, yf_task)
+    tushare_pack, news_rows, rag_chunks, yf, calendar = await asyncio.gather(tushare_task, news_task, rag_task, yf_task, calendar_task)
+    if calendar.get("evidence_sources"):
+        log["data_sources_used"].append("economic_calendar_rag")
+    log["errors"].extend(calendar.get("limitations") or [])
 
     secondary_kline: dict[str, Any] | None = None
     if include_secondary and include_secondary.strip().upper() != sym:
@@ -126,6 +131,7 @@ async def collect_for_symbol(
         "tushare_pack": tushare_pack,
         "news": news_rows,
         "issuer_chunks": rag_chunks,
+        "economic_calendar": calendar,
         "yahoo_fundamentals": yf,
         "secondary": (
             {

@@ -66,6 +66,83 @@ def test_news_revision_and_latest_update_roll_back_together():
     assert len(news_store.list_content_revisions(item["id"])) == 1
 
 
+def test_news_reverting_correction_creates_a_b_a_observations():
+    initial = news_item("第一版经营数据", 20000)
+    news_store.upsert_many([initial])
+    for content, observed in (("更正后的经营数据", 22000), ("第一版经营数据", 24000)):
+        news_store.upsert_many([news_item(content, observed)])
+    rows = news_store.list_content_revisions(initial["id"])
+    assert len(rows) == 3
+    assert [row["snapshot"]["content"] for row in rows] == ["第一版经营数据", "更正后的经营数据", "第一版经营数据"]
+    assert rows[0]["content_hash"] == rows[2]["content_hash"]
+    assert len({row["id"] for row in rows}) == 3
+    news_store.upsert_many([news_item("第一版经营数据", 26000)])
+    assert len(news_store.list_content_revisions(initial["id"])) == 3
+
+
+def legacy_news_sequence():
+    """Represent an old hash-unique archive whose current body already reverted."""
+    initial = news_item("第一版经营数据", 20000)
+    news_store.upsert_many([initial])
+    news_store.upsert_many([news_item("更正后的经营数据", 22000)])
+    originals = news_store.list_content_revisions(initial["id"])
+    with news_store._connect() as conn:
+        conn.execute("CREATE UNIQUE INDEX legacy_revision_hash ON article_content_revisions(article_id,content_hash)")
+        snapshot = originals[-1]["snapshot"]
+        conn.execute("""UPDATE articles SET content=?,summary=?,source_articles=?,fetched_at=30000,content_observed_at=30000
+            WHERE id=?""", (snapshot["content"], snapshot["summary"], json.dumps(snapshot["source_articles"]), initial["id"]))
+        conn.execute("UPDATE sqlite_sequence SET seq=100 WHERE name='article_content_revisions'")
+    return initial["id"], originals
+
+
+def test_news_sequence_migration_preserves_citations_sequence_and_missed_current_body():
+    aid, originals = legacy_news_sequence()
+    news_store.init_db()
+    migrated = news_store.list_content_revisions(aid)
+    assert len(migrated) == 3 and migrated[0]["id"] > 100
+    assert [row["id"] for row in migrated[1:]] == [row["id"] for row in originals]
+    assert [row["snapshot_json"] for row in migrated[1:]] == [row["snapshot_json"] for row in originals]
+    assert migrated[0]["snapshot"]["content"] == "第一版经营数据"
+    assert migrated[0]["first_observed_at"] == 30000
+    assert migrated[0]["origin"] == "sequence_migration"
+    news_store.init_db()
+    assert len(news_store.list_content_revisions(aid)) == 3
+    with news_store._connect() as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            conn.execute("DELETE FROM article_content_revisions")
+
+
+def test_news_sequence_migration_failure_restores_original_table(monkeypatch):
+    aid, originals = legacy_news_sequence()
+    original_record = news_store._record_content_revision
+    def failed_record(*args, **kwargs):
+        if kwargs.get("origin") == "sequence_migration":
+            raise sqlite3.OperationalError("fixture interruption")
+        return original_record(*args, **kwargs)
+    monkeypatch.setattr(news_store, "_record_content_revision", failed_record)
+    with pytest.raises(sqlite3.OperationalError, match="fixture interruption"):
+        news_store.init_db()
+    with news_store._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM article_content_revisions").fetchone()[0] == 2
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='legacy_revision_hash'").fetchone()
+        assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name='article_content_revisions_sequence'").fetchone()
+    monkeypatch.setattr(news_store, "_record_content_revision", original_record)
+    assert len(news_store.list_content_revisions(aid)) == 3
+
+
+def test_news_display_revision_freezes_shown_body_after_background_correction():
+    from app.services.tracking_evidence import freeze_evidence_refs
+
+    original = news_item("屏幕上显示的原稿", 20000)
+    news_store.upsert_many([original])
+    displayed = news_store.list_archive()[0][0]
+    assert displayed["revision_id"]
+    news_store.upsert_many([news_item("之后后台更新的更正稿", 22000)])
+    saved = freeze_evidence_refs(1, [{"kind": "news", "id": displayed["id"], "revision_id": displayed["revision_id"]}])[0]
+    assert saved["snapshot"]["content"] == displayed["content"] == "屏幕上显示的原稿"
+    assert news_store.list_archive()[0][0]["revision_id"] != displayed["revision_id"]
+
+
 DATASETS = [
     ("basic_info", fundamentals.import_basic_csv, {"Symbol": "000001", "EndDate": "2024-12-31", "FullName": "旧公司名"}, "FullName"),
     ("financial", fundamentals.import_financial_csv, {"FI_T1.Stkcd": "000001", "FI_T1.Accper": "2024-12-31", "FI_T1.Typrep": "A", "FI_T1.F010101A": "1.2"}, "FI_T1.F010101A"),

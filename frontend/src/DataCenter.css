@@ -1,0 +1,134 @@
+.data-center-layout { min-height: 100vh; height: auto; background: var(--sva-bg); font-family: var(--sva-font); }
+.data-center-content { max-width: 1560px; width: 100%; min-width: 0; margin: 0 auto; padding: 26px 28px 48px; }
+.data-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
+.data-heading h1.ant-typography { margin: 0 0 7px; font-family: var(--sva-font-display); font-size: 26px; font-weight: 650; letter-spacing: -.65px; }
+.data-heading p.ant-typography { margin-bottom: 10px; font-size: 13px; }
+.data-heading .ant-badge-status-text { color: var(--sva-text-secondary); font-size: 12px; }
+.data-heading-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.data-heading-actions .ant-btn { font-size: 13px; }
+.data-caption { color: var(--sva-text-secondary); font-size: 12px; line-height: 1.7; }
+.data-banner { margin-bottom: 16px; }
+.data-summary-band { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 18px 0; margin-bottom: 18px; background: var(--sva-surface); border: 1px solid var(--sva-separator); border-radius: 10px; }
+.data-summary-band > div { display: flex; flex-direction: column; gap: 5px; padding: 0 22px; }
+.data-summary-band > div + div { border-left: 1px solid var(--sva-separator); }
+.data-summary-band span, .data-summary-band small { color: var(--sva-text-secondary); font-size: 12px; font-weight: 400; }
+.data-summary-band strong { color: var(--sva-text); font-size: 25px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.data-summary-band strong small { font-size: 14px; }
+.data-directory-card.ant-card { margin-bottom: 18px; background: var(--sva-surface); border: 1px solid var(--sva-separator); border-radius: 9px; }
+.data-directory-card > .ant-card-body { display: flex; gap: 12px; align-items: center; }
+.data-directory-card > .ant-card-body > .anticon { color: var(--sva-accent); font-size: 20px; }
+.data-directory-card > .ant-card-body > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.data-directory-path { font-size: 12px; overflow-wrap: anywhere; }
+.data-category-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin-bottom: 22px; }
+.data-category { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; border: 1px solid var(--sva-separator); border-radius: 8px; min-width: 0; background: var(--sva-surface); }
+.data-category > span { color: var(--sva-text-secondary); font-size: 12px; }
+.data-category > strong { color: var(--sva-text); font-size: 18px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.data-category > small { color: var(--sva-text-tertiary); font-size: 10px; line-height: 1.5; }
+.data-workspace-card.ant-card { background: var(--sva-surface); border: 1px solid var(--sva-separator); border-radius: 10px; min-width: 0; }
+.data-workspace-card > .ant-card-body { padding: 0 20px 20px; }
+.data-workspace-card .ant-tabs-nav { margin-bottom: 20px; }
+.data-workspace-card .ant-tabs-tab { padding-block: 17px; font-size: 13px; }
+.data-workspace-card .ant-table { font-size: 12px; }
+.data-workspace-card .ant-table-cell { overflow-wrap: anywhere; }
+.data-file-filters { display: grid; grid-template-columns: repeat(3, minmax(130px, 1fr)) minmax(220px, 1.6fr); gap: 12px; margin-bottom: 20px; }
+.data-file-filters label { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.data-file-filters label > span:first-child { color: var(--sva-text-secondary); font-size: 12px; }
+.data-file-filters .ant-select { width: 100%; }
+.data-record-filters { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(220px, 2fr); gap: 14px; max-width: 800px; margin-bottom: 20px; }
+.data-record-filters label { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.data-record-filters label > span:first-child { color: var(--sva-text-secondary); font-size: 12px; }
+.data-record-filters .ant-select { width: 100%; }
+.data-record-title { display: flex; flex-direction: column; gap: 5px; }
+.data-record-title > span:last-child { font-size: 11px; }
+.data-record-detail { max-width: 1000px; font-size: 12px; }
+.data-record-detail > p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.data-record-detail > div { margin-top: 8px; overflow-wrap: anywhere; }
+.data-file-identity { display: flex; flex-direction: column; gap: 5px; }
+.data-file-path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; word-break: break-all; }
+.data-file-identity > span:last-child { color: var(--sva-text-tertiary); font-size: 10px; }
+.data-file-table .ant-tag { margin: 0; font-size: 10px; }
+.data-expiry { font-size: 10px; }
+.data-section-intro { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 18px; }
+.data-section-intro h4.ant-typography { margin: 0 0 6px; font-size: 16px; }
+.data-section-intro p.ant-typography { margin: 0; }
+.data-section-intro .ant-badge { flex-shrink: 0; }
+.data-section-intro .ant-badge-status-text { font-size: 12px; color: var(--sva-text-secondary); }
+.data-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.data-source-card { border: 1px solid var(--sva-separator); border-radius: 9px; padding: 16px; min-width: 0; }
+.data-source-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.data-source-card-heading > a, .data-source-card-heading > span { color: var(--sva-text); font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.data-source-card-heading .ant-badge { flex-shrink: 0; }
+.data-source-card-heading .ant-badge-status-text { color: var(--sva-text-secondary); font-size: 11px; font-weight: 400; }
+.data-source-card > p.ant-typography { margin-bottom: 15px; min-height: 40px; }
+.data-source-metadata { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; }
+.data-source-metadata dt { color: var(--sva-text-tertiary); font-size: 10px; margin-bottom: 4px; }
+.data-source-metadata dd { margin: 0; color: var(--sva-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.data-source-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid var(--sva-separator); }
+.data-source-card-footer .ant-btn { font-size: 11px; flex-shrink: 0; }
+.data-source-error { color: var(--sva-stale); font-size: 11px; overflow-wrap: anywhere; }
+.data-jobs-heading { margin-top: 28px; }
+.data-time-pair { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.data-cleanup-plan.ant-card { border: 1px solid var(--sva-accent-border); margin-block: 18px 26px; background: var(--sva-fill); }
+.data-cleanup-plan .ant-card-head-title { font-size: 14px; }
+.data-plan-actions { margin-top: 16px; }
+.data-trash-heading.ant-typography { margin-top: 28px; font-size: 16px; }
+.data-trash-details { display: flex; flex-direction: column; gap: 10px; }
+.data-trash-details > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.data-trash-details .ant-typography { font-size: 11px; }
+.data-overlay .ant-drawer-body { padding: 24px; }
+.data-config-form > .ant-alert { margin-bottom: 22px; }
+.data-config-form .ant-alert-message { font-size: 13px; }
+.data-config-form .ant-alert-description { font-size: 12px; line-height: 1.7; }
+.data-config-form .ant-form-item-label > label { font-size: 13px; }
+.data-config-form .ant-form-item-extra { font-size: 11px; }
+.data-config-switches, .data-config-numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.data-config-numbers .ant-input-number { width: 100%; }
+.data-source-config-list { border: 1px solid var(--sva-separator); border-radius: 9px; }
+.data-source-config { display: grid; grid-template-columns: minmax(0, 1fr) 40px 145px; align-items: center; gap: 14px; padding: 14px; }
+.data-source-config + .data-source-config { border-top: 1px solid var(--sva-separator); }
+.data-source-config-name { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.data-source-config-name > a, .data-source-config-name > span:first-child { color: var(--sva-text); font-size: 13px; }
+.data-source-config-name > span:last-child { font-size: 11px; line-height: 1.6; }
+.data-source-config .ant-form-item { margin: 0; }
+.data-source-interval .ant-input-number { width: 100%; }
+.data-form-actions { margin-top: 24px; }
+.data-loading { min-height: 100px; display: grid; place-items: center; }
+@media (max-width: 1150px) {
+  .data-heading { flex-wrap: wrap; gap: 14px; }
+  .data-source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 800px) {
+  .data-file-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .data-summary-band > div { padding-inline: 14px; }
+  .data-section-intro { flex-wrap: wrap; gap: 12px; }
+}
+@media (max-width: 600px) {
+  .data-center-content { padding: 20px 16px 32px; }
+  .data-heading { margin-bottom: 18px; }
+  .data-heading h1.ant-typography { font-size: 23px; }
+  .data-heading p.ant-typography { font-size: 12px; }
+  .data-heading-actions { width: 100%; display: grid; grid-template-columns: 1fr 1.3fr; }
+  .data-heading-actions .ant-btn { font-size: 12px; }
+  .data-heading-actions .ant-btn-primary { grid-column: 1 / -1; }
+  .data-summary-band { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; }
+  .data-summary-band > div { padding: 14px; }
+  .data-summary-band > div:nth-child(3) { border-left: 0; }
+  .data-summary-band > div:nth-child(n+3) { border-top: 1px solid var(--sva-separator); }
+  .data-summary-band strong { font-size: 23px; }
+  .data-category-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .data-category { padding: 10px 12px; }
+  .data-category > strong { font-size: 16px; }
+  .data-workspace-card > .ant-card-body { padding: 0 12px 16px; }
+  .data-workspace-card .ant-tabs-tab { font-size: 12px; }
+  .data-workspace-card .ant-tabs-tab + .ant-tabs-tab { margin-left: 20px; }
+  .data-source-grid { grid-template-columns: minmax(0, 1fr); }
+  .data-source-card > p.ant-typography { min-height: 0; }
+  .data-file-filters { gap: 10px; }
+  .data-record-filters { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .data-overlay .ant-drawer-body { padding: 18px 16px; }
+  .data-config-numbers { gap: 12px; }
+  .data-source-config { grid-template-columns: minmax(0, 1fr) 40px; gap: 10px; padding: 12px; }
+  .data-source-interval { grid-column: 1 / -1; }
+  .data-source-interval .ant-input-number { max-width: 180px; }
+  .data-plan-actions { display: flex; flex-wrap: wrap; }
+}

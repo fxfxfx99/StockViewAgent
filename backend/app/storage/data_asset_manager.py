@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import os
+import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +26,9 @@ _TIME_FMT = "%Y%m%dT%H%M%S%fZ"
 
 def managed_root() -> Path:
     root = settings.data_dir / _MANAGED_DIR
-    (root / _BACKUP_DIR).mkdir(parents=True, exist_ok=True)
+    if Path(settings.data_dir).is_symlink() or root.is_symlink() or (root / _BACKUP_DIR).is_symlink():
+        raise ValueError("数据管理目录不能是符号链接")
+    (root / _BACKUP_DIR).mkdir(mode=0o700, parents=True, exist_ok=True)
     return root
 
 
@@ -36,7 +39,10 @@ def catalog_path() -> Path:
 @contextmanager
 def catalog_lock():
     """Serialize catalog read/modify/write across API and worker processes."""
-    with (managed_root() / "catalog.lock").open("a+") as handle:
+    descriptor = os.open(managed_root() / "catalog.lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(descriptor, "a+") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode) or os.fstat(handle.fileno()).st_nlink != 1:
+            raise ValueError("数据索引锁文件无效")
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             yield
@@ -82,7 +88,12 @@ def _load_catalog() -> dict[str, Any]:
     if not path.exists():
         return {"version": 1, "updated_at": _now_iso(), "assets": {}}
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 64 * 1024 ** 2:
+                raise ValueError("数据索引文件无效")
+            raw = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return {"version": 1, "updated_at": _now_iso(), "assets": {}}
     if not isinstance(raw, dict):
@@ -242,6 +253,8 @@ def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
     stem = path.stem
     if rel.startswith("research/"):
         return {"kind": "research_immutable_data", "key": rel, "source": "research_archive"}
+    if rel.startswith("datasets/"):
+        return {"kind": "collected_immutable_data", "key": rel, "source": "data_center"}
     if rel.startswith("kline_bundle_cache/"):
         return {"kind": "kline_bundle_cache", "key": stem, "source": "local_cache"}
     if rel.startswith("market_history_cache/"):
@@ -281,11 +294,14 @@ def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
         "strategy_knowledge.db": ("sqlite_db", "strategy_knowledge", "strategy_knowledge_store"),
         "decision_signals.db": ("sqlite_db", "decision_signals", "decision_signal_store"),
         "research.sqlite3": ("sqlite_db", "research", "research_store"),
+        "tracking.sqlite3": ("sqlite_db", "tracking", "tracking_store"),
+        "economic_events.sqlite3": ("sqlite_db", "economic_events", "event_calendar_store"),
+        "data_center.sqlite3": ("sqlite_db", "data_center", "data_collection_store"),
     }
     if name in mapping:
         kind, key, source = mapping[name]
         return {"kind": kind, "key": key, "source": source}
-    if name.endswith(".db"):
+    if name.endswith((".db", ".sqlite", ".sqlite3")):
         return {"kind": "sqlite_db", "key": stem, "source": "app"}
     if name.endswith(".json"):
         return {"kind": "json_data", "key": stem, "source": ""}
@@ -301,6 +317,7 @@ _CATEGORIES = {
     "cache": ("行情与接口缓存", "rebuildable"),
     "runtime": ("运行日志与状态", "runtime"),
     "backups": ("历史备份", "backup"),
+    "quarantine": ("缓存回收区", "recoverable"),
     "index": ("索引与迁移记录", "durable"),
     "other": ("其他本地资产", "durable"),
 }
@@ -308,6 +325,8 @@ _CATEGORIES = {
 
 def _category(rel: str) -> str:
     first = rel.split("/", 1)[0]
+    if rel.startswith("_managed/quarantine/"):
+        return "quarantine"
     if rel.startswith(("_managed/backups/", "_managed/legacy/")):
         return "backups"
     if first == "_managed" or first == "INDEX.md":
@@ -316,9 +335,9 @@ def _category(rel: str) -> str:
         return _category(rel.rsplit("-", 1)[0])  # May contain committed database changes.
     if first == "runtime" or rel.endswith((".lock", ".pid", "-shm")):
         return "runtime"
-    if first in {"research", "research.sqlite3", "research_agent.db", "quant.db", "decision_signals.db", "stock_picker_agents.db"}:
+    if first in {"research", "research.sqlite3", "tracking.sqlite3", "research_agent.db", "quant.db", "decision_signals.db", "stock_picker_agents.db"}:
         return "research"
-    if first in {"issuer_uploads", "kline_learning", "imports", "strategy_knowledge.db", "kline_insights"}:
+    if first in {"issuer_uploads", "kline_learning", "imports", "strategy_knowledge.db", "kline_insights", "economic_events.sqlite3", "data_center.sqlite3", "datasets"}:
         return "knowledge"
     if first in {"news.db", "company_fundamentals.db", "company_updates", "company_basic_universe.json", "issuer_basic_info_universe.json", "xueqiu_comments.db"}:
         return "news"
@@ -330,18 +349,31 @@ def _category(rel: str) -> str:
 
 
 def _walk_files(root: Path):
-    # Never traverse symlinks: a portable root must not silently index another
-    # directory, nor follow a mount/symlink loop during inventory.
-    for base, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = sorted(d for d in dirs if not (Path(base) / d).is_symlink())
-        for name in sorted(files):
-            path = Path(base) / name
-            if path.is_symlink() or not path.is_file():
-                continue
+    # Descriptor traversal also refuses an ancestor swapped to a symlink during
+    # the scan. Inventory reads metadata only, including for credential files.
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    def walk(directory, base):
+        for name in sorted(os.listdir(directory)):
             try:
-                yield path, path.stat()
-            except FileNotFoundError:
-                continue  # Cache rotation may race with a read-only scan.
+                info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    child = os.open(name, flags, dir_fd=directory)
+                    try:
+                        yield from walk(child, base / name)
+                    finally:
+                        os.close(child)
+                elif stat.S_ISREG(info.st_mode):
+                    yield base / name, info
+            except (FileNotFoundError, NotADirectoryError, PermissionError):
+                continue  # Rotation and inaccessible files do not abort inventory.
+    try:
+        directory = os.open(root, flags)
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    try:
+        yield from walk(directory, root)
+    finally:
+        os.close(directory)
 
 
 def scan_data_assets() -> dict[str, Any]:
@@ -353,6 +385,8 @@ def scan_data_assets() -> dict[str, Any]:
     all_items: list[dict[str, Any]] = []
     categories = {key: {"id": key, "label": value[0], "retention": value[1], "files": 0, "size_bytes": 0}
                   for key, value in _CATEGORIES.items()}
+    from app.storage import cache_lifecycle
+    policy = cache_lifecycle.get_policy()
     for path, stat in _walk_files(root):
         rel = path.relative_to(root).as_posix()
         meta = dict(catalog_assets.get(rel) or {})
@@ -362,6 +396,7 @@ def scan_data_assets() -> dict[str, Any]:
                 meta[field] = inferred[field]
         meta.update(path=rel, size_bytes=stat.st_size, category=_category(rel),
                     updated_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat())
+        meta.update(cache_lifecycle.describe_asset(rel, stat, policy=policy))
         # Discard stale absolute backup locators from older catalogs.
         meta["backups"] = [b for b in (meta.get("backups") or []) if isinstance(b, str) and not Path(b).is_absolute() and ".." not in Path(b).parts]
         all_items.append(meta)
@@ -390,6 +425,50 @@ def scan_data_assets() -> dict[str, Any]:
                       "刷新索引只扫描文件，不抓取行情、不调用模型，也不清理历史证据。"],
         },
     }
+
+
+def query_data_assets(*, category: str = "", q: str = "", source: str = "", lifecycle: str = "",
+                      offset: int = 0, limit: int = 100, sort: str = "updated_at",
+                      descending: bool = True) -> dict[str, Any]:
+    """Metadata-only, bounded file inventory; never expose file contents or accept a path to read."""
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 500:
+        raise ValueError("offset 必须非负，limit 必须在 1 到 500 之间")
+    if sort not in {"path", "updated_at", "size_bytes", "category", "source"}:
+        raise ValueError("不支持的文件排序字段")
+    if category and category not in _CATEGORIES:
+        raise ValueError("未知数据分类")
+    if lifecycle not in {"", "protected", "rebuildable", "expired"}:
+        raise ValueError("未知缓存生命周期筛选")
+    if not all(isinstance(v, str) and len(v) <= 200 for v in (q, source)):
+        raise ValueError("筛选文本过长")
+    inventory = scan_data_assets()
+    # Include the recovery area and metadata/backups in file management, while
+    # keeping scan_data_assets.items backwards compatible for existing clients.
+    root = settings.data_dir.resolve()
+    from app.storage import cache_lifecycle
+    policy = cache_lifecycle.get_policy()
+    items = list(inventory["items"])
+    for path, info in _walk_files(root / _MANAGED_DIR):
+        rel = path.relative_to(root).as_posix()
+        items.append({**_infer_asset_meta(rel, path), "path": rel, "size_bytes": info.st_size,
+                      "category": _category(rel), "updated_at": datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat(),
+                      **cache_lifecycle.describe_asset(rel, info, policy=policy)})
+    sources = sorted({str(item["source"]) for item in items if item.get("source")})
+    summary = {"cache_bytes": sum(item["size_bytes"] for item in items if item["rebuildable"]),
+               "expired_bytes": sum(item["size_bytes"] for item in items if item["expired"]),
+               "protected_bytes": sum(item["size_bytes"] for item in items if item["protected"]),
+               "quarantine_bytes": sum(item["size_bytes"] for item in items if item["storage_role"] == "quarantine"),
+               "budget_bytes": policy["budget_bytes"]}
+    needle = q.casefold().strip()
+    items = [item for item in items if (not category or item["category"] == category)
+             and (not source or item.get("source") == source)
+             and (not needle or needle in " ".join(str(item.get(key) or "") for key in ("path", "source", "key", "data_domain")).casefold())
+             and (not lifecycle or bool(item.get(lifecycle)))]
+    items.sort(key=lambda item: (item.get(sort) or (0 if sort == "size_bytes" else ""), item["path"]), reverse=descending)
+    return {"items": items[offset:offset + limit], "total": len(items), "offset": offset, "limit": limit,
+            "size_bytes": sum(item["size_bytes"] for item in items), "categories": inventory["categories"],
+            "directory_totals": inventory["directory_totals"], "index": inventory["index"],
+            "sources": sources, "summary": summary}
 
 
 @_catalog_writer

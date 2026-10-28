@@ -240,11 +240,12 @@ class ResearchStore:
                 clauses.append("kind IN (%s)" % ",".join("?" for _ in kinds)); args.extend(kinds)
             # Pause checks belong in the same transaction as leasing, so paused users
             # never consume queue work even when another process toggles settings.
-            rows = conn.execute("SELECT * FROM jobs WHERE " + " AND ".join(clauses) + " ORDER BY not_before,created_at", args).fetchall()
+            rows = conn.execute("SELECT * FROM jobs WHERE " + " AND ".join(clauses) +
+                                " ORDER BY CASE WHEN kind='watch_review' THEN 0 ELSE 1 END,not_before,created_at", args).fetchall()
             for row in rows:
                 config_row = conn.execute("SELECT value FROM state WHERE user_id=? AND key='config'", (row["user_id"],)).fetchone()
                 config = {**DEFAULT_CONFIG, **(json.loads(config_row[0]) if config_row else {})}
-                if not config["enabled"] or (config["paused"] and row["kind"] not in {"collect", "paper", "signals", "rollback", "source_maintenance"}):
+                if not config["enabled"] or (config["paused"] and row["kind"] not in {"collect", "paper", "signals", "rollback", "source_maintenance", "watch_review"}):
                     continue
                 token = str(uuid.uuid4())
                 conn.execute("UPDATE jobs SET status='running',attempts=attempts+1,lease_token=?,lease_owner=?,lease_until=?,updated_at=? WHERE id=?", (token, worker_id, now + lease_seconds, now, row["id"]))

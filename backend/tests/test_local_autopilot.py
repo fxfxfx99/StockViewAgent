@@ -60,7 +60,7 @@ def test_first_boot_seeds_five_and_queues_no_paid_work():
     assert result["watchlist"]["symbols"] == list(auto.DEFAULT_SYMBOLS)
     assert result["watchlist"]["seeded"] is True
     assert result["phase"] == "waiting_llm"
-    assert {job["kind"] for job in result["queued_jobs"]} == {"collect", "github", "source_maintenance"}
+    assert {job["kind"] for job in result["queued_jobs"]} == {"collect", "github", "source_maintenance", "watch_review"}
     assert store.budget_status(USER)["used"] == {"calls": 0, "tokens": 0, "candidates": 0}
     again = auto.reconcile(USER, now=NOW)
     assert {job["id"] for job in again["queued_jobs"]} == {job["id"] for job in result["queued_jobs"]}
@@ -134,7 +134,7 @@ def test_paused_candidates_keep_data_and_source_maintenance():
     configured()
     store.update_config(USER, {"paused": True})
     result = auto.reconcile(USER, now=NOW)
-    assert {j["kind"] for j in result["queued_jobs"]} == {"collect", "source_maintenance"}
+    assert {j["kind"] for j in result["queued_jobs"]} == {"collect", "source_maintenance", "watch_review"}
     assert result["phase"] == "paused"
     complete_collection()
     result = auto.reconcile(USER, now=NOW)

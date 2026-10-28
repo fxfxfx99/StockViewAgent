@@ -133,6 +133,12 @@ data/
 
 首次申请 5 年行情；已有足够覆盖、约 1,000 根以上日线且末日较近时，后续申请近 1 个月并合并。旧记录保留，重叠日期的新修订只影响新快照。来源、复权口径或成交量单位变化会形成独立分支并产生质量问题，不能无标记拼接。当前图表缓存可用于采集兜底；离线或陈旧数据会携带质量阻断项。
 
+读取研究快照和归档日线时，每行包含 `source`、`fetched_at`、`available_at` 和 `batch_id`。其中 `batch_id` 是实际存储批次的内容哈希，可对应到 `research/batches/<batch_id>/manifest.json`，核对原始响应、文件校验值和父批次。这个标识在读取时从实际批次补入，覆盖输入中同名的自报字段，旧 Parquet 无需重写；仅批次或采集时间改变不会被统计为行情修订，也不会消耗新的优化留出期访问。
+
+`ResearchData.read_snapshot(user_id, snapshot_id, as_of=...)` 支持历史时点读取：先筛选 `available_at <= as_of`，再按快照固定的批次顺序选择同一股票、同一时间的最后一个可见修订。比如某日收盘价最初为 12，次年才更正为 10.5，查询原交易日收盘后仍会得到 12；从更正实际可得的时刻起才返回 10.5。不传 `as_of` 则读取该快照固定批次中的最终修订，旧快照不受新批次影响。`as_of` 使用 Unix 秒或带时区的 ISO 字符串，边界包含该时刻。
+
+时点筛选不会改变快照的质量结论。缺少历史可得性证据的缓存仍保留 `availability_inferred=true`，迟到修订、探索数据及其它质量阻断项也不会因筛选而获得严格资格。
+
 进程重启后队列和进度仍在。运行任务使用可续租的租约，过期后允许重新领取，默认最多尝试 3 次；旧租约不能提交新的完成结果。模拟每日事件按账户和日期去重。长期积累会增加磁盘占用，当前没有自动清理旧研究批次的策略。
 
 ## 严格数据与可信导入
@@ -227,8 +233,17 @@ PY
 | [Microsoft RD-Agent](https://github.com/microsoft/RD-Agent) | 假设、验证、反馈、修订循环 |
 | [Freqtrade](https://github.com/freqtrade/freqtrade) | 前视偏差检查与截断数据重算 |
 | [VeighNa / vn.py](https://github.com/vnpy/vnpy) | 数据、策略、研究分层 |
+| [CNEquity](https://github.com/rootSunc/CNEquity) | 不可变数据批次、行级来源追溯、历史时点可见性与修订选择 |
 
-知识卡作为候选提示材料，不是经过验证的因子库。文档发生变化只产生待验证假设；具体引用以页面保存的 commit 链接为准。
+每个已成功获取的固定来源最多选取一张最新知识卡作为候选提示材料，避免某个仓库的多次更新挤掉其它来源。知识卡不是经过验证的因子库；文档发生变化只产生待验证假设，具体引用以页面保存的 commit 链接为准。
+
+### CNEquity 的学习与落地
+
+本轮参考 [CNEquity 查询指南](https://github.com/rootSunc/CNEquity/blob/c53c797f0d8c6e58c6748e27b2037e4fa99b9361/docs/zh/datasets/query-guide.md)、[Python API 的时点查询契约](https://github.com/rootSunc/CNEquity/blob/c53c797f0d8c6e58c6748e27b2037e4fa99b9361/docs/zh/reference/python-api.md) 和 [PIT 版本处理](https://github.com/rootSunc/CNEquity/blob/c53c797f0d8c6e58c6748e27b2037e4fa99b9361/src/cnequity/domain/pit.py)，阅读版本为 `c53c797f0d8c6e58c6748e27b2037e4fa99b9361`。
+
+基于本项目已有的不可变批次与快照，补充了逐行批次标识，修正了先覆盖修订再过滤时间导致旧数据消失的问题，并将查询指南纳入固定文档学习来源。这些改动由本项目自行实现，未引入 CNEquity 运行时依赖或复制其源码。现有原始价、复权口径、交易状态和质量检查继续适用；本轮没有接入 CNEquity 的数据湖、全部数据集或 MCP 服务。
+
+感谢 CNEquity 作者及贡献者公开数据工程实践。上游代码使用 [Apache-2.0](https://github.com/rootSunc/CNEquity/blob/c53c797f0d8c6e58c6748e27b2037e4fa99b9361/LICENSE)，其 [NOTICE](https://github.com/rootSunc/CNEquity/blob/c53c797f0d8c6e58c6748e27b2037e4fa99b9361/NOTICE) 保留作者声明；其它已参考项目与使用方式见 [README 开源致谢](../README.md#开源学习与致谢)。
 
 ### 行情与新闻来源自动维护
 

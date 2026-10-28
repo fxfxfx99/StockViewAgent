@@ -351,7 +351,68 @@ def test_late_revision_keeps_original_snapshot_but_cannot_be_strict(tmp_path):
     assert data.read_snapshot(1, original["id"])[-1]["c"] == 12
     assert data.read_snapshot(1, revised["id"])[-1]["c"] == 10.5
     assert "availability_after_decision_time" in revised["payload"]["blockers"]
-    assert len(data.read_snapshot(1, revised["id"], as_of="2025-01-07T16:30:00+08:00")) == 1
+    visible = data.read_snapshot(1, revised["id"], as_of="2025-01-07T16:30:00+08:00")
+    assert len(visible) == 2
+    assert visible[-1]["c"] == 12
+    assert visible[-1]["batch_id"] == first["id"]
+    at_revision = data.read_snapshot(1, revised["id"], as_of="2026-01-08T10:00:00+08:00")
+    assert at_revision[-1]["c"] == 10.5
+    assert at_revision[-1]["batch_id"] == second["id"]
+    # Filtering rows does not certify the exploratory snapshot or mutate it.
+    assert not data.get_snapshot(1, revised["id"])["payload"]["strict"]
+
+
+def test_as_of_selects_visible_revision_per_symbol_with_inclusive_cutoff(tmp_path):
+    data = ResearchData(tmp_path)
+    first = data.ingest_bundle(1, "600000.SS", sample(strict=True), metadata=provenance())
+    other = data.ingest_bundle(1, "000001.SZ", sample(strict=True), metadata=provenance())
+    delta = sample(strict=True, dates=("2025-01-07",))
+    cutoff = delta["candles"][0]["available_at"] + 1800
+    delta["candles"][0].update(c=10.5, available_at=cutoff)
+    second = data.ingest_bundle(1, "600000.SS", delta,
+        metadata={**provenance(), "parent_batch_ids": [first["id"]]})
+    snapshot = data.create_snapshot(1, [second["id"], other["id"]])
+    before = data.read_snapshot(1, snapshot["id"], as_of=cutoff - 1)
+    at = data.read_snapshot(1, snapshot["id"], as_of=cutoff)
+    assert len(before) == len(at) == 4
+    assert [(r["symbol"], r["c"], r["batch_id"]) for r in before if r["date"] == "2025-01-07"] == [
+        ("000001.SZ", 12, other["id"]), ("600000.SS", 12, first["id"])]
+    assert [(r["symbol"], r["c"], r["batch_id"]) for r in at if r["date"] == "2025-01-07"] == [
+        ("000001.SZ", 12, other["id"]), ("600000.SS", 10.5, second["id"])]
+    assert data.read_snapshot(1, snapshot["id"], as_of="2025-01-06T15:59:59+08:00") == []
+
+
+def test_row_batch_provenance_is_derived_and_existing_files_stay_immutable(tmp_path):
+    import pyarrow.parquet as pq
+
+    data = ResearchData(tmp_path)
+    bundle = sample(strict=True)
+    bundle["candles"][0]["batch_id"] = "provider_supplied_not_trusted"
+    snapshot = data.import_snapshot(1, {"600000.SS": bundle}, metadata=provenance())
+    batch_id = snapshot["payload"]["batch_ids"][0]
+    path = data.batches / batch_id / "bars.parquet"
+    original_bytes = path.read_bytes()
+    # Legacy schema has no batch_id column; reading enriches without migration.
+    assert "batch_id" not in pq.read_schema(path).names
+    rows = data.read_snapshot(1, snapshot["id"])
+    assert all(row["batch_id"] == batch_id for row in rows)
+    assert all(row["source"] == "fixture_provider" for row in rows)
+    assert path.read_bytes() == original_bytes
+
+
+def test_inferred_later_revision_does_not_erase_historically_visible_bar(tmp_path):
+    data = ResearchData(tmp_path)
+    first = data.ingest_bundle(1, "600000.SS", sample(strict=True), metadata=provenance())
+    delta = sample(dates=("2025-01-07",))
+    delta["candles"][0]["c"] = 10.5
+    second = data.ingest_bundle(1, "600000.SS", delta,
+        metadata={**provenance(), "fetched_at": "2026-01-08T12:00:00+08:00", "parent_batch_ids": [first["id"]]})
+    snapshot = data.create_snapshot(1, [second["id"]], metadata=provenance())
+    before = data.read_snapshot(1, snapshot["id"], as_of="2025-01-07T16:30:00+08:00")
+    assert len(before) == 2 and before[-1]["c"] == 12
+    latest = data.read_snapshot(1, snapshot["id"])
+    assert latest[-1]["c"] == 10.5 and latest[-1]["availability_inferred"]
+    assert "historical_availability_missing" in snapshot["payload"]["blockers"]
 
 
 @pytest.mark.parametrize("explicit_flag", [False, True])

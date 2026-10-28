@@ -23,6 +23,8 @@ from app.routers import (
     autopilot,
     auth,
     decision_signals,
+    data_center,
+    events,
     kline_learning,
     macro,
     market,
@@ -35,6 +37,7 @@ from app.routers import (
     stock_picker_agents,
     stocks,
     transaction_agent,
+    tracking,
     watchlist,
     xueqiu,
 )
@@ -51,6 +54,8 @@ async def lifespan(app: FastAPI):
         startup_data_check,
         xueqiu_comments_scheduler,
         xueqiu_comments_service,
+        event_calendar_service,
+        data_collection,
     )
     from app.storage import data_asset_manager
 
@@ -59,11 +64,16 @@ async def lifespan(app: FastAPI):
     company_updates_task: asyncio.Task | None = None
     comments_worker_task = asyncio.create_task(xueqiu_comments_service.worker_loop())
     comments_scheduler_task: asyncio.Task | None = None
+    calendar_scheduler_task: asyncio.Task | None = None
+    collection_worker_task = asyncio.create_task(data_collection.worker_loop()) if settings.enable_data_collection else None
     if settings.enable_research_worker:
         from app.services import local_autopilot
         local_autopilot.reconcile_all(startup=True)
     data_asset_manager.refresh_catalog_from_disk()
     if settings.enable_scheduler:
+        # Data-center scheduling owns the calendar cadence when enabled.
+        if not settings.enable_data_collection:
+            calendar_scheduler_task = asyncio.create_task(event_calendar_service.scheduler_loop())
         scheduler_task = asyncio.create_task(kline_insight_scheduler.kline_insight_scheduler_loop())
         if settings.xueqiu_comments_auto_refresh_enabled:
             comments_scheduler_task = asyncio.create_task(xueqiu_comments_scheduler.scheduler_loop())
@@ -72,7 +82,7 @@ async def lifespan(app: FastAPI):
     if settings.company_auto_refresh_enabled:
         company_updates_task = asyncio.create_task(company_updates.company_updates_loop())
     yield
-    for task in (scheduler_task, startup_check_task, company_updates_task, comments_worker_task, comments_scheduler_task):
+    for task in (scheduler_task, startup_check_task, company_updates_task, comments_worker_task, comments_scheduler_task, calendar_scheduler_task, collection_worker_task):
         if task is not None:
             task.cancel()
     if scheduler_task is not None:
@@ -94,7 +104,7 @@ async def lifespan(app: FastAPI):
             pass
         except asyncio.TimeoutError:
             logger.warning("公司资料更新取消超时，跳过等待以便服务快速退出")
-    for task in (comments_worker_task, comments_scheduler_task):
+    for task in (comments_worker_task, comments_scheduler_task, calendar_scheduler_task):
         if task is not None:
             try:
                 await asyncio.wait_for(task, timeout=3.0)
@@ -102,6 +112,11 @@ async def lifespan(app: FastAPI):
                 pass
             except asyncio.TimeoutError:
                 logger.warning("雪球评论任务取消超时，任务将在租约到期后恢复")
+    if collection_worker_task is not None:
+        try:
+            await collection_worker_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -111,6 +126,8 @@ app = FastAPI(
     openapi_tags=[
         {"name": "watchlist", "description": "股票列表（`watchlist.json`、导入、行情摘要、公司资料）"},
         {"name": "macro", "description": "市场研判 · 宏观与行业（Tushare）"},
+        {"name": "economic-events", "description": "全球经济金融事件日历、监控与可追溯检索证据"},
+        {"name": "data-center", "description": "本地分类文件、公共资料采集、缓存回收与恢复（管理员）"},
         {
             "name": "market",
             "description": "A股多源行情与统一缓存；日线按可配置公开源链降级并可用 Tushare/Pytdx 兜底，分钟走东财/腾讯/Baostock/Pytdx；MyTT 指标 /mytt/*",
@@ -125,6 +142,7 @@ app = FastAPI(
         {"name": "transaction-agent", "description": "TransactionAgent 多策略交易观点（数据接口已对齐本系统）"},
         {"name": "quant", "description": "量化交易：策略制定、模板化回测、绩效报告"},
         {"name": "research", "description": "本地研究实验室：数据快照、策略版本、实验与前向模拟"},
+        {"name": "tracking", "description": "个人关注判断、证据时间线、今日变化与人工复盘"},
         {"name": "decision-signals", "description": "决策信号生命周期与 1/3/5/10 日后验复盘"},
         {"name": "stock-picker-agents", "description": "可新增、编辑、启停和执行的用户自定义选股 Agent"},
         {"name": "xueqiu", "description": "雪球可选补充：公司信息、讨论摘要等（需 Cookie 或匿名 warm-up）"},
@@ -154,11 +172,14 @@ app.include_router(analysis.router)
 app.include_router(news.router)
 app.include_router(market.router)
 app.include_router(macro.router)
+app.include_router(events.router)
+app.include_router(data_center.router)
 app.include_router(kline_learning.router)
 app.include_router(settings_llm.router)
 app.include_router(settings_integrations.router)
 app.include_router(stocks.router)
 app.include_router(transaction_agent.router)
+app.include_router(tracking.router)
 app.include_router(decision_signals.router)
 app.include_router(stock_picker_agents.router)
 app.include_router(quant.router)

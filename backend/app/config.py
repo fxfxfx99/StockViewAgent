@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     auth_bootstrap_user_password: str = ""
     # 多 worker / 多副本部署时只允许独立 scheduler 实例开启，避免重复任务。
     enable_scheduler: bool = True
+    # Persistent public-data queue; no model calls or paid source selection.
+    enable_data_collection: bool = True
     # Research runs in a separate persistent worker, never inside API lifespan.
     enable_research_worker: bool = True
     # 启动后异步检查/预热外部数据源；不阻塞服务启动。

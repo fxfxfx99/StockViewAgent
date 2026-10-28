@@ -1,4 +1,7 @@
-import { Alert, Card, Collapse, Space, Tag, Tooltip, Typography } from "antd";
+import { useState } from "react";
+import { Alert, Button, Card, Collapse, Space, Tag, Tooltip, Typography } from "antd";
+import { ThesisComposer } from "../TrackingComponents.jsx";
+import { newsEvidence } from "../trackingViewModel.js";
 import {
   directionLabels,
   formatTime,
@@ -209,7 +212,8 @@ function CombinedSources({ articles }) {
   );
 }
 
-export default function NewsImpactCard({ item }) {
+export default function NewsImpactCard({ item, symbol }) {
+  const [composerOpen, setComposerOpen] = useState(false);
   const analysis = item.analysis;
   const status = item.analysis_status || analysis?.status;
   const analyzed = isAnalyzed(analysis) && !["error", "unavailable", "irrelevant", "stale"].includes(status);
@@ -482,6 +486,8 @@ export default function NewsImpactCard({ item }) {
         />
       ) : null}
       <CombinedSources articles={sourceArticles} />
+      {symbol && item.id != null ? <div className="tracking-news-action"><Button type="link" onClick={() => setComposerOpen(true)}>保存为关注判断</Button></div> : null}
+      {composerOpen ? <ThesisComposer symbol={symbol} initial={{ reason: analysis?.reasoning || analysis?.event_summary || item.title || "", watch_conditions: strings(analysis?.watch_points || analysis?.confirmation_conditions).join("\n"), invalidation_conditions: strings(analysis?.invalidation_conditions).join("\n") }} evidenceRefs={[newsEvidence(item)]} onClose={() => setComposerOpen(false)} /> : null}
     </Card>
   );
 }

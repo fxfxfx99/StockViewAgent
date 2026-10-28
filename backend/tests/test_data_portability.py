@@ -62,9 +62,10 @@ def test_migration_private_relative_manifest_and_exclusions(roots):
     no_staging(destination)
 
 
-def test_sqlite_backup_includes_committed_wal_without_changing_source(roots):
+@pytest.mark.parametrize("database_name", ["research.sqlite3", "tracking.sqlite3"])
+def test_sqlite_backup_includes_committed_wal_without_changing_source(roots, database_name):
     source, destination = roots
-    database = source / "research.sqlite3"
+    database = source / database_name
     connection = sqlite3.connect(database)
     try:
         connection.execute("PRAGMA journal_mode=WAL")

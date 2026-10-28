@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.config import settings
-from app.services import kline_pipeline, market_extra_http, strategy_knowledge_service
+from app.services import event_calendar_context, public_data_context, kline_pipeline, market_extra_http, strategy_knowledge_service
 from app.storage import company_fundamentals_store, kline_bundle_cache, market_history_cache
 
 STRATEGIES: list[dict[str, str]] = [
@@ -259,6 +259,12 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
     basic = _compact_record(fundamentals.get("basic_info")) or {}
     financial = _compact_record(fundamentals.get("financial"))
     mda = _compact_record(fundamentals.get("mda"), text_limit=1000) or {}
+    industry = (basic.get("industry_name_c") or basic.get("industry_name")
+                or basic.get("industry_name_d") or (fundamentals.get("financial") or {}).get("industry_name_1"))
+    calendar = event_calendar_context.retrieve(
+        "strategies", f"{sym} {industry or ''} 利率 通胀 货币政策 金融风险 事件窗口",
+        as_of=as_of_day, symbols=[sym], industry=industry,
+    )
     return {
         "symbol": sym,
         "stock_name": metrics.get("name") or basic.get("short_name") or sym,
@@ -291,6 +297,8 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
         },
         "flow": _latest_flow_summary(flow_items),
         "market_institution": _latest_market_institution_summary(as_of_day),
+        "economic_calendar": calendar,
+        "public_data": public_data_context.retrieve(f"{industry or ''} 经济 通胀 汇率 货币政策", as_of=as_of_day, symbols=[sym]),
         "data_limitations": ([
             "历史节点仅使用该日及之前的 K 线和有日期的资金数据；最新估值、财务与经营讨论快照因缺少公告日期不参与评分。",
             "历史 K 线可能使用当前前复权因子，策略知识库采用当前规则；此结果不等同于严格的时点回测。",
@@ -302,12 +310,7 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
             "raw_financial": financial_raw,
             "pe_ttm": metrics.get("pe_ttm"),
             "total_market_cap_yuan": metrics.get("total_market_cap_yuan"),
-            "industry": (
-                basic.get("industry_name_c")
-                or basic.get("industry_name")
-                or basic.get("industry_name_d")
-                or (fundamentals.get("financial") or {}).get("industry_name_1")
-            ),
+            "industry": industry,
             "mda_preview": (mda.get("mana_disc_anal") or "")[:500],
         },
     }
@@ -448,6 +451,44 @@ def _apply_knowledge_context(view: dict[str, Any]) -> dict[str, Any]:
             reasons.append(f"策略知识库提示：{first_points[0]}")
             out["reasons"] = reasons[:4]
     out["detailed_analysis"] = _build_detailed_analysis(out, knowledge)
+    return out
+
+
+def _apply_calendar_context(view: dict[str, Any], calendar: dict[str, Any]) -> dict[str, Any]:
+    """Calendar coverage supplies dated evidence, never a bullish/bearish score."""
+    if not calendar.get("enabled"):
+        return view
+    out = dict(view)
+    sources = calendar.get("evidence_sources") or []
+    meta = dict(out.get("metadata") or {})
+    meta["economic_calendar"] = {
+        "source_ids": [source["source_id"] for source in sources],
+        "revision_ids": [source.get("revision_id") for source in sources],
+        "retrieval": {key: (calendar.get("retrieval") or {}).get(key) for key in ("method", "agent", "as_of")},
+    }
+    meta["rag_context"] = list(meta.get("rag_context") or []) + [
+        f"[{source['source_id']}] {source.get('title', '')}: {source.get('text', '')[:200]}"
+        for source in sources[:3]
+    ]
+    out["metadata"] = meta
+    detail = dict(out.get("detailed_analysis") or {})
+    detail["data_limitations"] = list(detail.get("data_limitations") or []) + list(calendar.get("limitations") or [])
+    if sources:
+        checks = [f"[{source['source_id']}] {source.get('title', '')}：{source.get('text', '')[:180]}" for source in sources[:3]]
+        detail["signal_checks"] = checks + list(detail.get("signal_checks") or [])
+        # Full source text belongs to the shared signal bundle, not sixteen
+        # copies of each event inside sixteen strategy explanations.
+        detail["sources"] = [{**{key: source.get(key) for key in (
+            "source_id", "title", "url", "event_id", "revision_id", "observed_at", "scheduled_at", "citation",
+        )}, "publisher": source.get("source")} for source in sources[:3]] + list(detail.get("sources") or [])
+        risk = "重大经济金融事件可能改变利率、汇率与风险偏好；预定日程不等于结果，需核验公布值及该公司的传导暴露。"
+        out["risks"] = list(dict.fromkeys([risk] + list(out.get("risks") or [])))
+        detail["risk_controls"] = list(dict.fromkeys([risk] + list(detail.get("risk_controls") or [])))
+        if out.get("strategy_id") == "event_driven":
+            out["viewpoint"] = "事件驱动视角已检索到经济金融日历证据，重点核验事件窗口、公布结果与公司业务暴露；方向仍由现有市场信号提供。"
+            out["reasons"] = [checks[0]] + [reason for reason in out.get("reasons") or [] if not reason.startswith("后续可接入")][:3]
+            detail["headline"] = out["viewpoint"]
+    out["detailed_analysis"] = detail
     return out
 
 
@@ -604,7 +645,8 @@ def _score_views(bundle: dict[str, Any]) -> list[dict[str, Any]]:
         f"20日表现 {ch20:.2f}%，行业 {industry}。",
     ], ["当前是市场级北向代理，尚非个股沪深港通持股变动。", "外资配置会受汇率、全球风险偏好和指数权重影响。"], "接入个股北向持股后再提高置信度；当前只用于中期配置偏好的弱确认。", ["不要把北向市场净流入等同个股被外资买入。", "不要忽略汇率和海外风险偏好变化。"], {"technical": t, "flow": flow, "fundamentals": f, "market_institution": market_inst}))
 
-    return [_apply_knowledge_context(v) for v in views]
+    calendar = bundle.get("economic_calendar") or {}
+    return [_apply_calendar_context(_apply_knowledge_context(v), calendar) for v in views]
 
 
 async def generate_strategy_views(symbol: str, strategy: str | None = None, as_of: str | None = None) -> dict[str, Any]:
@@ -612,6 +654,13 @@ async def generate_strategy_views(symbol: str, strategy: str | None = None, as_o
     views = _score_views(bundle)
     for view in views:
         view["detailed_analysis"]["data_limitations"].extend(bundle.get("data_limitations") or [])
+        public = bundle.get("public_data") or {}
+        detail = view["detailed_analysis"]
+        detail["data_limitations"].extend(public.get("limitations") or [])
+        for item in (public.get("items") or [])[:2]:
+            detail.setdefault("sources", []).append({"source_id": item["source_id"], "title": item["title"],
+                "url": item["source_url"], "publisher": item["source"], "citation": item["citation"], "revision_id": item["revision_id"]})
+            detail.setdefault("signal_checks", []).append(f"[{item['source_id']}] {item['title']}；统计期 {item['period']}；值 {item['value']} {item['unit'] or ''}（背景资料，不改变规则评分）")
     if strategy:
         key = strategy.strip()
         want = _STRATEGY_BY_ID.get(key) or _STRATEGY_BY_NAME.get(key)

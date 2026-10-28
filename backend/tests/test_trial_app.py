@@ -93,6 +93,9 @@ def test_only_existing_built_assets_are_served(client):
     "/api/admin/users", "/api/ready", "/api/settings/llm", "/api/quant/orders",
     "/api/market/history/export", "/api/watchlist/profiles/unknown", "/api/xueqiu/bundle",
     "/api/news/source-config", "/api/transaction-agent/knowledge/ingest-local",
+    "/calendar", "/api/events/calendar", "/api/events/config", "/api/events/search",
+    "/data", "/api/data-center/overview", "/api/data-center/files", "/api/data-center/records",
+    "/today", "/api/tracking/theses", "/api/tracking/changes", "/api/tracking/refresh",
     "/api/market/kline/some%2Fother%2Fpath",
 ])
 def test_unlisted_paths_never_fall_back_to_spa(client, path):
@@ -120,7 +123,7 @@ def test_allowlist_covers_frontend_api_contract(client):
         response = client.request(method.upper(), "/api" + path)
         # The persistent research worker belongs to the local deployment. Adding
         # its authenticated UI must not silently expose it on the public trial.
-        if path.startswith(("/research/", "/autopilot/", "/runtime/", "/admin/data-assets", "/settings/llm")):
+        if path.startswith(("/research/", "/tracking/", "/events/", "/data-center/", "/autopilot/", "/runtime/", "/admin/data-assets", "/settings/llm")):
             assert response.status_code == 404
             continue
         assert response.status_code == 200, (method, path, response.text)

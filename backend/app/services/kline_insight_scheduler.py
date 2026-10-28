@@ -86,6 +86,8 @@ async def run_daily_batch_if_configured() -> None:
                         out.get("interpretation") or "",
                         source="scheduled",
                         model=str(out.get("model") or ""),
+                        economic_calendar=out.get("economic_calendar"),
+                        public_data=out.get("public_data"),
                     )
                     logger.info("盘后解读已保存 user=%s symbol=%s date=%s", uid, sym, today)
                 except Exception:

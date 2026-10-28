@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
-from app.services import llm_client
+from app.services import event_calendar_context, public_data_context, llm_client
 from app.services.market_time import market_date
 
 INDEX_NAME, PROMPT_NAME, FILES_SUB = "materials.json", "prompt.json", "files"
@@ -420,6 +420,12 @@ async def analyze_a_share_symbol(
         user_msg += "\n\n【基础提示词模块】\n" + "\n".join(module_lines)
     if bundle.get("cache_saved_at"):
         user_msg += f"\n【数据说明】本次使用本地 K 线缓存，缓存时间：{bundle['cache_saved_at']}。请在风险提示中说明数据可能滞后。"
+    calendar = event_calendar_context.retrieve(
+        "kline", f"{sym} {strategy_meta['label']} 全球经济金融事件 风险窗口", symbols=[sym],
+    )
+    user_msg += event_calendar_context.prompt_evidence(calendar)
+    public_data = public_data_context.retrieve("宏观 经济 通胀 汇率 公司主营", symbols=[symbol])
+    user_msg = public_data_context.prompt_evidence(public_data) + user_msg
     analysis, err = await asyncio.to_thread(llm_structured_interpret, pr["system"], user_msg)
     if err:
         raise RuntimeError(err)
@@ -433,6 +439,8 @@ async def analyze_a_share_symbol(
         "strategy": strategy_key,
         "strategy_label": strategy_meta["label"],
         "prompt_modules": selected_modules,
+        "economic_calendar": calendar,
+        "public_data": public_data,
         "model": settings.kline_llm_model,
         "kline_source": bundle.get("kline_source"),
         "tencent_mkline_slot": bundle.get("tencent_mkline_slot"),

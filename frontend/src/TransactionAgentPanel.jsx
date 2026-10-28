@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Divider, Modal, Progress, Row, Space, Spin, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import * as api from "./api";
 import { qk } from "./hooks/queryKeys.js";
 import { safeUrl } from "./components/format.js";
+import { useAuth } from "./AuthContext.jsx";
+import { ThesisComposer } from "./TrackingComponents.jsx";
+import { strategyEvidence } from "./trackingViewModel.js";
 
 const { Text, Paragraph } = Typography;
 
@@ -21,9 +24,12 @@ function scoreStatus(score) {
 }
 
 export default function TransactionAgentPanel({ symbol, displayName = "", asOf = null }) {
+  const { user } = useAuth();
   const [selectedView, setSelectedView] = useState(null);
+  const [savingView, setSavingView] = useState(null);
+  const pendingSaveView = useRef(null);
   const query = useQuery({
-    queryKey: qk.transactionAgentViews(symbol, asOf),
+    queryKey: qk.transactionAgentViews(symbol, asOf, user?.id),
     queryFn: () => api.getTransactionAgentViews(symbol, undefined, asOf || undefined),
     enabled: !!symbol,
     staleTime: 120_000,
@@ -31,15 +37,10 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
 
   const data = query.data;
   const strategies = data?.strategies || [];
-  const summary = data?.summary;
   const fmtText = (text) => {
     const raw = String(text || "");
     return displayName && symbol ? raw.replaceAll(symbol, displayName) : raw;
   };
-  const sorted = useMemo(
-    () => [...strategies].sort((a, b) => Number(b.score || 0) - Number(a.score || 0)),
-    [strategies]
-  );
   const selectedDetail = selectedView?.detailed_analysis || {};
 
   return (
@@ -52,7 +53,6 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
       }
       extra={
         <Space size={8}>
-          {summary ? <span className="sva-meta">均分 {summary.average_score}</span> : null}
           <Button size="small" type="text" icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => query.refetch()}>
             刷新
           </Button>
@@ -64,16 +64,14 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
           <Alert type="error" showIcon message={api.getApiErrorMessage(query.error)} />
         ) : null}
 
-        {summary ? (
+        {strategies.length ? (
           <div className="sva-summary-row">
-            <span data-tone="up">偏多 {summary.bullish_count}</span>
-            <span data-tone="flat">中性 {summary.neutral_count}</span>
-            <span data-tone="down">偏空 {summary.bearish_count}</span>
+            <span>各观点按自身周期解读，评分是规则强度，不能视为胜率。</span>
           </div>
         ) : null}
 
         <Row gutter={[10, 10]}>
-          {sorted.map((view) => {
+          {strategies.map((view) => {
             const meta = directionMeta(view.direction);
             return (
               <Col xs={24} md={12} xl={8} key={view.strategy_id || view.strategy}>
@@ -134,6 +132,9 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
           <Text type="secondary">暂无策略观点。</Text>
         ) : null}
       </Spin>
+      {savingView ? <ThesisComposer key={`${user?.id}:${savingView.view.strategy_id}`} symbol={symbol}
+        initial={{ reason: savingView.view.viewpoint || "", watch_conditions: (savingView.view.reasons || []).join("\n"), invalidation_conditions: (savingView.view.do_not_do?.length ? savingView.view.do_not_do : savingView.view.risks || []).join("\n") }}
+        evidenceRefs={[savingView.evidence]} onClose={() => setSavingView(null)} /> : null}
       <Modal
         open={!!selectedView}
         title={
@@ -146,9 +147,10 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
             </Space>
           ) : null
         }
-        footer={null}
+        footer={<Button type="primary" onClick={() => { pendingSaveView.current = { view: selectedView, evidence: strategyEvidence(selectedView, data) }; setSelectedView(null); }}>保存这条关注判断</Button>}
         width={880}
-        onCancel={() => setSelectedView(null)}
+        onCancel={() => { pendingSaveView.current = null; setSelectedView(null); }}
+        afterClose={() => { const view = pendingSaveView.current; pendingSaveView.current = null; if (view) setSavingView(view); }}
         className="ex-transaction-agent-modal"
       >
         {selectedView ? (

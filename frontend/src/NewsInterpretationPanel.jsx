@@ -153,7 +153,7 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
       <Spin spinning={news.isFetching || busy}>
         <div className="news-stack">
           {news.data?.items?.length ? (
-            news.data.items.map((item) => <NewsImpactCard key={item.id} item={item} />)
+            news.data.items.map((item) => <NewsImpactCard key={item.id} item={item} symbol={symbol} />)
           ) : !news.isPending ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}

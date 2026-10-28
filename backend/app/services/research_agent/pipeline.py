@@ -270,6 +270,7 @@ async def run_research(user_id: int, user_query: str) -> ResearchRunRecord:
         plan.primary_ticker,
         q,
         include_secondary=plan.secondary_ticker,
+        user_id=user_id,
     )
     clog = bundle.get("collection_log") or {}
     log.data_sources_used = list(dict.fromkeys(log.data_sources_used + (clog.get("data_sources_used") or [])))
@@ -288,6 +289,16 @@ async def run_research(user_id: int, user_query: str) -> ResearchRunRecord:
     news = analyze_news(bundle)
     fil = analyze_filings(bundle)
     risk = analyze_risks(bundle, price, val, news)
+    calendar = bundle.get("economic_calendar") or {}
+    calendar_sources = calendar.get("evidence_sources") or []
+    risk["items"].extend(calendar.get("limitations") or [])
+    if calendar_sources:
+        risk["items"].append("经济金融日历中的计划事件尚待公布，需核验实际结果及对该公司的传导条件。")
+        news["narrative"] += "\n全球经济金融事件证据：\n" + "\n".join(
+            f"[{source['source_id']}] {source.get('title', '')}：{source.get('text', '')[:400]}"
+            for source in calendar_sources
+        )
+    risk["narrative"] = "主要风险维度（自动化草稿）:\n" + "\n".join(f"- {item}" for item in risk["items"])
 
     steps.append({"name": "分析模块", "status": "ok", "detail": "Price / Fundamental / Valuation / News / Filing / Risk"})
 
@@ -300,6 +311,7 @@ async def run_research(user_id: int, user_query: str) -> ResearchRunRecord:
         "risks": risk.get("items"),
         "secondary": bundle.get("secondary"),
         "errors": clog.get("errors"),
+        "economic_calendar": calendar,
     }
 
     memo_draft = _template_report(plan_dict, price, fund, val, news, fil, risk)

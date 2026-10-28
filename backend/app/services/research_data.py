@@ -48,7 +48,7 @@ class MarketDataValidationError(ValueError):
 
 def _bar_content(row):
     """Market revisions exclude acquisition clocks, including inferred availability."""
-    value = {k: v for k, v in row.items() if k not in ("fetched_at", "extra_json")}
+    value = {k: v for k, v in row.items() if k not in ("fetched_at", "extra_json", "batch_id")}
     if value.get("availability_inferred"):
         value.pop("available_at", None)
     return store.canonical_json(value)
@@ -278,20 +278,29 @@ class ResearchData:
             raise SnapshotIntegrityError("Batch reference hash mismatch")
         return manifest
 
-    def _read_batches(self, batch_ids):
+    def _read_batches(self, batch_ids, *, as_of=None):
         import duckdb
         # The immutable manifest order is revision precedence. New snapshots may
         # supersede a bar; old snapshots retain their original batch list forever.
+        # Filter visibility BEFORE choosing a revision: a later correction must
+        # not hide the original bar that was available at the requested time.
+        cutoff = _ts(as_of) if as_of is not None else None
         by_key = {}
         with duckdb.connect(str(self.root / "read.duckdb"), read_only=True) as conn:
             for batch_id in batch_ids:
                 path = str(self._batch_path(batch_id) / "bars.parquet")
-                result = conn.execute("SELECT * FROM read_parquet(?)", [path])
+                query, params = "SELECT * FROM read_parquet(?)", [path]
+                if cutoff is not None:
+                    query += " WHERE available_at <= ?"
+                    params.append(cutoff)
+                result = conn.execute(query, params)
                 names = [col[0] for col in result.description]
                 for value in result.fetchall():
                     row = dict(zip(names, value))
                     extra = json.loads(row.pop("extra_json") or "{}")
-                    by_key[(row["symbol"], row["t"])] = {**extra, **row}
+                    # Derive provenance from the immutable file being read, not
+                    # provider-supplied extras. Old Parquet files need no rewrite.
+                    by_key[(row["symbol"], row["t"])] = {**extra, **row, "batch_id": batch_id}
         return sorted(by_key.values(), key=lambda r: (r["t"], r["symbol"]))
 
     def _expand_batches(self, user_id, batch_ids):
@@ -437,9 +446,13 @@ class ResearchData:
         return snapshot
 
     def read_snapshot(self, user_id, snapshot_id, *, as_of=None):
+        """Read the last visible revision in manifest order, with batch provenance.
+
+        ``as_of`` is an inclusive availability cutoff, not a quality certificate:
+        inferred timestamps and the snapshot's original blockers remain unchanged.
+        """
         snapshot = self.get_snapshot(user_id, snapshot_id)
-        rows = self._read_batches(snapshot["payload"]["batch_ids"])
-        return rows if as_of is None else [row for row in rows if row["available_at"] <= _ts(as_of)]
+        return self._read_batches(snapshot["payload"]["batch_ids"], as_of=as_of)
 
     def import_snapshot(self, user_id, bundles, *, metadata, pool_version_id=None):
         if not isinstance(bundles, dict) or not bundles:

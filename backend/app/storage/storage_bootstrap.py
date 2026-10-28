@@ -29,17 +29,25 @@ _GUIDE = """# StockViewAgent 本地数据目录
 | --- | --- | --- |
 | `research.sqlite3`、`research/` | 任务、策略版本、实验、数据清单、不可变行情批次、前向模拟、运行用量 | 长期保留，勿单独删改 |
 | `strategy_knowledge.db`、`decision_signals.db` | 正反研究证据和信号评价 | 长期保留 |
+| `tracking.sqlite3` | 个人关注判断、不可覆盖的修改与复盘历史、证据快照、变化和阅读状态 | 长期保留，随目录备份与搬迁 |
+| `economic_events.sqlite3` | 官方经济日历、不可变事件修订、全文检索索引与各账户 Agent 检索配置 | 长期保留 |
+| `data_center.sqlite3`、`datasets/` | 公共数据采集配置、队列、预算、来源状态、不可变内容批次与检索修订 | 长期保留，不作为普通缓存清理 |
 | `issuer_uploads/`、`kline_learning/` | 原始上传文件、提示词、资料清单、RAG 索引 | 保留原文件；向量索引可重建 |
 | `imports/company_fundamentals/` | 财务、管理层讨论和公司信息 CSV | 导入原件，长期保留 |
 | `news.db`、`company_fundamentals.db`、`company_updates/` | 新闻、财务修订和公司资料 | 长期保留 |
 | `users.db`、`watchlists/`、配置 JSON | 账户、API 配置、自选股、接口优先级 | 私有文件，搬迁会一并携带凭据 |
-| 各 `*_cache/` | 行情与接口缓存 | 可重新采集，不等于研究快照 |
+| `market_source_cache/`、`kline_bundle_cache/`、`tushare_daily_cache/` | 已知格式的行情与接口缓存 | 到期并通过预览校验后可回收，不等于研究快照 |
+| `market_history_cache/` | 累计市场历史序列 | 可能无法完整重建，长期保留 |
 | `runtime/logs/`、`runtime/pids/` | 进程日志与运行状态 | PID/锁不搬迁，日志可保留 |
 | `_managed/catalog.json` | 相对路径、分类、大小和更新时间的完整索引 | 可刷新重建，不含文件正文或 API 密钥 |
 | `_managed/backups/`、`_managed/legacy/` | JSON 写入前版本、旧目录冲突归档 | 勿把它们当临时缓存清理 |
+| `_managed/cache/` | 缓存策略、预览计划与管理锁 | 自动回收默认关闭；容量预算不是硬盘配额 |
+| `_managed/quarantine/` | 可恢复缓存与批次操作记录 | 仍占磁盘；仅管理员手动确认才永久删除，恢复不覆盖新文件 |
 | `_managed/layout.json`、`_managed/migration-manifest.json` | 目录身份、旧数据归拢报告、迁移校验清单 | 随数据保留 |
 
 ## 查看和搬迁
+
+管理员可在 `/data` 查看分类文件、自动采集任务和缓存回收区。数据库及 WAL、研究证据、公开资料批次、上传原件、账户与凭据配置不进入普通缓存清理。
 
 在项目根目录执行：
 

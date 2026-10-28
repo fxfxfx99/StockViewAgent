@@ -74,6 +74,8 @@ def upsert_insight(
     *,
     source: str,
     model: str,
+    economic_calendar: dict[str, Any] | None = None,
+    public_data: dict[str, Any] | None = None,
 ) -> None:
     """同一标的同一自然日仅保留一条（覆盖）。"""
     sym = (symbol or "").strip().upper()
@@ -88,6 +90,10 @@ def upsert_insight(
         "source": source if source in ("manual", "scheduled") else "manual",
         "model": (model or "").strip(),
     }
+    if economic_calendar is not None:
+        row["economic_calendar"] = economic_calendar
+    if public_data is not None:
+        row["public_data"] = public_data
     replaced = False
     for i, x in enumerate(rows):
         if str(x.get("report_date") or "")[:10] == rd:

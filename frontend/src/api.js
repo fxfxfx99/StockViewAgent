@@ -377,3 +377,151 @@ export async function updateResearchConfig(patch) {
   const { data } = await client.patch("/research/config", patch, { timeout: 15_000 });
   return data;
 }
+
+/** Global economic events use Shanghai date boundaries; timestamps remain UTC. */
+export async function getEventCalendar(params, { signal } = {}) {
+  const { data } = await client.get("/events/calendar", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function refreshEventCalendar() {
+  const { data } = await client.post("/events/refresh", {}, { timeout: 90_000 });
+  return data;
+}
+
+export async function getEventCalendarConfig({ signal } = {}) {
+  const { data } = await client.get("/events/config", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function updateEventCalendarConfig(patch) {
+  const { data } = await client.patch("/events/config", patch, { timeout: 15_000 });
+  return data;
+}
+
+export async function getCalendarEvent(id, { signal } = {}) {
+  const { data } = await client.get(`/events/${encodeURIComponent(id)}`, { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function searchCalendarEvents(params, { signal } = {}) {
+  const { data } = await client.get("/events/search", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+/** Administrator-only local data inventory, collection and reversible cache management. */
+export async function getLocalDataOverview({ signal } = {}) {
+  const { data } = await client.get("/data-center/overview", { signal, timeout: 60_000 });
+  return data;
+}
+
+export async function getLocalDataFiles(params, { signal } = {}) {
+  const { data } = await client.get("/data-center/files", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function getCollectedDataRecords(params, { signal } = {}) {
+  const { data } = await client.get("/data-center/records", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function getCollectionConfig({ signal } = {}) {
+  const { data } = await client.get("/data-center/config", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function updateCollectionConfig(patch) {
+  const { data } = await client.patch("/data-center/config", patch, { timeout: 15_000 });
+  return data;
+}
+
+export async function getCollectionSources({ signal } = {}) {
+  const { data } = await client.get("/data-center/sources", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function getCollectionJobs(params = {}, { signal } = {}) {
+  const { data } = await client.get("/data-center/jobs", { params, signal, timeout: 15_000 });
+  return data;
+}
+
+export async function startDataCollection(sourceIds) {
+  const { data } = await client.post("/data-center/collect", sourceIds?.length ? { source_ids: sourceIds } : {}, { timeout: 15_000 });
+  return data;
+}
+
+export async function getLocalCachePolicy({ signal } = {}) {
+  const { data } = await client.get("/data-center/cache/policy", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function updateLocalCachePolicy(patch) {
+  const { data } = await client.patch("/data-center/cache/policy", patch, { timeout: 15_000 });
+  return data;
+}
+
+export async function previewLocalCacheCleanup() {
+  const { data } = await client.post("/data-center/cleanup/preview", {}, { timeout: 60_000 });
+  return data;
+}
+
+export async function applyLocalCacheCleanup(planId) {
+  const { data } = await client.post("/data-center/cleanup/apply", { plan_id: planId }, { timeout: 60_000 });
+  return data;
+}
+
+export async function getLocalDataTrash({ signal, offset = 0, limit = 20 } = {}) {
+  const { data } = await client.get("/data-center/trash", { params: { offset, limit }, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function restoreLocalDataTrash(batchId) {
+  const { data } = await client.post(`/data-center/trash/${encodeURIComponent(batchId)}/restore`, {}, { timeout: 60_000 });
+  return data;
+}
+
+export async function deleteLocalDataTrash(batchId) {
+  const { data } = await client.delete(`/data-center/trash/${encodeURIComponent(batchId)}`, { data: { confirm: true }, timeout: 60_000 });
+  return data;
+}
+
+/** Personal research judgments and changes use archived evidence, without a model call. */
+export async function getTrackingTheses({ signal } = {}) {
+  const { data } = await client.get("/tracking/theses", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function createTrackingThesis(payload) {
+  const { data } = await client.post("/tracking/theses", payload, { timeout: 15_000 });
+  return data;
+}
+
+export async function getTrackingThesis(id, { signal } = {}) {
+  const { data } = await client.get(`/tracking/theses/${encodeURIComponent(id)}`, { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function updateTrackingThesis(id, payload) {
+  const { data } = await client.patch(`/tracking/theses/${encodeURIComponent(id)}`, payload, { timeout: 15_000 });
+  return data;
+}
+
+export async function reviewTrackingThesis(id, payload) {
+  const { data } = await client.post(`/tracking/theses/${encodeURIComponent(id)}/reviews`, payload, { timeout: 15_000 });
+  return data;
+}
+
+export async function getTrackingChanges({ signal } = {}) {
+  const { data } = await client.get("/tracking/changes", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function updateTrackingChange(id, patch) {
+  const { data } = await client.patch(`/tracking/changes/${encodeURIComponent(id)}`, patch, { timeout: 15_000 });
+  return data;
+}
+
+export async function refreshTracking() {
+  const { data } = await client.post("/tracking/refresh", {}, { timeout: 60_000 });
+  return data;
+}
