@@ -99,8 +99,7 @@ def get_llm_infer(
     return {"ok": True, **r}
 
 
-@router.put("/llm")
-def put_llm(body: LLMUpdate, user: Annotated[UserRecord, Depends(get_current_user)]):
+def save_llm_settings(body: LLMUpdate, user: UserRecord, *, activate_research: bool = True):
     patch = body.model_dump(exclude_unset=True)
     if not patch:
         return llm_public_dict(user.id)
@@ -128,7 +127,12 @@ def put_llm(body: LLMUpdate, user: Annotated[UserRecord, Depends(get_current_use
         kw["embedding_api_base"] = patch["embedding_api_base"] or ""
     validate_llm_endpoints(kw)
     merge_user_credentials(user.id, {"llm": unify_llm_runtime_fields(kw)})
-    if settings.enable_research_worker:
+    if activate_research and settings.enable_research_worker:
         from app.services import local_autopilot
         local_autopilot.reconcile(user.id)
     return llm_public_dict(user.id)
+
+
+@router.put("/llm")
+def put_llm(body: LLMUpdate, user: Annotated[UserRecord, Depends(get_current_user)]):
+    return save_llm_settings(body, user)

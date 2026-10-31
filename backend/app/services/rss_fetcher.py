@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import quote, quote_plus
 
@@ -18,6 +19,8 @@ from app.services import eastmoney_stock_news, news_watchlist_matcher
 from app.services.news_fetch_http import DEFAULT_NEWS_TIMEOUT, NEWS_UA, fetch_bytes_with_retry
 
 USER_AGENT = NEWS_UA
+FETCH_CONCURRENCY = 2
+SYMBOL_BATCH_SIZE = 2
 
 
 def _code_from_symbol(symbol: str) -> str:
@@ -95,43 +98,65 @@ def _symbol_feed_jobs(symbols: list[str]) -> list[tuple[str, str, str | None]]:
     return jobs
 
 
-async def fetch_news_for_symbols(symbols: list[str], *, collection_stats: dict | None = None) -> list[dict[str, Any]]:
-    sym_list = [s.strip().upper() for s in symbols if s and s.strip()]
-    sym_jobs = _symbol_feed_jobs(sym_list)
-    global_jobs = [(url, label, None) for label, url in GLOBAL_FEEDS]
-    urls: list[tuple[str, str, str | None]] = [*sym_jobs, *global_jobs]
+async def fetch_news_for_symbols(
+    symbols: list[str], *, collection_stats: dict | None = None,
+    collector: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
+) -> list[dict[str, Any]]:
+    """Download small batches; ``collector`` archives every batch, independently
+    of the display limit. Collector mode returns no accumulated display list.
+    """
+    sym_list = list(dict.fromkeys(s.strip().upper() for s in symbols if s and s.strip()))
+    _, name_hints = news_watchlist_matcher.load_watchlist_match_hints()
+    counts = collection_stats if collection_stats is not None else {}
+    counts["records_received"] = 0
+    cap = max(80, min(settings.news_feed_max_items, 500))
+    by_id: dict[str, dict[str, Any]] = {}
 
-    wl_hints, name_hints = news_watchlist_matcher.load_watchlist_match_hints()
+    async def accept(rows):
+        counts["records_received"] += len(rows)
+        # A response cap also needs per-item caps: one oversized title must not
+        # survive in every slot of the retained display list across many feeds.
+        rows = [{**row, **{field: str(row[field])[:limit]
+                          for field, limit in (("title", 1000), ("summary", 2000), ("published", 200), ("source", 200))
+                          if field in row}}
+                for row in rows if len(str(row.get("link") or "")) <= 2000]
+        if collector is not None:
+            if rows:
+                await collector(rows)
+            return
+        for row in rows:
+            old = by_id.get(row["id"])
+            if old is None or (row.get("published_ts") or 0) > (old.get("published_ts") or 0):
+                by_id[row["id"]] = row
+        if len(by_id) > cap:
+            newest = sorted(by_id.values(), key=lambda row: row.get("published_ts") or 0, reverse=True)[:cap]
+            by_id.clear()
+            by_id.update((row["id"], row) for row in newest)
 
     async with httpx.AsyncClient(
-        timeout=DEFAULT_NEWS_TIMEOUT,
-        headers={"User-Agent": USER_AGENT},
+        timeout=DEFAULT_NEWS_TIMEOUT, headers={"User-Agent": USER_AGENT},
+        limits=httpx.Limits(max_connections=FETCH_CONCURRENCY, max_keepalive_connections=FETCH_CONCURRENCY),
     ) as client:
-        tasks = [fetch_bytes_with_retry(client, u) for u, _, _ in urls]
-        bodies = await asyncio.gather(*tasks)
-        em_items = await eastmoney_stock_news.fetch_symbols_news_items(
-            sym_list,
-            limit_per_symbol=14,
-            name_hints=name_hints,
-        )
+        async def fetch_one(job):
+            url, label, symbol = job
+            body = await fetch_bytes_with_retry(client, url)
+            if not body:
+                return []
+            # Parse before returning: no raw response survives until another
+            # symbol finishes. Only these small parsed snippets reach accept().
+            return _parse_feed(body, label, symbol, max_entries=18 if symbol else 30)
 
-    merged: list[dict[str, Any]] = list(em_items)
-    for (_, label, sym), body in zip(urls, bodies, strict=True):
-        if not body:
-            continue
-        max_e = 18 if sym else 30
-        merged.extend(_parse_feed(body, label, sym, max_entries=max_e))
-    if collection_stats is not None:
-        collection_stats["records_received"] = len(merged)
+        async def feeds(jobs):
+            for offset in range(0, len(jobs), FETCH_CONCURRENCY):
+                groups = await asyncio.gather(*(fetch_one(job) for job in jobs[offset:offset + FETCH_CONCURRENCY]))
+                for rows in groups:
+                    await accept(rows)
 
-    by_id: dict[str, dict[str, Any]] = {}
-    for it in merged:
-        i = it["id"]
-        old = by_id.get(i)
-        if not old or (it.get("published_ts") or 0) > (old.get("published_ts") or 0):
-            by_id[i] = it
+        await feeds([(url, label, None) for label, url in GLOBAL_FEEDS])
+        for offset in range(0, len(sym_list), SYMBOL_BATCH_SIZE):
+            batch = sym_list[offset:offset + SYMBOL_BATCH_SIZE]
+            await feeds(_symbol_feed_jobs(batch))
+            await accept(await eastmoney_stock_news.fetch_symbols_news_items(
+                batch, limit_per_symbol=14, name_hints=name_hints))
 
-    items = list(by_id.values())
-    items.sort(key=lambda x: x.get("published_ts") or 0, reverse=True)
-    cap = max(80, min(settings.news_feed_max_items, 500))
-    return items[:cap]
+    return sorted(by_id.values(), key=lambda row: row.get("published_ts") or 0, reverse=True)

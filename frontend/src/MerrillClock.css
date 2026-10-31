@@ -1,0 +1,129 @@
+.merrill-page { background: var(--sva-bg); color: var(--sva-text); }
+.merrill-page .merrill-content { width: 100%; max-width: 1600px; margin: 0 auto; padding: 28px var(--sva-page-padding, 24px) 48px; }
+.merrill-page .merrill-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 25px; }
+.merrill-page .merrill-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: .16em; color: var(--sva-text-tertiary); }
+.merrill-page h1 { margin: 7px 0 8px; font-size: 29px; font-weight: 650; letter-spacing: -.04em; color: var(--sva-text); }
+.merrill-page h1 > span { margin-left: 18px; font-size: 15px; font-weight: 400; color: var(--sva-text-secondary); letter-spacing: 0; }
+.merrill-page .merrill-page-heading p { margin: 0; color: var(--sva-text-secondary); font-size: 13px; line-height: 1.7; }
+.merrill-page .merrill-heading-status { display: flex; align-items: center; flex-shrink: 0; gap: 7px; font-size: 12px; color: var(--sva-text-secondary); }
+.merrill-page .merrill-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #779a8f; }
+.merrill-page .merrill-status-dot.is-busy { background: #c59750; }
+.merrill-page .merrill-content > .ant-alert { margin-bottom: 18px; }
+.merrill-page .merrill-main-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(345px, 1fr); align-items: stretch; gap: 18px; }
+.merrill-page .merrill-card { min-width: 0; background: var(--sva-panel-bg); border: 1px solid var(--sva-separator); border-radius: 12px; padding: 23px; }
+.merrill-page .merrill-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 21px; }
+.merrill-page .merrill-kicker { margin-bottom: 5px; color: var(--sva-text-tertiary); font-size: 11px; letter-spacing: .08em; }
+.merrill-page h2 { margin: 0; color: var(--sva-text); font-size: 18px; font-weight: 600; letter-spacing: -.025em; line-height: 1.5; }
+.merrill-page .merrill-card-heading .ant-tag { margin: 0; font-size: 11px; color: var(--sva-text-secondary); background: var(--sva-fill); border-color: var(--sva-separator); }
+.merrill-page .merrill-chart-card { display: flex; flex-direction: column; }
+.merrill-page .merrill-chart-controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.merrill-page .merrill-chart-controls > label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--sva-text-secondary); }
+.merrill-page .merrill-chart-controls .ant-select { min-width: 128px; }
+.merrill-page .merrill-chart-controls .ant-picker { width: 174px; }
+.merrill-page .merrill-selection { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+.merrill-page .merrill-class-select { flex: 0 0 110px; }
+.merrill-page .merrill-asset-select { flex: 1; min-width: 0; }
+.merrill-page .merrill-chart { position: relative; width: 100%; height: 390px; min-height: 320px; flex: 1; }
+.merrill-page .merrill-chart-pending { position: absolute; top: 0; right: 0; display: flex; align-items: center; gap: 7px; padding: 6px 10px; font-size: 11px; color: var(--sva-text-secondary); background: var(--sva-panel-bg); border-radius: 6px; }
+.merrill-page .merrill-chart-empty, .merrill-page .merrill-loading, .merrill-page .merrill-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; min-height: 260px; height: 100%; padding: 28px; color: var(--sva-text-secondary); font-size: 13px; text-align: center; }
+.merrill-page .merrill-empty-line { font-size: 60px; line-height: 1; color: var(--sva-text-tertiary); font-weight: 200; }
+.merrill-page .merrill-inline-note { padding: 8px 10px; margin: 0 0 10px; border-radius: 5px; background: var(--sva-fill); color: var(--sva-text-secondary); font-size: 11px; }
+.merrill-page .merrill-note { margin: 12px 0 0; font-size: 11px; line-height: 1.75; color: var(--sva-text-tertiary); }
+.merrill-page .merrill-muted { color: var(--sva-text-tertiary); font-size: 11px; line-height: 1.65; }
+.merrill-page .merrill-clock-card { padding-bottom: 15px; }
+.merrill-page .merrill-clock-card .merrill-card-heading { margin-bottom: 16px; }
+.merrill-page .merrill-clock-card .ant-segmented { flex-shrink: 0; font-size: 12px; }
+.merrill-page .merrill-phase-line { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.merrill-page .merrill-phase-line > strong { font-size: 25px; font-weight: 600; letter-spacing: -.025em; }
+.merrill-page .merrill-phase-line > span { color: var(--sva-text-tertiary); font-size: 10px; line-height: 1.7; text-align: right; }
+.merrill-page .merrill-dial-wrap { max-width: 365px; margin: 2px auto 0; }
+.merrill-page .merrill-dial { display: block; width: 100%; overflow: visible; }
+.merrill-page .merrill-sector path { fill: var(--phase-color); fill-opacity: .075; transition: fill-opacity .3s ease; }
+.merrill-page .merrill-sector.is-current path { fill-opacity: .18; }
+.merrill-page .merrill-sector text { text-anchor: middle; }
+.merrill-page .merrill-sector-name { fill: var(--phase-color); font-size: 17px; font-weight: 600; }
+.merrill-page .merrill-sector-asset { fill: var(--sva-text-tertiary); font-size: 11px; }
+.merrill-page .merrill-dial-edge { fill: none; stroke: var(--sva-separator); stroke-width: 1; }
+.merrill-page .merrill-dial-axis { stroke: var(--sva-separator); stroke-width: 1; stroke-dasharray: 3 5; }
+.merrill-page .merrill-tick { stroke: var(--sva-separator-strong, #5b606a); stroke-width: 1; }
+.merrill-page .merrill-tick.is-hour { stroke: var(--sva-text-tertiary); stroke-width: 1.3; }
+.merrill-page .merrill-axis-label { fill: var(--sva-text-tertiary); text-anchor: middle; font-size: 11px; }
+.merrill-page .merrill-axis-left { text-anchor: start; }
+.merrill-page .merrill-axis-right { text-anchor: end; }
+.merrill-page .merrill-dial-center { fill: var(--sva-panel-bg); stroke: var(--sva-separator); stroke-width: 1; }
+.merrill-page .merrill-needle { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.merrill-page .merrill-hub { fill: currentColor; }
+.merrill-page .merrill-node-halo { fill: currentColor; fill-opacity: .17; }
+.merrill-page .merrill-node { fill: currentColor; stroke: var(--sva-panel-bg); stroke-width: 2; }
+.merrill-page .merrill-no-node { fill: var(--sva-text-tertiary); text-anchor: middle; font-size: 20px; }
+.merrill-page .merrill-node-caption { display: flex; align-items: center; justify-content: center; gap: 6px; margin: -2px 0 15px; color: var(--sva-text-tertiary); font-size: 10px; }
+.merrill-page .merrill-node-caption > i { width: 5px; height: 5px; border-radius: 50%; }
+.merrill-page .merrill-cycle-notice { margin: 0 0 13px; padding: 8px 10px; border-radius: 6px; background: var(--sva-fill); color: var(--sva-text-secondary); font-size: 11px; line-height: 1.65; text-align: center; }
+.merrill-page .merrill-evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding-top: 14px; border-top: 1px solid var(--sva-separator); }
+.merrill-page .merrill-evidence + .merrill-evidence { border-left: 1px solid var(--sva-separator); padding-left: 14px; }
+.merrill-page .merrill-evidence > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; font-size: 11px; color: var(--sva-text-secondary); }
+.merrill-page .merrill-evidence strong { color: var(--sva-text); font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.merrill-page .merrill-evidence p { margin: 6px 0 1px; color: var(--sva-text-tertiary); font-size: 10px; line-height: 1.5; }
+.merrill-page .merrill-method { margin-top: 13px; color: var(--sva-text-tertiary); font-size: 11px; line-height: 1.7; }
+.merrill-page .merrill-method > summary { cursor: pointer; width: fit-content; }
+.merrill-page .merrill-method p { margin: 8px 0; }
+.merrill-page .merrill-macro-source { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--sva-separator); overflow-wrap: anywhere; }
+.merrill-page .merrill-macro-source strong { color: var(--sva-text-secondary); font-weight: 500; }
+.merrill-page .merrill-macro-source a { color: var(--sva-text-secondary); }
+.merrill-page .merrill-explanation-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-top: 18px; }
+.merrill-page .merrill-small-label { color: var(--sva-text-tertiary); font-size: 11px; }
+.merrill-page .merrill-body-copy { font-size: 12px; line-height: 1.85; color: var(--sva-text-secondary); margin: 0 0 15px; }
+.merrill-page .merrill-theory-row { display: flex; align-items: flex-start; gap: 12px; padding: 15px 0; border-top: 1px solid var(--sva-separator); }
+.merrill-page .merrill-phase-number { margin-top: 1px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.merrill-page .merrill-theory-row > div { flex: 1; min-width: 0; }
+.merrill-page .merrill-theory-row h3 { display: flex; flex-wrap: wrap; gap: 5px 13px; margin: 0; font-size: 13px; color: var(--sva-text); font-weight: 550; }
+.merrill-page .merrill-theory-row h3 span { font-size: 11px; line-height: 1.9; color: var(--sva-text-tertiary); font-weight: 400; }
+.merrill-page .merrill-theory-row p { margin: 5px 0 0; font-size: 11px; color: var(--sva-text-secondary); line-height: 1.8; }
+.merrill-page .merrill-asset-pill { display: block; flex-shrink: 0; padding: 2px 9px; font-size: 10px; border: 1px solid var(--sva-separator); border-radius: 4px; }
+.merrill-page .merrill-theory-sources { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-size: 10px; }
+.merrill-page .merrill-theory-sources > a, .merrill-page .merrill-coverage a { color: var(--sva-text-secondary); text-underline-offset: 3px; }
+.merrill-page .merrill-rule-summary { padding: 14px 16px; background: var(--sva-fill); border-left: 2px solid #779a8f; border-radius: 0 6px 6px 0; }
+.merrill-page .merrill-rule-summary > span { color: var(--sva-text-tertiary); font-size: 11px; margin-right: 12px; }
+.merrill-page .merrill-rule-summary strong { font-size: 13px; font-weight: 550; color: var(--sva-text); }
+.merrill-page .merrill-rule-summary p { margin: 7px 0 0; color: var(--sva-text-secondary); font-size: 12px; line-height: 1.85; }
+.merrill-page .merrill-analysis-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 22px 0 10px; font-size: 11px; color: var(--sva-text-tertiary); }
+.merrill-page .merrill-ai-badge { border: 1px solid var(--sva-separator); border-radius: 4px; color: var(--sva-text-secondary); padding: 1px 6px; font-size: 10px; }
+.merrill-page .merrill-analysis-date { font-size: 10px; color: var(--sva-text-tertiary); margin: 0 0 12px; }
+.merrill-page .merrill-analysis-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.95; color: var(--sva-text-secondary); max-height: 450px; overflow: auto; padding-right: 5px; }
+.merrill-page .merrill-analysis .ant-alert { margin-bottom: 12px; }
+.merrill-page .merrill-analysis-empty { min-height: 158px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
+.merrill-page .merrill-analysis-empty > span { font-size: 13px; color: var(--sva-text-secondary); }
+.merrill-page .merrill-analysis-empty > p { font-size: 12px; line-height: 1.85; color: var(--sva-text-tertiary); max-width: 440px; }
+.merrill-page .merrill-automation { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin: 18px 0; }
+.merrill-page .merrill-automation h2 { font-size: 16px; }
+.merrill-page .merrill-automation p { margin: 7px 0 2px; font-size: 12px; color: var(--sva-text-secondary); }
+.merrill-page .merrill-automation-actions { display: flex; align-items: center; gap: 30px; }
+.merrill-page .merrill-auto-switch { display: flex; align-items: center; gap: 12px; }
+.merrill-page .merrill-auto-switch > div { display: flex; flex-direction: column; gap: 3px; }
+.merrill-page .merrill-auto-switch strong { font-size: 12px; color: var(--sva-text); font-weight: 500; }
+.merrill-page .merrill-auto-switch span { font-size: 10px; color: var(--sva-text-tertiary); }
+.merrill-page .merrill-coverage { padding: 0; overflow: hidden; }
+.merrill-page .merrill-coverage > summary { padding: 18px 23px; color: var(--sva-text); font-size: 13px; font-weight: 500; cursor: pointer; }
+.merrill-page .merrill-coverage > summary > span:first-child { margin-right: 15px; }
+.merrill-page .merrill-coverage > .merrill-note { padding: 0 23px; margin: 0 0 16px; }
+.merrill-page .merrill-table-scroll { overflow-x: auto; }
+.merrill-page .merrill-coverage table { width: 100%; min-width: 830px; border-collapse: collapse; text-align: left; font-size: 11px; }
+.merrill-page .merrill-coverage th { color: var(--sva-text-tertiary); font-size: 10px; font-weight: 500; background: var(--sva-fill); padding: 10px 16px; white-space: nowrap; }
+.merrill-page .merrill-coverage td { padding: 13px 16px; border-top: 1px solid var(--sva-separator); vertical-align: top; color: var(--sva-text-secondary); line-height: 1.7; }
+.merrill-page .merrill-coverage td:first-child { min-width: 170px; }
+.merrill-page .merrill-coverage td:nth-child(2) { min-width: 150px; }
+.merrill-page .merrill-coverage td:nth-child(3) { min-width: 110px; }
+.merrill-page .merrill-coverage td:nth-child(4) { width: 32%; }
+.merrill-page .merrill-coverage td:last-child { min-width: 120px; }
+.merrill-page .merrill-series-name { display: flex; align-items: center; gap: 7px; color: var(--sva-text); }
+.merrill-page .merrill-series-name i { display: block; flex: 0 0 6px; height: 6px; border-radius: 50%; opacity: .35; }
+.merrill-page .merrill-coverage .is-selected .merrill-series-name i { opacity: 1; }
+.merrill-page .merrill-cell-note { display: block; color: var(--sva-text-tertiary); font-size: 10px; line-height: 1.65; margin-top: 4px; overflow-wrap: anywhere; }
+.merrill-page .merrill-proxy-tag { margin: 0 0 0 6px; font-size: 9px; line-height: 16px; background: var(--sva-fill); color: var(--sva-text-tertiary); border-color: var(--sva-separator); }
+.merrill-page .merrill-warning-text { color: #bd9550; }
+.merrill-page .merrill-source-error { max-width: 210px; color: var(--sva-text-secondary); }
+@media (min-width: 1450px) { .merrill-page .merrill-chart { min-height: 430px; } .merrill-page .merrill-dial-wrap { max-width: 385px; } }
+@media (max-width: 1120px) { .merrill-page .merrill-main-grid { grid-template-columns: minmax(0, 1.35fr) minmax(310px, 1fr); gap: 14px; } .merrill-page .merrill-card { padding: 18px; } .merrill-page .merrill-coverage { padding: 0; } .merrill-page .merrill-heading-status { align-self: flex-start; margin-top: 10px; } .merrill-page h1 > span { display: none; } .merrill-page .merrill-clock-card h2 { font-size: 16px; } }
+@media (max-width: 900px) { .merrill-page .merrill-page-heading { align-items: flex-start; flex-direction: column; gap: 7px; } .merrill-page .merrill-heading-status { margin-top: 0; } .merrill-page .merrill-main-grid { grid-template-columns: minmax(0, 1fr); } .merrill-page .merrill-dial-wrap { max-width: 360px; } .merrill-page .merrill-explanation-grid { grid-template-columns: minmax(0, 1fr); } .merrill-page .merrill-chart { flex: none; height: 390px; } .merrill-page .merrill-evidence p { font-size: 11px; } .merrill-page .merrill-automation { align-items: flex-start; flex-direction: column; gap: 18px; } .merrill-page .merrill-automation-actions { width: 100%; justify-content: space-between; } }
+@media (max-width: 520px) { .merrill-page .merrill-content { padding: 20px 12px 30px; } .merrill-page h1 { font-size: 26px; } .merrill-page .merrill-page-heading p { font-size: 12px; } .merrill-page .merrill-card { padding: 16px; border-radius: 10px; } .merrill-page .merrill-coverage { padding: 0; } .merrill-page .merrill-card-heading { margin-bottom: 17px; } .merrill-page .merrill-chart-controls { gap: 10px; } .merrill-page .merrill-chart-controls > label { flex: 1; } .merrill-page .merrill-chart-controls .ant-select { min-width: 120px; } .merrill-page .merrill-chart-controls .ant-picker { width: 100%; } .merrill-page .merrill-class-select { flex-basis: 98px; } .merrill-page .merrill-chart { height: 340px; } .merrill-page .merrill-card-heading h2 { font-size: 16px; } .merrill-page .merrill-analysis .merrill-card-heading { flex-wrap: wrap; } .merrill-page .merrill-theory-row { gap: 9px; } .merrill-page .merrill-asset-pill { padding: 2px 6px; } .merrill-page .merrill-coverage > summary { padding: 16px; } .merrill-page .merrill-coverage > summary > .merrill-muted { display: block; padding: 5px 0 0 16px; } .merrill-page .merrill-coverage > .merrill-note { padding: 0 16px; } }
+@media (prefers-reduced-motion: reduce) { .merrill-page .merrill-sector path { transition: none; } }

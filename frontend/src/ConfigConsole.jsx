@@ -32,20 +32,20 @@ const { Text, Paragraph, Title } = Typography;
 const MARKET_OPTIONS = [
   {
     value: "klineshare",
-    label: "KlineShare（推荐）",
-    hint: "在 data.klineshare.cn 申请 API Key，支持 A 股 K 线/行情增强",
+    label: "KlineShare",
+    hint: "A 股行情与 K 线；API Key 可在 data.klineshare.cn 申请。",
     doc: "https://data.klineshare.cn/docs",
   },
   {
     value: "tushare",
     label: "Tushare Pro",
-    hint: "宏观/行业与 K 线兜底",
+    hint: "宏观、行业数据与备用 K 线来源。",
     doc: "https://tushare.pro/document/2",
   },
   {
     value: "public",
     label: "公开行情",
-    hint: "使用东财、腾讯、百度等公开行情接口",
+    hint: "东财、腾讯、百度等公开行情。",
     doc: null,
   },
 ];
@@ -58,8 +58,7 @@ export function SetupOnboardingBanner({ setupStatus }) {
       showIcon
       banner
       className="sva-setup-banner"
-      message="配置大模型后即可自动运行"
-      description={<Text>选择供应商并填写 API Key，行情默认使用公开来源。</Text>}
+      message="配置大模型，开启量化自动研究"
       action={
         <Link to="/setup">
           <Button type="primary" size="small">打开设置</Button>
@@ -153,7 +152,7 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
     setRefreshing(true);
     try {
       const state = await api.refreshDataCenter();
-      message.success("已触发后台数据更新");
+      message.success("已提交数据更新");
       qc.setQueryData(["settings", "data-center", userId], (prev) => ({
         ...prev,
         refresh_running: true,
@@ -249,7 +248,7 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
     } catch (e) {
       if (e?.errorFields) return;
       const detail = e?.response || e?.code ? api.getApiErrorMessage(e) : e.message || "请检查配置后重试。";
-      if (saved && startAutomatically) setActivation({ type: "warning", message: "配置已保存，自动启动待重试", description: "再次点击开启按钮，或前往研究实验室查看状态。" });
+      if (saved && startAutomatically) setActivation({ type: "warning", message: "配置已保存，自动启动待重试", description: "再次点击「保存并开启量化自动研究」重试。" });
       else message.error(detail);
     } finally {
       setSaving(false);
@@ -260,7 +259,6 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
   const llm = integrations?.llm;
   const klineshare = integrations?.klineshare;
   const tushare = integrations?.tushare;
-  const market = integrations?.market_data;
   const startup = center?.last_startup_refresh;
 
   const marketProvider = Form.useWatch("market_data_provider", form);
@@ -299,11 +297,11 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
           forceRender: true,
           children: <Spin spinning={loading}>
         <Form form={form} layout="vertical" size="small">
-        <Space direction="vertical" size={22} className="sva-settings-stack">
+        <Space direction="vertical" size={24} className="sva-settings-stack">
           <section className="sva-config-welcome">
             <Title level={3}>连接大模型</Title>
             <Paragraph type="secondary">
-              保存后自动采集公开行情、验证策略并积累模拟记录。
+              用于研究分析与策略验证；模型调用受当前账户研究预算限制。
             </Paragraph>
           </section>
 
@@ -312,12 +310,12 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
             <Form.Item name="llm_provider" label="大模型供应商" rules={[{ required: true, message: "请选择供应商" }]}>
               <Select options={providers.map(({ value, label }) => ({ value, label }))} onChange={changeProvider} />
             </Form.Item>
-            {presetsUnavailable ? <Paragraph type="secondary">供应商列表暂不可用，可手动填写接口地址与模型。</Paragraph> : null}
+            {presetsUnavailable ? <Paragraph type="secondary">供应商列表加载失败，可手动填写接口地址和模型。</Paragraph> : null}
             <Form.Item
               name="llm_api_key"
               label="API Key"
               rules={[{ required: !llm?.key_configured, whitespace: true, message: "请填写 API Key" }]}
-              extra={llm?.key_configured ? "密钥已保存。留空沿用，更换服务地址时填写新密钥。" : "密钥保存在本机。"}
+              extra={llm?.key_configured ? "更换服务地址时需填写新密钥。" : "密钥保存在本机。"}
             >
               <Input.Password placeholder={llm?.key_configured ? "留空沿用现有密钥" : "粘贴供应商提供的 API Key"} autoComplete="new-password" visibilityToggle={false} />
             </Form.Item>
@@ -334,11 +332,11 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
             </div>
             <div className="sva-settings-primary-action">
             <Button type="primary" disabled={loading || !integrations || saving} loading={saving && saveMode === "activate"} onClick={() => void save(true)}>
-              保存并开启自动运行
+              保存并开启量化自动研究
             </Button>
             </div>
             <Paragraph className="sva-config-note" type="secondary">
-              首次准备示例自选，可随时调整。模型按研究预算调用，结果保存在本机。
+              首次运行会添加示例自选，研究结果保存在本机。
             </Paragraph>
             {activation ? <Alert showIcon {...activation} action={activation.type === "success" ? <Button size="small" onClick={() => setTab("runtime")}>查看运行状态</Button> : null} /> : null}
           </section>
@@ -347,25 +345,22 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
             className="sva-config-advanced"
             ghost
             onChange={(keys) => setAdvancedOpen(keys.includes("advanced"))}
-            items={[{ key: "advanced", label: "高级设置（可选）", children: (
-              <Space direction="vertical" size={18} className="sva-settings-stack">
+            items={[{ key: "advanced", label: "高级设置", children: (
+              <Space direction="vertical" size={24} className="sva-settings-stack">
           <section className="sva-admin-section sva-settings-group">
             <Title level={5}>行情来源</Title>
-            <Paragraph type="secondary" style={{ fontSize: 12, margin: "6px 0" }}>
-              默认使用公开行情，也可添加已有的付费行情账户。
-            </Paragraph>
-            <div className="sva-settings-source-state"><Text type="secondary">当前：{market?.provider && market.provider !== "unset" ? market.provider : "公开行情"}</Text><Text type="secondary">KlineShare {klineshare?.configured ? "已配置" : "可选"}</Text><Text type="secondary">Tushare {tushare?.configured ? "已配置" : "可选"}</Text></div>
+            <div className="sva-settings-source-state"><Text type="secondary">KlineShare {klineshare?.configured ? "已配置" : "可选"}</Text><Text type="secondary">Tushare {tushare?.configured ? "已配置" : "可选"}</Text></div>
             <div className="sva-settings-fields sva-settings-fields--inset">
               <Form.Item name="market_data_provider" label="行情提供商">
                 <Select options={MARKET_OPTIONS.map(({ value, label }) => ({ value, label }))} />
               </Form.Item>
               {marketProvider === "klineshare" ? (
-                <Form.Item name="klineshare_api_key" label="KlineShare Key" extra="留空保留已保存的密钥。">
+                <Form.Item name="klineshare_api_key" label="KlineShare Key" extra="留空沿用现有密钥。">
                   <Input.Password placeholder="从 KlineShare 用户中心复制" autoComplete="new-password" visibilityToggle={false} />
                 </Form.Item>
               ) : null}
               {marketProvider === "tushare" ? (
-                <Form.Item name="tushare_token" label="Tushare Token" extra="留空保留已保存的密钥。">
+                <Form.Item name="tushare_token" label="Tushare Token" extra="留空沿用现有密钥。">
                   <Input.Password placeholder="个人 Token" autoComplete="new-password" visibilityToggle={false} />
                 </Form.Item>
               ) : null}
@@ -387,11 +382,12 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
 
           {isAdmin ? (
             <>
+              <section className="sva-admin-section sva-settings-group"><Text strong>后台公共数据采集</Text><Paragraph className="sva-settings-helper">按计划采集，无需配置模型。</Paragraph><Link to="/data" onClick={onClose}>管理采集计划与资源限额 ↗</Link></section>
               <LocalDataDirectory userId={userId} active={advancedActive} />
               <section className="sva-admin-section sva-settings-group">
                 {centerQuery.error ? <Alert type="warning" showIcon message={api.getApiErrorMessage(centerQuery.error)} /> : null}
                 <div className="sva-admin-section__head">
-                  <Text strong>数据维护</Text>
+                  <Text strong>一次性数据维护</Text>
                   <Button
                     size="small"
                     icon={<ReloadOutlined />}
@@ -399,22 +395,22 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
                     disabled={center?.refresh_running}
                     onClick={() => void refreshDataCenter()}
                   >
-                    {center?.refresh_running ? "后台更新中" : "立即后台更新"}
+                    {center?.refresh_running ? "后台更新中" : "联网更新一次"}
                   </Button>
                 </div>
-                <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
-                  刷新股票列表、新闻入库、行情缓存等。
+                <Paragraph type="secondary" className="sva-settings-helper">
+                  更新股票列表、新闻和行情缓存。
                 </Paragraph>
                 {startup ? (
                   <Tag color={startup.status === "ok" ? "success" : "warning"}>
                     最近任务：{startup.status || "—"}
                   </Tag>
                 ) : (
-                  <Text type="secondary" style={{ fontSize: 12 }}>尚未运行启动预热</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>尚未更新</Text>
                 )}
                 <Table
                   size="small"
-                  style={{ marginTop: 10 }}
+                  className="sva-settings-maintenance-table"
                   pagination={false}
                   rowKey="id"
                   dataSource={center?.domains || []}
@@ -435,14 +431,14 @@ function ConfigConsoleContent({ open, onClose, isAdmin, userId, embedded }) {
               </section>
 
               <section className="sva-admin-section sva-settings-group">
-                <Text strong>连接与代理</Text><Paragraph type="secondary" className="sva-settings-helper">管理员设置，按需配置。</Paragraph>
+                <Text strong>连接与代理</Text>
                 <div className="sva-settings-fields sva-settings-fields--inset">
                   <Form.Item
                     name="xueqiu_cookies"
                     label="雪球 Cookie"
-                    extra="Cookie 默认自动更新。登录或人工验证时可填写，留空沿用现有配置。"
+                    extra="需登录验证时可手动填写。"
                   >
-                    <Input.TextArea rows={2} placeholder="粘贴登录 Cookie（可选）" />
+                    <Input.TextArea rows={2} placeholder="留空沿用现有 Cookie" />
                   </Form.Item>
                   <Form.Item name="adata_proxy_enabled" label="行情 HTTP 代理" valuePropName="checked">
                     <Switch />

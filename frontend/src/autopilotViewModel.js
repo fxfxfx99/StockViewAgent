@@ -34,17 +34,17 @@ export function llmPatchFromForm(values, existing = {}, providers = [CUSTOM_PROV
 export const autopilotQueryKey = (userId) => ["autopilot", userId, "status"];
 
 export function autopilotPresentation(status) {
-  if (!status) return { label: "正在准备", tone: "processing", description: "正在读取自动运行状态。", action: null };
+  if (!status) return { label: "正在准备", tone: "processing", description: "读取状态…", action: null };
   const phases = {
-    waiting_llm: ["待配置", "warning", "配置大模型，开启自动研究。", "setup"],
-    waiting_watchlist: ["需关注", "warning", "添加 A 股自选后自动继续。", null],
-    collecting: ["正在准备", "processing", "正在整理历史行情，完成后自动研究。", "research"],
-    researching: ["运行中", "processing", "正在验证候选策略并记录结果。", "research"],
-    observing: ["运行中", "success", "正在积累数据与模拟记录，达标后更新策略。", "research"],
+    waiting_llm: ["待配置", "warning", "配置大模型后开始研究。", "setup"],
+    waiting_watchlist: ["需关注", "warning", "添加 A 股自选后继续。", null],
+    collecting: ["正在准备", "processing", "整理历史行情后开始研究。", "research"],
+    researching: ["运行中", "processing", "验证候选策略并记录结果。", "research"],
+    observing: ["运行中", "success", "积累模拟记录，达标后更新策略。", "research"],
     paused: ["需关注", "default", "候选研究已暂停，行情和模拟维护继续。", "research"],
     disabled: ["需关注", "default", "自动运行已关闭。", "research"],
-    worker_offline: ["需关注", "warning", "后台任务尚未连接，请检查启动服务。", "research"],
-    attention: ["需关注", "warning", "有任务需要处理，请查看详情。", "research"],
+    worker_offline: ["需关注", "warning", "后台任务尚未连接，请检查服务。", "research"],
+    attention: ["需关注", "warning", "有待处理任务。", "research"],
   };
   const [label, tone, fallback, action] = phases[status.phase] || phases.attention;
   return { label, tone, description: status.phase === "attention" && status.next_action ? status.next_action : fallback, action };

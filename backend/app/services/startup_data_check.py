@@ -63,6 +63,16 @@ def _short_error(exc: Exception) -> str:
 async def _capture_step(name: str, fn: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
     started = time.perf_counter()
     try:
+        from app.services import collector_resources, data_collection
+        resources = await asyncio.to_thread(collector_resources.snapshot, data_collection.get_config()["max_memory_mb"])
+        if resources["pressure"]:
+            skipped = {"name": name, "status": "skipped", "reason": "high_memory", "resources": resources}
+            if name == "watchlist_market_data":
+                previous = next((step for step in (load_state().get("steps") or [])
+                                 if step.get("name") == name), {})
+                cursor = int(previous.get("next_cursor") or 0)
+                skipped.update(cursor=cursor, next_cursor=cursor, symbols_checked=0)
+            return skipped
         out = await fn()
         status = str(out.pop("status", "ok"))
         return {
@@ -102,7 +112,8 @@ async def _probe_news_sources() -> dict[str, Any]:
 async def _sync_news_archive() -> dict[str, Any]:
     try:
         out = await asyncio.wait_for(news_feed_sync.sync_all_sources_to_archive(), timeout=75.0)
-        return {"status": "ok", "upserted": out.get("upserted", 0), "merged_unique": out.get("merged_unique", 0), "archive": out.get("archive")}
+        status = {"success": "ok", "partial": "warning", "failed": "error"}.get(out.get("status"), out.get("status", "ok"))
+        return {"status": status, "reason": out.get("skipped"), "upserted": out.get("upserted", 0), "merged_unique": out.get("merged_unique", 0), "archive": out.get("archive")}
     except asyncio.TimeoutError:
         return {"status": "warning", "warning": "多源新闻同步超过75秒，保留已有归档并在下次启动重试", "archive": news_store.stats()}
 
@@ -127,7 +138,7 @@ async def _warm_major_index() -> dict[str, Any]:
 
 async def _warm_watchlist_market_data() -> dict[str, Any]:
     symbols = watchlist_store.load_all_symbols_union()
-    limit = max(0, int(settings.startup_data_check_watchlist_limit))
+    limit = min(len(symbols), max(0, int(settings.startup_data_check_watchlist_limit)))
     previous = load_state()
     previous_step = next((x for x in (previous.get("steps") or []) if x.get("name") == "watchlist_market_data"), {})
     cursor = int(previous_step.get("next_cursor") or 0)
@@ -158,14 +169,25 @@ async def _warm_watchlist_market_data() -> dict[str, Any]:
             except Exception as exc:
                 cached = market_history_cache.load_series("stock_capital_flow", sym)
                 return {"status": "cached", "rows": len(cached.get("items") or []), "warning": _short_error(exc)} if cached else {"status": "error", "error": _short_error(exc)}
-        item["kline"], item["capital_flow"] = await asyncio.gather(get_kline(), get_flow())
+        item["kline"] = await get_kline()
+        item["capital_flow"] = await get_flow()
         return item
 
-    semaphore = asyncio.Semaphore(3)
+    from app.services import collector_resources, data_collection
+    config = data_collection.get_config()
+    semaphore = asyncio.Semaphore(config["max_concurrent_jobs"])
     async def limited(sym: str) -> dict[str, Any]:
         async with semaphore:
+            resources = await asyncio.to_thread(collector_resources.snapshot, config["max_memory_mb"])
+            if resources["pressure"]:
+                return {"symbol": sym, "status": "skipped", "reason": "high_memory"}
             return await one_symbol(sym)
     rows = await asyncio.gather(*(limited(sym) for sym in selected))
+    skipped_positions = [index for index, row in enumerate(rows) if row.get("status") == "skipped"]
+    if skipped_positions:
+        # Retry from the first member that was never admitted. Later concurrent
+        # successes can be checked again; an unprocessed member must not be lost.
+        next_cursor = (cursor + skipped_positions[0]) % len(symbols)
 
     errors = sum(
         1
@@ -174,9 +196,11 @@ async def _warm_watchlist_market_data() -> dict[str, Any]:
         if (row.get(key) or {}).get("status") == "error"
     )
     return {
-        "status": "warning" if errors else "ok",
+        "status": "skipped" if len(skipped_positions) == len(rows) else "warning" if errors or skipped_positions else "ok",
+        "reason": "high_memory" if skipped_positions else None,
         "symbols_total": len(symbols),
-        "symbols_checked": len(selected),
+        "symbols_checked": len(rows) - len(skipped_positions),
+        "symbols_skipped": len(skipped_positions),
         "cursor": cursor,
         "next_cursor": next_cursor,
         "errors": errors,
@@ -226,7 +250,7 @@ async def _run_startup_data_check_locked() -> dict[str, Any]:
     status = "ok"
     if any(step.get("status") == "error" for step in steps):
         status = "error"
-    elif any(step.get("status") == "warning" for step in steps):
+    elif any(step.get("status") == "warning" or step.get("reason") == "high_memory" for step in steps):
         status = "warning"
     state = {
         "status": status,

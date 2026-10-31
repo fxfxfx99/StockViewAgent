@@ -26,9 +26,15 @@ from app.routers import (
     data_center,
     events,
     kline_learning,
+    kline_replay,
     macro,
+    merrill_clock,
     market,
+    monitoring,
+    earnings,
+    investment_research,
     news,
+    overseas_news,
     quant,
     research,
     runtime,
@@ -57,6 +63,11 @@ async def lifespan(app: FastAPI):
         event_calendar_service,
         data_collection,
     )
+    from app.services import overseas_news as overseas_news_service
+    from app.services import monitoring as monitoring_service
+    from app.services import earnings as earnings_service
+    from app.services import investment_research as investment_research_service
+    from app.services import merrill_clock as merrill_clock_service
     from app.storage import data_asset_manager
 
     scheduler_task: asyncio.Task | None = None
@@ -65,7 +76,17 @@ async def lifespan(app: FastAPI):
     comments_worker_task = asyncio.create_task(xueqiu_comments_service.worker_loop())
     comments_scheduler_task: asyncio.Task | None = None
     calendar_scheduler_task: asyncio.Task | None = None
+    # This shared collector owns a database lease, including in multi-worker
+    # Docker deployments where other per-process schedulers are disabled.
+    overseas_news_task = (
+        asyncio.create_task(overseas_news_service.scheduler_loop(), name="overseas-news")
+        if settings.overseas_news_enabled else None
+    )
     collection_worker_task = asyncio.create_task(data_collection.worker_loop()) if settings.enable_data_collection else None
+    monitoring_task = asyncio.create_task(monitoring_service.worker_loop(), name="personal-monitoring") if settings.enable_monitoring else None
+    earnings_task = asyncio.create_task(earnings_service.worker_loop(), name="earnings-reports") if settings.enable_earnings else None
+    investment_research_task = asyncio.create_task(investment_research_service.worker_loop(), name="investment-research") if settings.enable_investment_research else None
+    merrill_clock_task = asyncio.create_task(merrill_clock_service.worker_loop(), name="merrill-clock") if settings.enable_merrill_clock else None
     if settings.enable_research_worker:
         from app.services import local_autopilot
         local_autopilot.reconcile_all(startup=True)
@@ -81,42 +102,45 @@ async def lifespan(app: FastAPI):
         startup_check_task = asyncio.create_task(startup_data_check.delayed_startup_data_check())
     if settings.company_auto_refresh_enabled:
         company_updates_task = asyncio.create_task(company_updates.company_updates_loop())
-    yield
-    for task in (scheduler_task, startup_check_task, company_updates_task, comments_worker_task, comments_scheduler_task, calendar_scheduler_task, collection_worker_task):
-        if task is not None:
-            task.cancel()
-    if scheduler_task is not None:
-        try:
-            await scheduler_task
-        except asyncio.CancelledError:
-            pass
-    if startup_check_task is not None:
-        try:
-            await asyncio.wait_for(startup_check_task, timeout=3.0)
-        except asyncio.CancelledError:
-            pass
-        except asyncio.TimeoutError:
-            logger.warning("启动数据源检查取消超时，跳过等待以便服务快速退出")
-    if company_updates_task is not None:
-        try:
-            await asyncio.wait_for(company_updates_task, timeout=3.0)
-        except asyncio.CancelledError:
-            pass
-        except asyncio.TimeoutError:
-            logger.warning("公司资料更新取消超时，跳过等待以便服务快速退出")
-    for task in (comments_worker_task, comments_scheduler_task, calendar_scheduler_task):
-        if task is not None:
+    try:
+        yield
+    finally:
+        # A failed finalizer must not skip later workers that are still draining
+        # paid requests or parser threads. Preserve each service's wait policy.
+        tasks = (
+            (scheduler_task, None, None),
+            (startup_check_task, 3.0, "启动数据源检查取消超时，跳过等待以便服务快速退出"),
+            (company_updates_task, 3.0, "公司资料更新取消超时，跳过等待以便服务快速退出"),
+            (comments_worker_task, 3.0, "雪球评论任务取消超时，任务将在租约到期后恢复"),
+            (comments_scheduler_task, 3.0, "雪球评论任务取消超时，任务将在租约到期后恢复"),
+            (calendar_scheduler_task, 3.0, "雪球评论任务取消超时，任务将在租约到期后恢复"),
+            (collection_worker_task, None, None),
+            (overseas_news_task, 5.0, "海外新闻采集取消超时，将在租约到期后恢复"),
+            (monitoring_task, None, None),
+            (earnings_task, None, None),
+            (investment_research_task, None, None),
+            (merrill_clock_task, None, None),
+        )
+        for task, _, _ in tasks:
+            if task is not None:
+                task.cancel()
+        for task, timeout, timeout_message in tasks:
+            if task is None:
+                continue
             try:
-                await asyncio.wait_for(task, timeout=3.0)
+                if timeout is None:
+                    await task
+                else:
+                    await asyncio.wait_for(task, timeout=timeout)
             except asyncio.CancelledError:
                 pass
-            except asyncio.TimeoutError:
-                logger.warning("雪球评论任务取消超时，任务将在租约到期后恢复")
-    if collection_worker_task is not None:
-        try:
-            await collection_worker_task
-        except asyncio.CancelledError:
-            pass
+            except Exception as exc:
+                if isinstance(exc, asyncio.TimeoutError) and timeout_message:
+                    logger.warning(timeout_message)
+                else:
+                    # Provider exceptions can contain credentials; log only
+                    # the task name and exception class, never its raw text.
+                    logger.warning("后台任务退出失败 task=%s type=%s", task.get_name(), type(exc).__name__)
 
 
 app = FastAPI(
@@ -126,6 +150,7 @@ app = FastAPI(
     openapi_tags=[
         {"name": "watchlist", "description": "股票列表（`watchlist.json`、导入、行情摘要、公司资料）"},
         {"name": "macro", "description": "市场研判 · 宏观与行业（Tushare）"},
+        {"name": "merrill-clock", "description": "中美美林时钟、跨资产周度历史与每周个人模型解读"},
         {"name": "economic-events", "description": "全球经济金融事件日历、监控与可追溯检索证据"},
         {"name": "data-center", "description": "本地分类文件、公共资料采集、缓存回收与恢复（管理员）"},
         {
@@ -170,16 +195,22 @@ app.include_router(admin.router)
 app.include_router(watchlist.router)
 app.include_router(analysis.router)
 app.include_router(news.router)
+app.include_router(earnings.router)
+app.include_router(investment_research.router)
+app.include_router(overseas_news.router)
 app.include_router(market.router)
 app.include_router(macro.router)
+app.include_router(merrill_clock.router)
 app.include_router(events.router)
 app.include_router(data_center.router)
 app.include_router(kline_learning.router)
+app.include_router(kline_replay.router)
 app.include_router(settings_llm.router)
 app.include_router(settings_integrations.router)
 app.include_router(stocks.router)
 app.include_router(transaction_agent.router)
 app.include_router(tracking.router)
+app.include_router(monitoring.router)
 app.include_router(decision_signals.router)
 app.include_router(stock_picker_agents.router)
 app.include_router(quant.router)

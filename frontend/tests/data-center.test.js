@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  cacheOperationNotice, cachePolicyPayload, collectionConfigPayload, collectionServiceNotice, collectionStatus, collectionSubmissionNotice, dataCenterQueryKey,
+  cacheOperationNotice, cachePolicyPayload, collectionConfigPayload, collectionConfigValues, collectionRuntime, sourceScheduleLabel, collectionServiceNotice, collectionStatus, collectionSubmissionNotice, dataCenterQueryKey,
   dataTime, fileQueryParams, quarantineSummary,
 } from "../src/dataCenterViewModel.js";
 
@@ -26,8 +26,8 @@ test("file filters use server pagination and preserve protected versus rebuildab
 
 test("collection config deduplicates symbols, keeps switches and emits task limits", () => {
   assert.deepEqual(collectionConfigPayload(config, sources), {
-    enabled: true, rag_enabled: true, use_watchlists: false, daily_job_limit: 120, max_symbols_per_cycle: 10, min_free_disk_mb: 1024,
-    symbols: ["600519.SS", "000001.SZ"], sources: { news: { enabled: false, interval_minutes: 120 } },
+    enabled: true, rag_enabled: true, use_watchlists: false, daily_job_limit: 120, max_symbols_per_cycle: 10, min_free_disk_mb: 1024, max_concurrent_jobs: 1, max_memory_mb: 768, job_timeout_seconds: 240, overseas_enabled: true, overseas_poll_interval_sec: 120,
+    symbols: ["600519.SS", "000001.SZ"], sources: { news: { enabled: false, interval_minutes: 120, schedule_mode: "interval", daily_at: "17:30" } },
   });
   assert.deepEqual(collectionConfigPayload({ ...config, symbols: "" }, sources).symbols, []);
 });
@@ -65,6 +65,8 @@ test("disabled collection service only queues manual jobs while disabled schedul
   assert.doesNotMatch(disabled, /仅处理手动/);
   assert.equal(collectionServiceNotice({ enabled: true, scheduler_enabled: false }), "服务器定时调度已关闭，仅处理手动提交的采集任务。");
   assert.equal(collectionServiceNotice({ enabled: true, scheduler_enabled: true }), null);
+  assert.equal(collectionServiceNotice({ enabled: true, scheduler_enabled: false, automatic_enabled: true }), null);
+  assert.equal(collectionServiceNotice({ enabled: true, scheduler_enabled: true, automatic_enabled: false }), "自动采集已关闭，仅处理手动提交的采集任务。");
   assert.equal(collectionServiceNotice(undefined), null);
 });
 
@@ -114,4 +116,24 @@ test("restore notices read restored_files plus returned batch item errors", () =
     { path: "cache/b", status: "quarantined", restore_error: "原路径已有文件，保留当前文件与回收副本" },
   ] };
   assert.deepEqual(cacheOperationNotice("restore", result), { type: "warning", text: "已恢复 1 个文件，1 个冲突项保留在回收区。" });
+});
+
+
+test("daily schedules preserve legacy intervals and validate resource boundaries", () => {
+  const values = collectionConfigValues(config);
+  assert.equal(values.sources.news.schedule_mode, "interval");
+  const daily = collectionConfigPayload({ ...values, sources: { news: { ...values.sources.news, schedule_mode: "daily", daily_at: "17:45" } }, overseas_enabled: false, max_concurrent_jobs: 2 }, sources);
+  assert.equal(daily.sources.news.interval_minutes, 120);
+  assert.equal(daily.sources.news.daily_at, "17:45");
+  assert.equal(daily.overseas_enabled, false);
+  for (const value of ["24:00", "9:30", "17:99"]) assert.throws(() => collectionConfigPayload({ ...values, sources: { news: { ...values.sources.news, daily_at: value } } }, sources), /HH:MM/);
+  for (const [key, value] of [["max_concurrent_jobs",4],["max_memory_mb",127],["job_timeout_seconds",601],["overseas_poll_interval_sec",59]]) assert.throws(() => collectionConfigPayload({ ...values, [key]:value }, sources), /整数/);
+});
+
+test("effective service status never mistakes saved enablement for an active unblocked worker", () => {
+  assert.equal(collectionRuntime({ enabled:true }, { enabled:false }).label, "服务环境已关闭");
+  assert.equal(collectionRuntime({ enabled:true }, { enabled:true, running:false }).label, "等待采集服务");
+  assert.equal(collectionRuntime({ enabled:true }, { enabled:true, running:true, resources:{pressure:true} }).label, "采集暂缓");
+  assert.match(collectionRuntime({ enabled:true }, { enabled:true, reason:"daily_budget_exhausted" }).description, /额度/);
+  assert.match(sourceScheduleLabel({enabled:true,schedule_mode:"daily",daily_at:"17:30"},{enabled:false},{}), /当前未启用/);
 });

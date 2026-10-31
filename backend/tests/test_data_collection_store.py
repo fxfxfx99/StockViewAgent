@@ -489,3 +489,77 @@ def test_record_payload_and_fts_selection_use_same_sqlite_read_snapshot(monkeypa
     assert result["total"] == 1
     assert result["items"][0]["title"] == "oldkeyword"
     assert current(T1)[0]["title"] == "newkeyword"
+
+
+def test_batch_byte_limit_rejects_before_any_file_or_revision(tmp_path):
+    # Unicode is counted as encoded bytes, not Python characters.
+    rows = [observation(upstream_id=f"large-{n}", text="中" * 8000) for n in range(720)]
+    with pytest.raises(ValueError, match="16 MiB"):
+        ingest(rows)
+    assert counts()["dc_batches"] == counts()["dc_revisions"] == 0
+    assert not list(tmp_path.glob("datasets/**/*.json"))
+
+
+def test_streamed_batch_keeps_original_canonical_hash_and_bytes(tmp_path, monkeypatch):
+    import hashlib
+    from pathlib import Path
+
+    rows = [observation(upstream_id=f"item-{n}", text="规范汉字" * 1000) for n in range(25)]
+    normalized = sorted([store._clean_record(row, "official_test", "macro", T1) for row in rows], key=lambda row: row["upstream_id"])
+    expected_hash = hashlib.sha256(store.canonical(normalized).encode()).hexdigest()
+    result = ingest(rows)
+    assert result["batch_id"] == hashlib.sha256(f"official_test:{expected_hash}".encode()).hexdigest()
+    path = tmp_path / "datasets/macro/official_test" / (result["batch_id"] + ".json")
+    expected = {"version": 1, "source_id": "official_test", "category": "macro", "content_hash": expected_hash,
+                "records": normalized, "observed_at": store.iso(T1)}
+    assert path.read_bytes() == (store.canonical(expected) + "\n").encode()
+    # Identical retries verify incrementally, never read the entire batch again.
+    monkeypatch.setattr(Path, "read_bytes", lambda *_: pytest.fail("unbounded batch read"))
+    assert ingest(rows, T2)["records_added"] == 0
+
+
+def test_sql_pagination_bounds_python_working_set_and_preserves_total(monkeypatch):
+    import tracemalloc
+    from contextlib import contextmanager
+
+    ingest([observation(upstream_id=f"row-{n}", text="growth " + "x" * 3000) for n in range(1200)])
+    original, statements = store.connection, []
+    @contextmanager
+    def traced_connection():
+        with original() as conn:
+            conn.set_trace_callback(lambda statement: statements.append(statement) if statement.startswith("PRAGMA") or (statement.startswith("SELECT") and "LIMIT" in statement) else None)
+            yield conn
+    monkeypatch.setattr(store, "connection", traced_connection)
+    # Trace callback would retain huge SQL inserts, so trace only SELECT query.
+    tracemalloc.start()
+    try:
+        result = store.records(q="growth", as_of=T3, offset=1190, limit=3)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result["total"] == 1200 and len(result["items"]) == 3
+    assert peak < 512 * 1024  # Prior fetchall+decode path retained >10 MiB.
+    assert any(statement == "PRAGMA temp_store=FILE" for statement in statements)
+    assert any("LIMIT 3 OFFSET 1190" in statement for statement in statements)
+    print(f"1200-record historical FTS page: Python peak {peak / 1024:.1f} KiB")
+
+
+def test_v1_queue_and_archived_records_survive_round_schema_upgrade(tmp_path):
+    # A genuine v1-style schema lacks dc_rounds; upgrade is idempotent and does
+    # not mutate active jobs, saved cadence, or immutable dataset revisions.
+    path = tmp_path / "data_center.sqlite3"
+    old = store._SCHEMA_SQL
+    begin = old.index("          CREATE TABLE IF NOT EXISTS dc_rounds")
+    end = old.index("          CREATE TABLE IF NOT EXISTS dc_sources", begin)
+    old = old[:begin] + old[end:]
+    with sqlite3.connect(path) as conn:
+        conn.executescript(old)
+        conn.execute("INSERT INTO dc_settings VALUES('config',?)", (json.dumps({"sources": {"public_company": {"enabled": True, "interval_minutes": 1440}}}),))
+        conn.execute("INSERT INTO dc_jobs(id,source_id,status,queued_at,payload) VALUES('old-job','public_company','queued',?,'{}')", (T0,))
+        conn.execute("PRAGMA user_version=1")
+    assert store.list_jobs()[0]["id"] == "old-job"
+    assert store.get_state("config")["sources"]["public_company"]["interval_minutes"] == 1440
+    assert store.round_states() == {}
+    with store.connection() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert ingest()["records_added"] == 1

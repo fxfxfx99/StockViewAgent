@@ -39,17 +39,17 @@ function StatusTag({ status }) {
   const [label, color] = statusInfo(status);
   return <Tag color={color}>{label}</Tag>;
 }
-function Issues({ values = EMPTY, empty = "暂无阻断原因", limit = 6 }) {
+function Issues({ values = EMPTY, empty, limit = 6 }) {
   const items = Array.isArray(values) ? values : [values];
-  if (!items.length) return <Text type="secondary">{empty}</Text>;
-  return <div className="research-issues"><ul>{items.slice(0, limit).map((item, i) => <li key={`${i}-${String(item)}`}>{reasonText(item)}</li>)}</ul>{items.length > limit ? <Text type="secondary">另 {items.length - limit} 项，见完整记录。</Text> : null}</div>;
+  if (!items.length) return empty ? <Text type="secondary">{empty}</Text> : null;
+  return <div className="research-issues"><ul>{items.slice(0, limit).map((item, i) => <li key={`${i}-${String(item)}`}>{reasonText(item)}</li>)}</ul>{items.length > limit ? <Text type="secondary">另 {items.length - limit} 项</Text> : null}</div>;
 }
 function JsonEvidence({ value, label = "原始证据" }) {
   return <Collapse size="small" className="research-evidence" items={[{ key: "evidence", label, children: <pre className="research-json">{JSON.stringify(value, null, 2)}</pre> }]} />;
 }
 function Quality({ quality, strict }) {
   if (!quality) return <Tag>尚未检查</Tag>;
-  return quality.eligible === true && strict !== false ? <Tag color="green">证据完整</Tag> : <Tag color="gold">探索性数据 · 待补证据</Tag>;
+  return quality.eligible === true && strict !== false ? <Tag color="green">证据完整</Tag> : <Tag color="gold">证据待补齐</Tag>;
 }
 function SourceLink({ href, children }) {
   const url = safeSourceUrl(href);
@@ -73,7 +73,7 @@ function useModalDetailHandoff(closeModal, openDetail) {
 }
 function BudgetCard({ budget, onSettings, disabled }) {
   return <Card size="small" title="研究预算" className="research-card research-budget-card" extra={<Button type="text" size="small" onClick={onSettings} disabled={disabled}>调整预算</Button>}><div className="research-budget">
-    {[["calls", "今日调用预算", "次"], ["tokens", "今日 Token 预算", ""], ["candidates", "本周候选预算", "个"]].map(([key, label, suffix]) => {
+    {[["calls", "今日调用", "次"], ["tokens", "今日 Token", ""], ["candidates", "本周候选", "个"]].map(([key, label, suffix]) => {
       const used = finiteNumber(budget?.used?.[key]);
       const limit = finiteNumber(budget?.limits?.[key]);
       const percent = used !== null && limit !== null ? (limit > 0 ? Math.min(100, used / limit * 100) : 100) : 0;
@@ -96,7 +96,7 @@ function GateList({ gates }) {
 function ExperimentDetail({ entity }) {
   const payload = entity?.payload || {};
   const report = payload.report;
-  if (!report) return <Space direction="vertical" className="research-full"><Alert type="warning" showIcon message="暂无评估报告" description={payload.error || "暂无评估结果。"} /><JsonEvidence value={entity} label="失败尝试与模型输出" /></Space>;
+  if (!report) return <Space direction="vertical" className="research-full"><Alert type="warning" showIcon message="暂无评估报告" description={payload.error} /><JsonEvidence value={entity} label="失败尝试与模型输出" /></Space>;
   const foldColumns = [
     { title: "窗口", key: "window", render: (_, row) => <span>{dateText(row.validation?.start, true)} — {dateText(row.validation?.end, true)}</span>, width: 220 },
     { title: "候选净收益", key: "return", render: (_, row) => displayPercent(row.candidate?.performance?.total_return_pct) },
@@ -104,23 +104,23 @@ function ExperimentDetail({ entity }) {
     { title: "双倍成本", key: "stress", render: (_, row) => displayPercent(row.cost_stress?.performance?.total_return_pct) },
     { title: "最大回撤", key: "drawdown", render: (_, row) => displayPercent(row.candidate?.performance?.max_drawdown_pct) },
   ];
-  return <Space direction="vertical" size={18} className="research-full">
+  return <Space direction="vertical" size={16} className="research-full">
     <Alert type={report.eligible === true ? "info" : "warning"} showIcon message={report.eligible === true ? "历史验证通过" : "历史验证未通过"} />
     <MetricGrid metrics={report.metrics} />
-    <Issues values={report.issues} empty="本轮没有阻断项" limit={30} />
+    <Issues values={report.issues} limit={30} />
     <GateList gates={report.gates} />
     <Table rowKey={(row) => row.index ?? row.validation?.start} columns={foldColumns} dataSource={report.folds || EMPTY} pagination={false} size="small" scroll={{ x: 720 }} locale={{ emptyText: "历史不足，尚无滚动验证窗口" }} />
     <Descriptions size="small" column={2} items={[
       { key: "strategy", label: "策略版本", children: shortId(payload.strategy_id) }, { key: "snapshot", label: "数据快照", children: shortId(payload.snapshot_id) },
       { key: "created", label: "评估时间", children: dateText(entity.created_at) }, { key: "capital", label: "起始资金", children: displayNumber(payload.initial_cash) },
     ]} />
-    <JsonEvidence value={entity} label="完整评估记录与数据依据" />
+    <JsonEvidence value={entity} label="完整评估记录" />
   </Space>;
 }
 function PaperAccount({ title, account, embedded = false }) {
   return <section className={`research-account${embedded ? " research-account-embedded" : ""}`} aria-label={title}>
     <h3 className="research-account-title">{title}</h3>
-    {!account ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未建立模拟记录" /> : <Space direction="vertical" size={12} className="research-full">
+    {!account ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无模拟记录" /> : <Space direction="vertical" size={12} className="research-full">
       <div className="research-between"><Text strong>{account.name || shortId(account.strategy_id)}</Text><StatusTag status={account.status} /></div>
       <div className="research-metric-grid"><div><Text type="secondary">账户权益</Text><strong>¥ {displayNumber(account.equity)}</strong></div><div><Text type="secondary">现金</Text><strong>¥ {displayNumber(account.cash)}</strong></div><div><Text type="secondary">观察交易日</Text><strong>{displayNumber(account.session_count, 0)}</strong></div><div><Text type="secondary">完整交易</Text><strong>{displayNumber(account.completed_trades, 0)}</strong></div></div>
       <Descriptions size="small" column={2} items={[{ key: "ret", label: "净收益", children: displayPercent(account.performance?.total_return_pct) }, { key: "dd", label: "最大回撤", children: displayPercent(account.performance?.max_drawdown_pct) }]} />
@@ -196,7 +196,7 @@ function ResearchWorkspace() {
   const submitJson = () => {
     try {
       const value = parseJsonObject(jsonText);
-      if (jsonModal === "import" && (!value.bundles || !Object.keys(value.bundles).length || !value.metadata)) throw new Error("请提供至少一个标的的 bundles 和 metadata。具体字段见数据导入要求。");
+      if (jsonModal === "import" && (!value.bundles || !Object.keys(value.bundles).length || !value.metadata)) throw new Error("请提供至少一个标的的 bundles 和 metadata。");
       setJsonError(""); saveJson.mutate({ kind: jsonModal, value });
     } catch (error) { setJsonError(error.message); }
   };
@@ -220,12 +220,12 @@ function ResearchWorkspace() {
   ];
   const experimentColumns = [
     { title: "策略 / 实验", key: "strategy", render: (_, row) => <div><Button type="link" className="research-table-link" onClick={() => view("experiment", row.id)}>{strategyNames.get(row.payload?.strategy_id) || shortId(row.payload?.strategy_id)}</Button><div className="research-caption">{dateText(row.created_at)}</div></div>, width: 190 },
-    { title: "验证结果", key: "eligible", render: (_, row) => row.payload?.status === "failed" ? <Tag color="error">评估失败</Tag> : <Tag color={experimentSummary(row).eligible === true ? "blue" : "gold"}>{experimentSummary(row).eligible === true ? "历史验证通过" : "待补证据 / 未通过"}</Tag>, width: 155 },
+    { title: "验证结果", key: "eligible", render: (_, row) => row.payload?.status === "failed" ? <Tag color="error">评估失败</Tag> : <Tag color={experimentSummary(row).eligible === true ? "blue" : "gold"}>{experimentSummary(row).eligible === true ? "通过" : "待补证据 / 未通过"}</Tag>, width: 155 },
     { title: "平均净收益", key: "return", render: (_, row) => displayPercent(experimentSummary(row).metrics?.mean_return_pct), width: 120 },
     { title: "超额收益", key: "excess", render: (_, row) => displayPercent(experimentSummary(row).metrics?.mean_excess_return_pct), width: 115 },
     { title: "Sharpe 中位数", key: "sharpe", render: (_, row) => displayNumber(experimentSummary(row).metrics?.median_sharpe), width: 130 },
     { title: "最大回撤", key: "drawdown", render: (_, row) => displayPercent(experimentSummary(row).metrics?.max_drawdown_pct), width: 115 },
-    { title: "主要原因", key: "issues", render: (_, row) => <Text type="secondary">{row.payload?.error || (experimentSummary(row).issues || []).slice(0, 2).map(reasonText).join("；") || "查看完整验证记录"}</Text>, width: 240 },
+    { title: "主要原因", key: "issues", render: (_, row) => <Text type="secondary">{row.payload?.error || (experimentSummary(row).issues || []).slice(0, 2).map(reasonText).join("；") || "—"}</Text>, width: 240 },
   ];
   const comparison = experiments.filter((e) => selectedExperiments.includes(e.id));
   const paper = data?.paper || {};
@@ -238,21 +238,19 @@ function ResearchWorkspace() {
     </Card>
     <aside className="research-stack" aria-label="研究预算与说明">
       <BudgetCard budget={data?.budget} onSettings={openSettings} disabled={!data} />
-      <div className="research-note"><Text strong>工作方式</Text><Paragraph>历史验证通过后进入模拟观察。</Paragraph><Paragraph type="secondary">失败实验同样归档。</Paragraph></div>
     </aside>
   </div>;
   const dataPanel = <div className="research-dashboard-grid">
     <Card title="当前数据覆盖" className="research-card" extra={snapshot ? <Button size="small" onClick={() => view("snapshot", snapshot.id)}>查看快照</Button> : null}>
-      {!snapshotPayload ? <Empty description="暂无研究数据，点击「立即采集」获取自选股历史。" /> : <Space direction="vertical" size={18} className="research-full">
+      {!snapshotPayload ? <Empty description="暂无数据，点击「立即采集」。" /> : <Space direction="vertical" size={16} className="research-full">
         <Descriptions column={{ xs: 1, sm: 2 }} items={[
           { key: "range", label: "历史区间", children: `${snapshotPayload.start || "—"} — ${snapshotPayload.end || "—"}` },
           { key: "symbols", label: "覆盖标的", children: `${snapshotPayload.symbols?.length ?? "—"} 个` },
           { key: "rows", label: "归档行情", children: `${displayNumber(snapshotPayload.row_count, 0)} 条` },
-          { key: "quality", label: "证据状态", children: <Quality quality={snapshotPayload.quality} strict={snapshotPayload.strict} /> },
         ]} />
         <div className="research-symbols">{snapshotPayload.symbols?.map((symbol) => <Tag key={symbol}>{symbol}</Tag>)}</div>
         <div className="research-data-checks">
-          <Alert showIcon type={snapshotPayload.strict ? "info" : "warning"} message={snapshotPayload.strict ? "历史证据完整。" : "可探索回测；晋升需补齐历史证据。"} />
+          {!snapshotPayload.strict ? <Alert showIcon type="warning" message="可探索回测；晋升需补齐历史证据。" /> : null}
           <Issues values={snapshotPayload.quality?.issues || snapshotPayload.blockers} />
         </div>
         <Text type="secondary" className="research-caption">实验固定使用当时的快照。</Text>
@@ -260,7 +258,7 @@ function ResearchWorkspace() {
     </Card>
     <Card title="补充历史证据" className="research-card">
       <Space direction="vertical" size={16} className="research-full">
-        <Paragraph className="research-no-margin" type="secondary">导入历史证据，自动检查交易状态、涨跌停、公司行动与可用时间。</Paragraph>
+        <Paragraph className="research-no-margin" type="secondary">导入后检查交易状态、涨跌停、公司行动与可用时间。</Paragraph>
         <Button icon={<DownloadOutlined />} onClick={() => openJson("import")}>导入 JSON 数据</Button>
         <JsonEvidence value={data?.import_requirements || { status: "加载中" }} label="字段与覆盖要求" />
       </Space>
@@ -268,10 +266,9 @@ function ResearchWorkspace() {
   </div>;
   const strategyPanel = <div className="research-panel-stack">
     <Card title="候选策略" className="research-card research-table-panel" extra={<Button size="small" icon={<PlusOutlined />} onClick={() => openJson("strategy")}>创建策略</Button>}>
-      <Table rowKey="id" columns={strategyColumns} dataSource={strategies} pagination={{ pageSize: 6, hideOnSinglePage: true }} scroll={{ x: 780 }} size="small" locale={{ emptyText: "暂无候选。采集后开始研究，或手动创建策略。" }} />
+      <Table rowKey="id" columns={strategyColumns} dataSource={strategies} pagination={{ pageSize: 6, hideOnSinglePage: true }} scroll={{ x: 780 }} size="small" locale={{ emptyText: "暂无策略，可开始研究或手动创建。" }} />
     </Card>
     <Card title="实验比较" className="research-card research-table-panel" extra={<Button size="small" type={comparison.length >= 2 ? "primary" : "default"} disabled={comparison.length < 2} onClick={() => { comparisonHandoff.reset(); setCompareOpen(true); }}>比较所选（{comparison.length}/4）</Button>}>
-      <Paragraph type="secondary" className="research-table-description">按同一数据快照比较实验。</Paragraph>
       <Table rowKey="id" dataSource={experiments} columns={experimentColumns} rowSelection={{ selectedRowKeys: selectedExperiments, onChange: setSelectedExperiments, getCheckboxProps: (row) => ({ disabled: selectedExperiments.length >= 4 && !selectedExperiments.includes(row.id) }) }} pagination={{ pageSize: 8, hideOnSinglePage: true }} scroll={{ x: 1100 }} size="small" locale={{ emptyText: "暂无实验结果" }} />
     </Card>
   </div>;
@@ -285,7 +282,7 @@ function ResearchWorkspace() {
             <Button disabled={!canRun} onClick={() => enqueue("paper")}>更新模拟记录</Button>
             <Popconfirm title="回滚到上一策略？" description="提交回滚任务，历史记录保留。" onConfirm={() => enqueue("rollback", paper.previous?.strategy_id ? { strategy_id: paper.previous.strategy_id } : {})} okText="提交回滚" cancelText="取消"><Button disabled={!canRun || !paper.previous} danger>回滚上一版本</Button></Popconfirm>
           </Space>
-          <Text type="secondary" className="research-caption">{paper.previous ? `上一版本：${paper.previous.name || shortId(paper.previous.strategy_id)}` : "尚无可回滚的历史版本"}</Text>
+          <Text type="secondary" className="research-caption">{paper.previous ? `上一版本：${paper.previous.name || shortId(paper.previous.strategy_id)}` : "暂无可回滚版本"}</Text>
         </Space>
       </Card>
     </div>
@@ -295,54 +292,51 @@ function ResearchWorkspace() {
         <PaperAccount title="现行策略对照" account={shadow.incumbent} embedded />
         <PaperAccount title="等权基准" account={shadow.baseline} embedded />
       </div>
-      <div className="research-observation"><Text strong>前向观察证据</Text>{shadow.evaluation ? <><Issues values={shadow.evaluation.issues} empty="本轮无阻断项" /><GateList gates={shadow.evaluation.gates} /></> : <Paragraph type="secondary">观察记录待积累。</Paragraph>}</div>
+      <div className="research-observation"><Text strong>前向观察证据</Text>{shadow.evaluation ? <><Issues values={shadow.evaluation.issues} /><GateList gates={shadow.evaluation.gates} /></> : <Paragraph type="secondary">观察记录待积累。</Paragraph>}</div>
     </Card>)}
-    {!paper.active && !(paper.shadows || []).length ? <Alert type="info" showIcon message="尚无模拟观察记录" description="候选进入模拟观察后显示账户与对照。" /> : null}
     <Card title="晋升与回滚记录" className="research-card research-table-panel">
       <Table rowKey="id" dataSource={promotions} pagination={{ pageSize: 6, hideOnSinglePage: true }} size="small" columns={[{ title: "时间", dataIndex: "created_at", render: (v) => dateText(v) }, { title: "状态", key: "status", render: (_, row) => <StatusTag status={row.payload?.status || row.payload?.action} /> }, { title: "依据", key: "reason", render: (_, row) => row.payload?.reason || (row.payload?.issues || []).map(reasonText).join("；") || "查看决策证据" }, { title: "记录", key: "evidence", render: (_, row) => <JsonEvidence value={row.payload} label="决策证据" /> }]} scroll={{ x: 700 }} locale={{ emptyText: "尚未发生晋升或回滚" }} />
     </Card>
   </div>;
-  const knowledgePanel = <Card title="可追溯的学习来源" className="research-card research-library" extra={<Button size="small" icon={<ReloadOutlined />} disabled={!canRun} onClick={() => enqueue("github")}>刷新 GitHub 来源</Button>}>
-    <Paragraph type="secondary" className="research-library-description">来源材料用于形成研究假设。</Paragraph>
-    {!(data?.knowledge || []).length ? <Empty description="暂无学习材料，刷新 GitHub 来源后查看。" /> : <div className="research-source-list" role="list">{data.knowledge.map((entity) => {
+  const knowledgePanel = <Card title="学习来源" className="research-card research-library" extra={<Button size="small" icon={<ReloadOutlined />} disabled={!canRun} onClick={() => enqueue("github")}>刷新 GitHub 来源</Button>}>
+    {!(data?.knowledge || []).length ? <Empty description="暂无材料，请刷新 GitHub 来源。" /> : <div className="research-source-list" role="list">{data.knowledge.map((entity) => {
       const k = entity.payload || {};
       return <article className="research-source-row" role="listitem" key={entity.id}>
         <div className="research-source-identity"><div className="research-source-title"><GithubOutlined /><h3><SourceLink href={k.url}>{k.repository || "研究来源"}</SourceLink></h3></div><Text type="secondary" className="research-caption">归档于 {dateText(k.observed_at || entity.created_at)}</Text><Text type="secondary" className="research-caption">版本 <code>{shortId(k.commit)}</code></Text></div>
-        <div className="research-source-content"><Text strong>{k.purpose || k.path}</Text><Paragraph className="research-no-margin" type="secondary">{k.hypothesis || k.applicability}</Paragraph><Space wrap size={16}><SourceLink href={k.url}>阅读原文</SourceLink><SourceLink href={k.license_url}>许可说明</SourceLink><Tag>待本地验证</Tag></Space><JsonEvidence value={{ path: k.path, headings: k.headings, excerpt: k.excerpt, content_hash: k.content_hash }} label="归档摘要与来源依据" /></div>
+        <div className="research-source-content"><Text strong>{k.purpose || k.path}</Text><Paragraph className="research-no-margin" type="secondary">{k.hypothesis || k.applicability}</Paragraph><Space wrap size={16}><SourceLink href={k.url}>阅读原文</SourceLink><SourceLink href={k.license_url}>许可说明</SourceLink></Space><JsonEvidence value={{ path: k.path, headings: k.headings, excerpt: k.excerpt, content_hash: k.content_hash }} label="归档摘要" /></div>
       </article>;
     })}</div>}
   </Card>;
 
   return <Layout className="sva-layout research-layout">
-    <AppToolbar active="research" settingsAction={<ConfigConsoleButton isAdmin={user?.role === "admin"} />} user={user} authRequired={authRequired} onLogout={logout} />
+    <AppToolbar active="lab" settingsAction={<ConfigConsoleButton isAdmin={user?.role === "admin"} />} user={user} authRequired={authRequired} onLogout={logout} />
     <Layout.Content className="research-content">
       <header className="research-heading">
-        <div className="research-heading-copy"><Title level={1}>研究实验室</Title><Paragraph type="secondary">采集数据、验证策略、跟踪模拟。</Paragraph><div className="research-heading-status"><Badge status={!data ? "default" : paused ? "warning" : "processing"} text={!data ? "连接中" : paused ? "自动研究已暂停" : "自动研究已启用"} /><span className="research-caption">{overview.dataUpdatedAt ? `最近同步 ${new Date(overview.dataUpdatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "等待本地服务"}</span><span className="research-caption">研究与模拟</span></div></div>
+        <div className="research-heading-copy"><Title level={1}>研究实验室</Title><Paragraph type="secondary">采集数据、验证策略、跟踪模拟。</Paragraph><div className="research-heading-status"><Badge status={!data ? "default" : paused ? "warning" : "processing"} text={!data ? "连接中" : paused ? "自动研究已暂停" : "自动研究已启用"} /><span className="research-caption">{overview.dataUpdatedAt ? `最近同步 ${new Date(overview.dataUpdatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}` : "等待本地服务"}</span></div></div>
         <div className="research-heading-actions"><Button icon={<ReloadOutlined />} onClick={() => void overview.refetch()} loading={overview.isFetching}>刷新</Button><Button disabled={!data || configure.isPending} onClick={() => configure.mutate({ paused: !paused, ...(!config.enabled && paused ? { enabled: true } : {}) })}>{paused ? "恢复自动研究" : "暂停自动研究"}</Button><Button icon={<DownloadOutlined />} disabled={!canRun} onClick={() => enqueue("collect")}>立即采集</Button><Tooltip title={!snapshot ? "先采集或导入历史数据" : undefined}><Button type="primary" loading={run.isPending && run.variables?.kind === "research"} disabled={!canRun || !snapshot} onClick={() => enqueue("research")}>开始研究</Button></Tooltip></div>
       </header>
     {overview.isError ? <Alert type="warning" showIcon className="research-banner" message="研究状态更新失败" description={`${api.getApiErrorMessage(overview.error)}${data ? " 显示上次同步记录。" : ""}`} action={<Button size="small" onClick={() => void overview.refetch()}>重新连接</Button>} /> : null}
     {errors.length ? <Alert type="warning" showIcon className="research-banner" message="部分研究数据读取失败" description={<Issues values={errors.map((error) => typeof error === "string" ? error : error.message || error.error || JSON.stringify(error))} />} action={<Button size="small" onClick={() => void overview.refetch()}>重试</Button>} /> : null}
-    {data && config.enabled && activeJobs.length > 0 && !workerAvailable ? <Alert type="warning" showIcon className="research-banner" message="研究执行器未连接，任务等待执行。" description="通过本地启动脚本或 Docker Compose 启动研究执行器。" /> : null}
-    {paused && data ? <Alert type="info" showIcon className="research-banner" message="自动研究已暂停。" /> : null}
+    {data && config.enabled && activeJobs.length > 0 && !workerAvailable ? <Alert type="warning" showIcon className="research-banner" message="研究执行器未连接" description="通过本地启动脚本或 Docker Compose 启动研究执行器。" /> : null}
     {overview.isPending ? <div className="research-loading"><Spin size="large" aria-label="读取研究记录" /></div> : <>
       <section className="research-summary-band" aria-label="研究概况">
-        <div className="research-summary-item"><span className="research-summary-label">已归档标的</span><strong>{snapshotPayload?.symbols?.length ?? "—"}</strong><span className="research-caption">{snapshotPayload ? `${snapshotPayload.start || "—"} — ${snapshotPayload.end || "—"}` : "等待首次采集"}</span></div>
-        <div className="research-summary-item"><span className="research-summary-label">近期候选与实验</span><strong>{data ? strategies.length : "—"} <small>/ {data ? experiments.length : "—"}</small></strong><span className="research-caption">记录结果与原因</span></div>
-        <div className="research-summary-item"><span className="research-summary-label">正在模拟观察</span><strong>{data ? observingCount : "—"}</strong><span className="research-caption">{paper.active ? `现行：${paper.active.name || shortId(paper.active.strategy_id)}` : "尚未建立现行模拟账户"}</span></div>
-        <div className="research-summary-item"><span className="research-summary-label">当前数据质量</span><div className="research-quality-summary"><Quality quality={snapshotPayload?.quality} strict={snapshotPayload?.strict} /></div><span className="research-caption">{snapshotPayload?.quality?.issues?.length ? `${snapshotPayload.quality.issues.length} 项证据待补充` : snapshotPayload ? "查看快照检查结果" : "等待数据归档"}</span></div>
+        <div className="research-summary-item"><span className="research-summary-label">已归档标的</span><strong>{snapshotPayload?.symbols?.length ?? "—"}</strong></div>
+        <div className="research-summary-item"><span className="research-summary-label">候选 / 实验</span><strong>{data ? strategies.length : "—"} <small>/ {data ? experiments.length : "—"}</small></strong></div>
+        <div className="research-summary-item"><span className="research-summary-label">正在模拟观察</span><strong>{data ? observingCount : "—"}</strong><span className="research-caption">{paper.active ? `现行：${paper.active.name || shortId(paper.active.strategy_id)}` : "暂无现行模拟账户"}</span></div>
+        <div className="research-summary-item"><span className="research-summary-label">当前数据质量</span><div className="research-quality-summary"><Quality quality={snapshotPayload?.quality} strict={snapshotPayload?.strict} /></div>{snapshotPayload?.quality?.issues?.length ? <span className="research-caption">{snapshotPayload.quality.issues.length} 项待补充</span> : null}</div>
       </section>
       <Tabs activeKey={tab} onChange={setTab} className="research-tabs" items={[{ key: "progress", label: "研究进展", children: progressPanel }, { key: "data", label: "数据资产", children: dataPanel }, { key: "strategies", label: "策略与实验", children: strategyPanel }, { key: "paper", label: "模拟与晋升", children: paperPanel }, { key: "knowledge", label: "学习来源", children: knowledgePanel }]} />
     </>}
 
     </Layout.Content>
     <Drawer rootClassName="research-overlay" title={{ experiment: "实验验证详情", strategy: "策略版本", snapshot: "数据快照", job: "任务进度" }[detail?.kind] || "详情"} open={Boolean(detail)} onClose={() => setDetail(null)} width="min(920px, 96vw)" destroyOnHidden>
-      {detailQuery.isPending ? <Spin /> : detailQuery.isError ? <Alert type="warning" message={api.getApiErrorMessage(detailQuery.error)} action={<Button onClick={() => void detailQuery.refetch()}>重试</Button>} /> : detailQuery.data ? detail?.kind === "experiment" ? <ExperimentDetail entity={detailQuery.data} /> : detail?.kind === "strategy" ? <Space direction="vertical" size={16} className="research-full"><Title level={4}>{detailQuery.data.payload?.spec?.name}</Title><Paragraph>{detailQuery.data.payload?.spec?.hypothesis}</Paragraph><Descriptions size="small" column={2} items={[{ key: "holding", label: "持有期限", children: `${detailQuery.data.payload?.spec?.holding_days ?? "—"} 个交易日` }, { key: "rebalance", label: "调仓间隔", children: `${detailQuery.data.payload?.spec?.rebalance_days ?? "—"} 个交易日` }, { key: "timing", label: "信号与成交", span: 2, children: "收盘形成信号，下一交易日开盘执行" }]} /><Text strong>失效条件</Text><Issues values={detailQuery.data.payload?.spec?.failure_conditions} empty="尚未填写" /><JsonEvidence value={detailQuery.data.payload?.spec} label="策略规则 JSON" /></Space> : detail?.kind === "job" ? <Space direction="vertical" size={14} className="research-full"><StatusTag status={detailQuery.data.status} /><Descriptions column={1} items={[{ key: "kind", label: "任务", children: RUN_LABELS[detailQuery.data.kind] || detailQuery.data.kind }, { key: "attempts", label: "执行次数", children: `${detailQuery.data.attempts} / ${detailQuery.data.max_attempts}` }, { key: "update", label: "最近更新", children: dateText(detailQuery.data.updated_at) }]} />{detailQuery.data.error ? <Alert type="warning" message={detailQuery.data.error} /> : null}{detailQuery.data.result ? <JsonEvidence value={detailQuery.data.result} label="执行结果" /> : <Text type="secondary">暂无任务结果。</Text>}<JsonEvidence value={detailQuery.data.payload} label="任务输入" /></Space> : <Space direction="vertical" size={16} className="research-full"><Quality quality={detailQuery.data.payload?.quality} strict={detailQuery.data.payload?.strict} /><Issues values={detailQuery.data.payload?.quality?.issues} limit={50} /><JsonEvidence value={detailQuery.data} label="快照覆盖与证据清单" /></Space> : null}
+      {detailQuery.isPending ? <Spin /> : detailQuery.isError ? <Alert type="warning" message={api.getApiErrorMessage(detailQuery.error)} action={<Button onClick={() => void detailQuery.refetch()}>重试</Button>} /> : detailQuery.data ? detail?.kind === "experiment" ? <ExperimentDetail entity={detailQuery.data} /> : detail?.kind === "strategy" ? <Space direction="vertical" size={16} className="research-full"><Title level={4}>{detailQuery.data.payload?.spec?.name}</Title><Paragraph>{detailQuery.data.payload?.spec?.hypothesis}</Paragraph><Descriptions size="small" column={2} items={[{ key: "holding", label: "持有期限", children: `${detailQuery.data.payload?.spec?.holding_days ?? "—"} 个交易日` }, { key: "rebalance", label: "调仓间隔", children: `${detailQuery.data.payload?.spec?.rebalance_days ?? "—"} 个交易日` }, { key: "timing", label: "信号与成交", span: 2, children: "收盘形成信号，下一交易日开盘执行" }]} /><Text strong>失效条件</Text><Issues values={detailQuery.data.payload?.spec?.failure_conditions} empty="尚未填写" /><JsonEvidence value={detailQuery.data.payload?.spec} label="策略规则 JSON" /></Space> : detail?.kind === "job" ? <Space direction="vertical" size={12} className="research-full"><StatusTag status={detailQuery.data.status} /><Descriptions column={1} items={[{ key: "kind", label: "任务", children: RUN_LABELS[detailQuery.data.kind] || detailQuery.data.kind }, { key: "attempts", label: "执行次数", children: `${detailQuery.data.attempts} / ${detailQuery.data.max_attempts}` }, { key: "update", label: "最近更新", children: dateText(detailQuery.data.updated_at) }]} />{detailQuery.data.error ? <Alert type="warning" message={detailQuery.data.error} /> : null}{detailQuery.data.result ? <JsonEvidence value={detailQuery.data.result} label="执行结果" /> : <Text type="secondary">暂无任务结果。</Text>}<JsonEvidence value={detailQuery.data.payload} label="任务输入" /></Space> : <Space direction="vertical" size={16} className="research-full"><Quality quality={detailQuery.data.payload?.quality} strict={detailQuery.data.payload?.strict} /><Issues values={detailQuery.data.payload?.quality?.issues} limit={50} /><JsonEvidence value={detailQuery.data} label="快照覆盖与证据清单" /></Space> : null}
     </Drawer>
-    <Modal rootClassName="research-overlay" title="实验对照" open={compareOpen} afterClose={comparisonHandoff.afterClose} onCancel={() => setCompareOpen(false)} footer={null} width="min(1100px, 96vw)"><Alert type="info" showIcon message={new Set(comparison.map((e) => e.payload?.snapshot_id)).size > 1 ? "快照不同，数据范围或修订可能影响比较。" : "使用同一数据快照。"} /><div className="research-comparison">{comparison.map((entity) => <Card size="small" key={entity.id} title={strategyNames.get(entity.payload?.strategy_id) || shortId(entity.id)}><MetricGrid metrics={experimentSummary(entity).metrics} /><Issues values={experimentSummary(entity).issues} /><Button type="link" onClick={() => comparisonHandoff.openAfterClose({ kind: "experiment", id: entity.id })}>完整验证证据</Button></Card>)}</div></Modal>
+    <Modal rootClassName="research-overlay" title="实验对照" open={compareOpen} afterClose={comparisonHandoff.afterClose} onCancel={() => setCompareOpen(false)} footer={null} width="min(1100px, 96vw)">{new Set(comparison.map((e) => e.payload?.snapshot_id)).size > 1 ? <Alert type="warning" showIcon message="快照不同，数据范围或修订可能影响比较。" /> : null}<div className="research-comparison">{comparison.map((entity) => <Card size="small" key={entity.id} title={strategyNames.get(entity.payload?.strategy_id) || shortId(entity.id)}><MetricGrid metrics={experimentSummary(entity).metrics} /><Issues values={experimentSummary(entity).issues} /><Button type="link" onClick={() => comparisonHandoff.openAfterClose({ kind: "experiment", id: entity.id })}>完整验证证据</Button></Card>)}</div></Modal>
     <Modal rootClassName="research-overlay" title={jsonModal === "strategy" ? "创建策略版本" : "导入历史数据快照"} open={Boolean(jsonModal)} afterClose={jsonHandoff.afterClose} onCancel={() => !saveJson.isPending && setJsonModal(null)} onOk={submitJson} confirmLoading={saveJson.isPending} okText={jsonModal === "strategy" ? "保存策略" : "导入并检查"} cancelText="取消" width="min(820px, 96vw)" destroyOnHidden>
-      <Paragraph type="secondary">{jsonModal === "strategy" ? "保存为独立版本，再用归档数据验证。" : "粘贴 JSON 或选择文件，导入后检查数据质量。"}</Paragraph>
+      <Paragraph type="secondary">{jsonModal === "strategy" ? "保存后可用归档数据验证。" : "粘贴 JSON 或选择文件，导入后检查数据质量。"}</Paragraph>
       {jsonError ? <Alert type="error" showIcon message={jsonError} className="research-banner" /> : null}
-      {jsonModal === "import" ? <Space direction="vertical" className="research-full"><label className="research-file-label">选择 JSON 文件<input aria-label="选择历史数据 JSON 文件" type="file" accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 20 * 1024 * 1024) { setJsonError("单个文件最多 20 MB，请缩小导入范围或选择较小文件。"); return; } try { setJsonText(await file.text()); setJsonError(""); } catch { setJsonError("无法读取文件，请重新选择。"); } }} /></label><JsonEvidence value={data?.import_requirements} label="导入要求" /></Space> : null}
+      {jsonModal === "import" ? <Space direction="vertical" className="research-full"><label className="research-file-label">选择 JSON 文件<input aria-label="选择历史数据 JSON 文件" type="file" accept=".json,application/json" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 20 * 1024 * 1024) { setJsonError("文件不能超过 20 MB。"); return; } try { setJsonText(await file.text()); setJsonError(""); } catch { setJsonError("无法读取文件，请重新选择。"); } }} /></label><JsonEvidence value={data?.import_requirements} label="导入要求" /></Space> : null}
       <Input.TextArea className="research-editor" aria-label={jsonModal === "strategy" ? "策略规则 JSON" : "历史数据 JSON"} value={jsonText} onChange={(event) => setJsonText(event.target.value)} autoSize={{ minRows: 14, maxRows: 24 }} spellCheck={false} />
     </Modal>
     <Modal rootClassName="research-overlay" title="研究预算" open={settingsOpen} onCancel={() => setSettingsOpen(false)} onOk={() => settingsForm.submit()} confirmLoading={configure.isPending} okText="保存" cancelText="取消"><Form form={settingsForm} layout="vertical" onFinish={(values) => configure.mutate({ enabled: values.enabled, daily_calls: values.daily_calls, daily_tokens: values.daily_tokens, weekly_candidates: values.weekly_candidates })}><Form.Item name="enabled" label="启用自动研究" valuePropName="checked"><Switch /></Form.Item><Form.Item name="daily_calls" label="每日模型调用上限" rules={[{ required: true }]}><InputNumber min={0} precision={0} className="research-full" /></Form.Item><Form.Item name="daily_tokens" label="每日总 Token 上限（输入 + 输出）" rules={[{ required: true }]}><InputNumber min={0} step={10000} precision={0} className="research-full" /></Form.Item><Form.Item name="weekly_candidates" label="每周候选上限" rules={[{ required: true }]}><InputNumber min={0} precision={0} className="research-full" /></Form.Item></Form><Divider /><Descriptions column={1} size="small" items={[{ key: "cash", label: "模拟初始资金", children: `¥ ${displayNumber(config.initial_cash)}` }, { key: "symbol", label: "单标的仓位上限", children: displayPercent(finiteNumber(config.max_symbol_weight) === null ? null : config.max_symbol_weight * 100) }, { key: "total", label: "总仓位上限", children: displayPercent(finiteNumber(config.max_position_pct) === null ? null : config.max_position_pct * 100) }]} /><Text type="secondary">现有模拟账户的初始资金不变。</Text></Modal>

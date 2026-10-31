@@ -4,7 +4,7 @@ import { useAuth } from "./AuthContext.jsx";
 import { getApiErrorMessage } from "./api.js";
 import ThemeModeToggle from "./ThemeModeToggle.jsx";
 
-const { Title, Paragraph, Text } = Typography;
+const { Title, Text } = Typography;
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,32}$/;
 
 function LoginForm() {
@@ -32,8 +32,7 @@ function LoginForm() {
         <span className="sva-brand">StockViewAgent</span>
         <ThemeModeToggle />
       </div>
-      <Title level={2}>{isRegistration ? "创建试用账号" : "欢迎使用"}</Title>
-      <Paragraph type="secondary">登录后管理自选股、查看行情与 AI 新闻解读。</Paragraph>
+      <Title level={2}>{isRegistration ? "创建试用账号" : "登录"}</Title>
       {registrationEnabled ? (
         <Segmented
           block
@@ -54,7 +53,7 @@ function LoginForm() {
             ...(isRegistration ? [{ pattern: USERNAME_PATTERN, message: "使用 3–32 位字母、数字或下划线" }] : []),
           ]}
         >
-          <Input autoComplete="username" maxLength={isRegistration ? 32 : 64} placeholder="用户名" autoCapitalize="none" spellCheck={false} />
+          <Input autoComplete="username" maxLength={isRegistration ? 32 : 64} autoCapitalize="none" spellCheck={false} />
         </Form.Item>
         <Form.Item
           label="密码"
@@ -64,7 +63,7 @@ function LoginForm() {
             ...(isRegistration ? [{ min: 10, max: 128, message: "密码需要 10–128 个字符" }] : []),
           ]}
         >
-          <Input.Password autoComplete={isRegistration ? "new-password" : "current-password"} maxLength={isRegistration ? 128 : 256} placeholder={isRegistration ? "至少 10 个字符" : "密码"} />
+          <Input.Password autoComplete={isRegistration ? "new-password" : "current-password"} maxLength={isRegistration ? 128 : 256} placeholder={isRegistration ? "至少 10 个字符" : undefined} />
         </Form.Item>
         <Button block type="primary" htmlType="submit" loading={submitting}>
           {isRegistration ? "注册并开始试用" : "登录"}
@@ -73,10 +72,9 @@ function LoginForm() {
       <Alert
         type="info"
         showIcon
-        message="使用自己的 API Key 试用"
-        description="登录后请在「设置」配置你的数据源和 AI 模型 API Key。密钥对应的服务用量由你自己的服务商账号承担。"
+        message="模型解读需在「设置」配置 API Key"
+        description="模型及付费数据源由服务商计费。"
       />
-      <Paragraph className="sva-auth-footnote" type="secondary">仅供研究参考，不构成投资建议。</Paragraph>
     </Card>
   );
 }
@@ -93,7 +91,7 @@ export default function AuthGate({ children }) {
         <Card className="sva-auth-card" variant="borderless">
           <Space direction="vertical" size="large">
             <Text strong>StockViewAgent</Text>
-            <Alert type="error" showIcon message={error || "连接服务失败，请重试。"} />
+            <Alert type="error" showIcon message={error || "连接服务失败。"} />
             <Button type="primary" onClick={() => void refreshMe()}>重新连接</Button>
           </Space>
         </Card>

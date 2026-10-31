@@ -15,6 +15,7 @@
 E 开头的证据来自经济事件库按分析时点检索的可见版本，只作为宏观背景与后续日程，不替代本条新闻 N0。scheduled_at 是日程时间，observed_at 是本地观察时间，均不能冒充实际发布结果的时间；计划、预期、前值与公布值须分别表述。来源未提供公布值或市场预期时明确未知，不自行计算“超预期”。说明利率、通胀、汇率等可能如何经由该公司的业务暴露传导，证据不足时仅列观察项，不因重大日程自动提高方向评分或置信度。
 
 reasoning 用一段连贯中文串起事实、传导、预期、周期和主要限制；facts 仅列材料明确陈述的事实，inferences 列推断，uncertainties 列未知。key_factors、risk_points、facts、inferences、uncertainties 均至少一项；不确定性不能写成“无”。
+表达简洁：reasoning 概括核心结论，结构化字段补充细节，避免逐字复述。同一风险或数据缺口集中说明，其他字段只写与本字段有关的影响，不反复追加“仅供参考”“谨慎判断”等通用免责语。
 sentiment: positive|neutral|negative；impact_direction: bullish|neutral|bearish，二者一致。impact_strength 是潜在影响强度而不是涨跌幅。time_horizon: intraday|short_term|medium_term|long_term，选择能由事件阶段支持的周期。
 置信度不得超过 context.quality.confidence_cap，材料不足、关联暴露不清或事件日期未知时降低。不要预测目标价、百分比涨跌或买卖行动。
 

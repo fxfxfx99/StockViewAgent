@@ -72,7 +72,7 @@ def test_sync_macro_route_uses_account_credentials(client, monkeypatch):
         return {"series_id": series_id, "candles": []}
 
     monkeypatch.setattr(macro.macro_tushare_service, "fetch_macro_kline", fetch)
-    response = client.get("/api/macro/kline?series_id=sh_index", headers=_headers())
+    response = client.get("/api/macro/kline?series_id=gold_sge", headers=_headers())
     assert response.status_code == 200
     assert observed == [(2, "macro-test-token")]
     assert current_user_id.get() is None
@@ -109,13 +109,13 @@ def test_news_sync_defaults_to_current_account_watchlist(client, monkeypatch):
     watchlist_store.save_symbols(2, ["000001.SZ"])
     observed = []
 
-    async def sync(symbols, *, lookback_days):
+    def sync(symbols, *, lookback_days):
         observed.append((current_user_id.get(), symbols, lookback_days))
         return {"symbols_queried": symbols}
 
-    monkeypatch.setattr(news.news_feed_sync, "sync_all_sources_to_archive", sync)
+    monkeypatch.setattr(news.data_collection, "enqueue_news", sync)
     response = client.post("/api/news/sync-archive-feeds", json={"lookback_days": 7}, headers=_headers())
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert observed == [(2, ["000001.SZ"], 7)]
 
 

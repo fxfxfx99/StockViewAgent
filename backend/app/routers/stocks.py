@@ -58,3 +58,12 @@ def stocks_company_fundamentals(
 ):
     """读取结构化公司基础库中的最新基本信息、财务指标和管理层讨论记录。"""
     return company_fundamentals_store.latest_for_symbol(symbol)
+
+
+@router.get("/{symbol}/fundamentals/history")
+def stocks_financial_history(symbol: str, _: Annotated[UserRecord, Depends(get_current_user)],
+                             limit: int = Query(default=12, ge=1, le=100)):
+    try:
+        return company_fundamentals_store.financial_history(symbol, limit)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc

@@ -287,6 +287,7 @@ def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
         "cn_headline_sources_state.json": ("news_source_state", "cn_headline_sources", "maintenance"),
         "cn_headline_sources_override.json": ("news_source_config", "cn_headline_sources_override", "admin"),
         "news.db": ("sqlite_db", "news", "app"),
+        "overseas_news.db": ("sqlite_db", "overseas_news", "overseas_news"),
         "users.db": ("sqlite_db", "users", "app"),
         "quant.db": ("sqlite_db", "quant", "app"),
         "research_agent.db": ("sqlite_db", "research_agent", "app"),
@@ -295,8 +296,12 @@ def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
         "decision_signals.db": ("sqlite_db", "decision_signals", "decision_signal_store"),
         "research.sqlite3": ("sqlite_db", "research", "research_store"),
         "tracking.sqlite3": ("sqlite_db", "tracking", "tracking_store"),
+        "monitoring.sqlite3": ("sqlite_db", "monitoring", "monitoring_store"),
+        "earnings.sqlite3": ("sqlite_db", "earnings", "earnings_store"),
+        "investment_research.sqlite3": ("sqlite_db", "investment_research", "investment_research_store"),
         "economic_events.sqlite3": ("sqlite_db", "economic_events", "event_calendar_store"),
         "data_center.sqlite3": ("sqlite_db", "data_center", "data_collection_store"),
+        "merrill.sqlite3": ("sqlite_db", "merrill_clock", "merrill_store"),
     }
     if name in mapping:
         kind, key, source = mapping[name]
@@ -335,11 +340,11 @@ def _category(rel: str) -> str:
         return _category(rel.rsplit("-", 1)[0])  # May contain committed database changes.
     if first == "runtime" or rel.endswith((".lock", ".pid", "-shm")):
         return "runtime"
-    if first in {"research", "research.sqlite3", "tracking.sqlite3", "research_agent.db", "quant.db", "decision_signals.db", "stock_picker_agents.db"}:
+    if first in {"research", "research.sqlite3", "investment_research", "investment_research.sqlite3", "tracking.sqlite3", "monitoring.sqlite3", "research_agent.db", "quant.db", "decision_signals.db", "stock_picker_agents.db"}:
         return "research"
-    if first in {"issuer_uploads", "kline_learning", "imports", "strategy_knowledge.db", "kline_insights", "economic_events.sqlite3", "data_center.sqlite3", "datasets"}:
+    if first in {"issuer_uploads", "kline_learning", "imports", "strategy_knowledge.db", "kline_insights", "economic_events.sqlite3", "data_center.sqlite3", "merrill.sqlite3", "datasets", "earnings.sqlite3", "earnings"}:
         return "knowledge"
-    if first in {"news.db", "company_fundamentals.db", "company_updates", "company_basic_universe.json", "issuer_basic_info_universe.json", "xueqiu_comments.db"}:
+    if first in {"news.db", "overseas_news.db", "company_fundamentals.db", "company_updates", "company_basic_universe.json", "issuer_basic_info_universe.json", "xueqiu_comments.db"}:
         return "news"
     if first in {"users.db", "watchlists", "watchlist.json", "watchlist_profiles.json", "llm_runtime.json", "integrations.json", "platform.json", "cn_headline_sources_override.json"}:
         return "accounts"
@@ -376,13 +381,15 @@ def _walk_files(root: Path):
         os.close(directory)
 
 
-def scan_data_assets() -> dict[str, Any]:
+def scan_data_assets(*, include_items: bool = True) -> dict[str, Any]:
     """Inventory real files, including backups; never read secret contents."""
     root = settings.data_dir.resolve()
     catalog = _load_catalog()
     catalog_assets = catalog.get("assets") if isinstance(catalog.get("assets"), dict) else {}
     assets: list[dict[str, Any]] = []
-    all_items: list[dict[str, Any]] = []
+    totals = {"files": 0, "size_bytes": 0}
+    directory_totals = {"files": 0, "size_bytes": 0}
+    by_kind: dict[str, dict[str, int]] = {}
     categories = {key: {"id": key, "label": value[0], "retention": value[1], "files": 0, "size_bytes": 0}
                   for key, value in _CATEGORIES.items()}
     from app.storage import cache_lifecycle
@@ -399,30 +406,29 @@ def scan_data_assets() -> dict[str, Any]:
         meta.update(cache_lifecycle.describe_asset(rel, stat, policy=policy))
         # Discard stale absolute backup locators from older catalogs.
         meta["backups"] = [b for b in (meta.get("backups") or []) if isinstance(b, str) and not Path(b).is_absolute() and ".." not in Path(b).parts]
-        all_items.append(meta)
+        directory_totals["files"] += 1
+        directory_totals["size_bytes"] += stat.st_size
         category = categories[meta["category"]]
         category["files"] += 1
         category["size_bytes"] += stat.st_size
         if not rel.startswith(f"{_MANAGED_DIR}/"):
-            assets.append(meta)
-    totals = {"files": len(assets), "size_bytes": sum(a["size_bytes"] for a in assets)}
-    directory_totals = {"files": len(all_items), "size_bytes": sum(a["size_bytes"] for a in all_items)}
-    by_kind: dict[str, dict[str, int]] = {}
-    for a in assets:
-        entry = by_kind.setdefault(a["kind"], {"files": 0, "size_bytes": 0})
-        entry["files"] += 1
-        entry["size_bytes"] += a["size_bytes"]
+            if include_items:
+                assets.append(meta)
+            totals["files"] += 1
+            totals["size_bytes"] += stat.st_size
+            entry = by_kind.setdefault(meta["kind"], {"files": 0, "size_bytes": 0})
+            entry["files"] += 1
+            entry["size_bytes"] += stat.st_size
     return {
         "data_root": str(root), "managed_dir": _MANAGED_DIR, "catalog": f"{_MANAGED_DIR}/{_CATALOG_NAME}",
-        "totals": totals, "directory_totals": directory_totals, "by_kind": by_kind, "items": assets,
+        "totals": totals, "directory_totals": directory_totals, "by_kind": by_kind, **({"items": assets} if include_items else {}),
         "categories": list(categories.values()),
         "index": {"path": f"{_MANAGED_DIR}/{_CATALOG_NAME}", "guide": "INDEX.md", "updated_at": catalog.get("updated_at")},
         "migration": {
             "commands": "./backend/.venv/bin/python scripts/storage.py migrate --to '/path/to/StockViewAgent-data'",
-            "notes": ["先停止 start.sh 管理的服务及 Docker；在项目根目录执行，替换为尚不存在的新目录路径。",
-                      "迁移校验 SQLite 和文件哈希，成功后原目录仍保留；按命令输出设置 STOCKVIEW_DATA_DIR 后再启动。",
-                      "目录包含已保存的 API 配置、账户和资料，请作为私有备份保管；外部 .env 与外部数据服务需另行配置。",
-                      "刷新索引只扫描文件，不抓取行情、不调用模型，也不清理历史证据。"],
+            "notes": ["停止 start.sh 服务与 Docker，替换为不存在的目标路径后，在项目根目录执行。",
+                      "迁移会校验 SQLite 与文件哈希，并保留原目录；完成后按输出设置 STOCKVIEW_DATA_DIR 再启动。",
+                      "目录含 API 配置、账户和资料，请私密保管；外部 .env 与数据服务需另行配置。"],
         },
     }
 

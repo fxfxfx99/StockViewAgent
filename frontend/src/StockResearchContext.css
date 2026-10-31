@@ -1,0 +1,15 @@
+.stock-research-context, .stock-financial-panel { padding: 22px; min-width: 0; }
+.stock-context-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+.stock-context-heading h2 { font-size: var(--sva-font-lg); margin: 0; }
+.stock-context-heading p, .stock-context-note { color: var(--sva-text-secondary); font-size: var(--sva-font-xs); line-height: 1.8; overflow-wrap: anywhere; }
+.stock-context-heading p { margin: 8px 0 0; }
+.stock-context-heading > a { font-size: var(--sva-font-xs); }
+.stock-context-alert { margin-bottom: 20px; }
+.stock-context-research-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; }
+.stock-context-research-list article { padding: 16px; border: 1px solid var(--sva-separator); border-radius: var(--sva-radius-sm); }
+.stock-context-research-list article p { line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.stock-context-monitors { display: flex; flex-direction: column; gap: 12px; }
+.stock-financial-select { width: 100%; max-width: 100%; }
+.stock-financial-chart { width: 100%; max-height: 340px; min-height: 190px; color: var(--sva-text-tertiary); }
+.stock-financial-chart text { fill: currentColor; font-size: 12px; }
+@media (max-width: 760px) { .stock-context-research-list { grid-template-columns: minmax(0, 1fr); } .stock-research-context, .stock-financial-panel { padding: 16px; } }

@@ -2,9 +2,9 @@ import { Tag } from "antd";
 import { commentText, commentsTime, safeXueqiuCommentUrl } from "../hooks/xueqiuCommentsState.js";
 
 const STANCES = {
-  bullish: { label: "用户观点 · 偏多", color: "green" },
-  bearish: { label: "用户观点 · 偏空", color: "red" },
-  neutral: { label: "用户观点 · 中性", color: "default" },
+  bullish: { label: "偏多", color: "green" },
+  bearish: { label: "偏空", color: "red" },
+  neutral: { label: "中性", color: "default" },
 };
 const CATEGORIES = {
   fundamentals: "基本面",
@@ -33,11 +33,12 @@ export default function XueqiuCommentCard({ item }) {
   const href = safeXueqiuCommentUrl(item.url);
   const title = commentText(item.title, 180);
   const summary = commentText(item.summary, 800);
+  const reason = commentText(item.reason, 700);
   const original = commentText(item.text);
   const category = commentText(item.category, 40);
   const stance = STANCES[item.stance] || STANCES.neutral;
   const risks = Array.isArray(item.risks)
-    ? item.risks.map((risk) => commentText(risk, 300)).filter(Boolean).slice(0, 5)
+    ? [...new Set(item.risks.map((risk) => commentText(risk, 300)).filter(Boolean))].slice(0, 5)
     : [];
 
   return (
@@ -53,19 +54,16 @@ export default function XueqiuCommentCard({ item }) {
         </span>
       </div>
       {title ? <h3 className="sva-comment-card__title">{title}</h3> : null}
-      <p className="sva-comment-card__summary"><strong>观点摘要：</strong>{summary || "模型未提供摘要，请核对原文。"}</p>
-      <p className="sva-comment-card__reason"><strong>入选理由：</strong>{commentText(item.reason, 700) || "模型未提供入选理由。"}</p>
-      <div className="sva-comment-card__risks" role="note">
-        <strong>风险提示</strong>
-        {risks.length ? (
-          <ul>{risks.map((risk, index) => <li key={index}>{risk}</li>)}</ul>
-        ) : <p>模型未列出具体风险，观点仍需自行核实。</p>}
-      </div>
+      {summary && summary !== title ? <p className="sva-comment-card__summary"><strong>摘要：</strong>{summary}</p> : null}
+      {reason && reason !== summary && reason !== title ? <p className="sva-comment-card__reason"><strong>入选理由：</strong>{reason}</p> : null}
+      {risks.length ? <div className="sva-comment-card__risks" role="note">
+        <strong>风险</strong>
+        <ul>{risks.map((risk, index) => <li key={index}>{risk}</li>)}</ul>
+      </div> : null}
       {original ? (
         <details className="sva-comment-card__original">
-          <summary>展开原文节选</summary>
+          <summary>原文节选</summary>
           <blockquote>{original}</blockquote>
-          <p>仅显示原文节选；完整内容以雪球原文为准。</p>
         </details>
       ) : null}
       <footer className="sva-comment-card__meta">

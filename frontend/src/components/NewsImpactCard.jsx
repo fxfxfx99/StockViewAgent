@@ -44,7 +44,7 @@ const eventTypes = {
   other: "其他事件",
 };
 const textKinds = {
-  full_text: "源提供正文",
+  full_text: "来源正文",
   summary: "仅有摘要",
   title_only: "仅有标题",
 };
@@ -52,10 +52,10 @@ const statuses = {
   pending: "待解读",
   analyzing: "正在解读",
   processing: "正在解读",
-  irrelevant: "相关性未达阈值，未进行影响分析",
-  unavailable: "AI 分析尚不可用，请在设置中配置大模型",
-  error: "本次 AI 分析未成功，可重试",
-  stale: "新闻已超出分析时效，仅保留历史记录",
+  irrelevant: "相关性不足，已跳过",
+  unavailable: "请先配置模型接口",
+  error: "解读失败，可重试",
+  stale: "已超出分析时效",
 };
 function strings(items) {
   return Array.isArray(items)
@@ -76,6 +76,17 @@ function uniqueText(items, shown = []) {
     seen.add(key);
     return true;
   });
+}
+
+function uniqueSections(sections, shown = []) {
+  const seen = new Set(shown.map(textKey).filter(Boolean));
+  return sections.map(([label, items]) => [label, (Array.isArray(items) ? items : []).filter((item) => {
+    if (typeof item !== "string") return true;
+    const key = textKey(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })]);
 }
 
 function sourceTime(value) {
@@ -143,7 +154,7 @@ function AnalysisEvidence({ sources, references }) {
             ))}
             {refs.length > 0 && !quotes.length ? (
               <Text type="secondary" className="analysis-source-note">
-                引用该来源，未提供逐字摘录。
+                未提供原文摘录。
               </Text>
             ) : null}
             {source.text ? (
@@ -158,7 +169,7 @@ function AnalysisEvidence({ sources, references }) {
         );
       })}
       {missing.length ? (
-        <Text type="warning">引用来源 {missing.join("、")} 未保存在分析背景中，无法核对。</Text>
+        <Text type="warning">引用来源 {missing.join("、")} 未保存，无法核对。</Text>
       ) : null}
     </div>
   );
@@ -197,7 +208,7 @@ function CombinedSources({ articles }) {
   if (sources.length < 2) return null;
   return (
     <details className="news-combined-sources">
-      <summary>已合并 {sources.length} 篇重复报道 · 查看来源</summary>
+      <summary>合并报道（{sources.length} 篇）</summary>
       <ul>
         {sources.map((article) => (
           <li key={article.url}>
@@ -263,24 +274,42 @@ export default function NewsImpactCard({ item, symbol }) {
   const failed = status === "error" || status === "unavailable";
   const failureReason = failed && typeof analysis?.reason === "string" && analysis.reason.trim();
   const relevanceReason = analysis?.relevance_reason || (!failed ? analysis?.reason : "");
-  const followUpFields = [
+  const followUpFields = uniqueSections([
     ["兑现条件", analysis?.realization_conditions],
     ["后续观察", analysis?.watch_points],
     ["失效条件", analysis?.invalidation_conditions],
     ["反向观点", analysis?.counter_arguments],
-  ];
-  const factFields = [
-    ["已知事实", analysis?.facts],
-    ["分析推断", analysis?.inferences],
+  ], visibleText);
+  const followUpText = followUpFields.flatMap(([, values]) => strings(values));
+  const confidenceReason = uniqueText([analysis?.confidence_reason], [...visibleText, ...followUpText])[0];
+  const factFields = uniqueSections([
+    ["事实", analysis?.facts],
+    ["推断", analysis?.inferences],
     ["关键因素", analysis?.key_factors],
     ["风险点", analysis?.risk_points],
     ["不确定信息", analysis?.uncertainties],
-  ];
+  ], [...visibleText, ...followUpText, confidenceReason]);
+  const reasoningDetail = uniqueText([fullReasoning], [
+    ...followUpText, confidenceReason, ...factFields.flatMap(([, values]) => strings(values)),
+  ])[0];
   const collapses = [];
+  if (eventSummary && (channels.length || expectationGap)) {
+    collapses.push({
+      key: "impact",
+      label: "影响与预期差",
+      children: <>
+        {channels.length ? <section className="analysis-impact-channels">
+          <Text strong>影响传导</Text>
+          <ol>{channels.map((step, index) => <li key={index}>{step}</li>)}</ol>
+        </section> : null}
+        {expectationGap ? <Paragraph className="analysis-expectation-gap"><Text strong>预期差：</Text>{expectationGap}</Paragraph> : null}
+      </>,
+    });
+  }
   if (matchEvidence.length || relevanceReason || analysis?.relevance_score != null || types[analysis?.relevance_type]) {
     collapses.push({
       key: "relevance",
-      label: "关联说明",
+      label: "关联依据",
       children: (
         <div>
           <Space wrap>
@@ -306,19 +335,19 @@ export default function NewsImpactCard({ item, symbol }) {
       )),
     });
   }
-  if (followUpFields.some(([, values]) => strings(values).length) || analysis?.confidence_reason) {
+  if (followUpFields.some(([, values]) => strings(values).length) || confidenceReason) {
     collapses.push({
       key: "follow-up",
-      label: "兑现条件与后续跟踪",
+      label: "后续跟踪",
       children: (
         <div className="evidence-grid">
           {followUpFields.map(([label, values]) => (
             <TextItems key={label} label={label} items={strings(values)} />
           ))}
-          {analysis.confidence_reason ? (
+          {confidenceReason ? (
             <section className="analysis-list analysis-confidence-reason">
               <Text strong>置信度依据</Text>
-              <Paragraph>{analysis.confidence_reason}</Paragraph>
+              <Paragraph>{confidenceReason}</Paragraph>
             </section>
           ) : null}
         </div>
@@ -332,17 +361,17 @@ export default function NewsImpactCard({ item, symbol }) {
       children: <AnalysisEvidence sources={sources} references={references} />,
     });
   }
-  if (factFields.some(([, values]) => Array.isArray(values) && values.length) || fullReasoning) {
+  if (factFields.some(([, values]) => Array.isArray(values) && values.length) || reasoningDetail) {
     collapses.push({
       key: "evidence",
       label: "事实、推断与风险",
       children: (
         <div className="evidence-grid">
-          {fullReasoning ? (
-            <section className="analysis-list analysis-full-reasoning">
-              <Text strong>完整分析理由</Text>
-              <Paragraph>{fullReasoning}</Paragraph>
-            </section>
+          {reasoningDetail ? (
+            <details className="analysis-list analysis-full-reasoning">
+              <summary>完整分析</summary>
+              <Paragraph>{reasoningDetail}</Paragraph>
+            </details>
           ) : null}
           {factFields.map(([label, values]) => (
             <TextItems key={label} label={label} items={values} />
@@ -354,12 +383,12 @@ export default function NewsImpactCard({ item, symbol }) {
   if (analysis?.analysis_input) {
     collapses.push({
       key: "analysis-input",
-      label: "查看分析时的新闻内容",
+      label: "解读时的新闻版本",
       children: (
         <div>
           <Text strong>{analysis.analysis_input.title}</Text>
           <Paragraph className="analysis-snapshot">
-            {analysis.analysis_input.content_excerpt || "当时没有可用的新闻正文。"}
+            {analysis.analysis_input.content_excerpt || "无正文。"}
           </Paragraph>
         </div>
       ),
@@ -374,7 +403,7 @@ export default function NewsImpactCard({ item, symbol }) {
         <span>{item.source || "来源未知"}</span>
         {item.attention?.level === "major" ? (
           <Tooltip
-            title={`优先核查与解读，不代表利好或影响强度${attentionReason ? `。${attentionReason}` : ""}`}
+            title={attentionReason || "优先解读事项"}
             trigger={["hover", "focus"]}
           >
             <Tag color="blue" tabIndex={0}>重大事项</Tag>
@@ -416,7 +445,7 @@ export default function NewsImpactCard({ item, symbol }) {
       ) : null}
       {hasQualityNotice ? (
         <div className="analysis-quality" role="note">
-          {textKinds[quality?.text_kind] ? <Tag>分析依据：{textKinds[quality.text_kind]}</Tag> : null}
+          {textKinds[quality?.text_kind] ? <Tag>依据：{textKinds[quality.text_kind]}</Tag> : null}
           {quality?.publication_date_known === false ? <Tag color="gold">发布日期未核实</Tag> : null}
           {quality?.confidence_cap != null && quality.confidence_cap < 100 ? (
             <span>置信度上限 {number(quality.confidence_cap, 0)} / 100</span>
@@ -434,7 +463,7 @@ export default function NewsImpactCard({ item, symbol }) {
           className="task-status"
           type="warning"
           showIcon
-          message="新闻内容已更新，以下判断基于分析时的内容。"
+          message="新闻已更新，分析基于旧版内容。"
         />
       ) : null}
       {analyzed && (hasInterpretation || mainReasoning) ? (
@@ -443,10 +472,10 @@ export default function NewsImpactCard({ item, symbol }) {
             <>
               {eventSummary ? (
                 <Paragraph className="analysis-event-summary">
-                  <Text strong>事件解读：</Text>{eventSummary}
+                  <Text strong>解读：</Text>{eventSummary}
                 </Paragraph>
               ) : null}
-              {channels.length ? (
+              {!eventSummary && channels.length ? (
                 <section className="analysis-impact-channels">
                   <Text strong>影响传导</Text>
                   <ol>
@@ -454,7 +483,7 @@ export default function NewsImpactCard({ item, symbol }) {
                   </ol>
                 </section>
               ) : null}
-              {expectationGap ? (
+              {!eventSummary && expectationGap ? (
                 <Paragraph className="analysis-expectation-gap">
                   <Text strong>预期差：</Text>{expectationGap}
                 </Paragraph>
@@ -462,7 +491,7 @@ export default function NewsImpactCard({ item, symbol }) {
             </>
           ) : (
             <Paragraph>
-              <Text strong>潜在影响分析：</Text>
+              <Text strong>解读：</Text>
               {mainReasoning}
             </Paragraph>
           )}

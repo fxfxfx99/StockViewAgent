@@ -8,7 +8,7 @@ import { normalizeAsOf, normalizeChartSymbol } from "./urlState.js";
 export function useAppUrlState() {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const chartSymbol = normalizeChartSymbol(searchParams.get("chart"));
+  const chartSymbol = normalizeChartSymbol(searchParams.get("chart") || searchParams.get("symbol"));
   const asOf = normalizeAsOf(searchParams.get("as_of"));
 
   const patch = useCallback(
@@ -29,9 +29,9 @@ export function useAppUrlState() {
     (sym) => {
       const s = normalizeChartSymbol(sym);
       if (s) {
-        patch((p) => p.set("chart", s));
+        patch((p) => { p.set("chart", s); p.delete("symbol"); p.delete("monitor_run"); });
       } else {
-        patch((p) => p.delete("chart"));
+        patch((p) => { p.delete("chart"); p.delete("symbol"); p.delete("monitor_run"); });
       }
     },
     [patch]

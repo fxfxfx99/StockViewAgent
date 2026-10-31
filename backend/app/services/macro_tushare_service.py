@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -21,11 +22,16 @@ from app.config import settings
 from app.services.market_time import SHANGHAI_TZ, market_timestamp
 from app.services.tushare_service import _cell, _get_pro, is_configured
 from app.storage.tushare_daily_cache import (
+    fresh_payload,
     load_entry,
     merge_stale_indices,
     merge_stale_kline,
     save_payload,
 )
+
+MACRO_CACHE_TTL_SECONDS = 15 * 60
+SW_KLINE_CACHE_TTL_SECONDS = 15 * 60
+SW_INDICES_CACHE_TTL_SECONDS = 60 * 60
 
 _RANGE_DAYS: dict[str, int] = {
     "3mo": 92,
@@ -102,20 +108,64 @@ def catalog() -> list[dict[str, Any]]:
 
 def _trade_date_to_ts(s: str) -> int:
     """YYYYMMDD -> 上海日历日 12:00 的时间戳（与现有 K 线展示一致）。"""
+    if not re.fullmatch(r"\d{8}", s):
+        raise ValueError("trade_date 须为有效的 YYYYMMDD 日期")
     dt = datetime.strptime(s, "%Y%m%d").replace(hour=12, minute=0, second=0)
     return market_timestamp(dt)
 
 
+def _range(value: str) -> str:
+    result = (value or "1y").strip().lower()
+    if result not in _RANGE_DAYS:
+        raise ValueError(f"range 须为 {', '.join(_RANGE_DAYS)} 之一")
+    return result
+
+
+def _text(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _nonnegative(value: Any) -> float:
+    try:
+        number = float(value)
+        return number if math.isfinite(number) and number >= 0 else 0.0
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
+def _provider_error(error: Exception) -> str:
+    """Provider exceptions sometimes include URLs or the request token."""
+    message = str(error).lower()
+    if any(term in message for term in ("token", "权限", "积分", "permission", "unauthorized")):
+        return "Tushare 请求失败，请检查 Token、积分与接口权限"
+    if any(term in message for term in ("timeout", "timed out", "超时")):
+        return "Tushare 请求超时，请稍后重试"
+    return "Tushare 请求失败或返回数据不可用，请稍后重试"
+
+
+def _sample(df: pd.DataFrame) -> dict[str, Any]:
+    result = {}
+    for key, value in df.iloc[-1].to_dict().items():
+        value = _cell(value)
+        if value is None or pd.isna(value):
+            value = None
+        elif isinstance(value, float) and not math.isfinite(value):
+            value = None
+        result[str(key)] = value
+    return result
+
+
 def _df_to_candles(df: pd.DataFrame, kind: str) -> list[dict[str, Any]]:
-    if df is None or df.empty:
+    if df is None or df.empty or "trade_date" not in df.columns:
         return []
-    df = df.sort_values("trade_date", ascending=True)
-    out: list[dict[str, Any]] = []
+    out: dict[int, dict[str, Any]] = {}
     for _, row in df.iterrows():
-        td = str(row.get("trade_date") or "")
-        if len(td) != 8:
+        try:
+            ts = _trade_date_to_ts(_text(row.get("trade_date")))
+        except (ValueError, TypeError, OverflowError, OSError):
             continue
-        ts = _trade_date_to_ts(td)
         if kind == "fx":
             o = row.get("bid_open")
             h = row.get("bid_high")
@@ -125,37 +175,26 @@ def _df_to_candles(df: pd.DataFrame, kind: str) -> list[dict[str, Any]]:
             o, h, low, c = row.get("open"), row.get("high"), row.get("low"), row.get("close")
         try:
             o, h, low, c = float(o), float(h), float(low), float(c)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             continue
-        v = row.get("vol")
-        if v is not None and not (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-            try:
-                vi = int(float(v))
-            except (TypeError, ValueError):
-                vi = 0
-        else:
-            vi = 0
-        amt = row.get("amount")
-        try:
-            amtf = float(amt) if amt is not None and not pd.isna(amt) else 0.0
-        except (TypeError, ValueError):
-            amtf = 0.0
-        out.append(
-            {
+        if not all(math.isfinite(value) and value > 0 for value in (o, h, low, c)):
+            continue
+        if low > min(o, c) or h < max(o, c) or low > h:
+            continue
+        out[ts] = {
                 "t": ts,
                 "o": round(o, 6),
                 "h": round(h, 6),
                 "l": round(low, 6),
                 "c": round(c, 6),
-                "v": vi,
-                "amount": round(amtf, 2),
+                "v": int(_nonnegative(row.get("vol"))),
+                "amount": round(_nonnegative(row.get("amount")), 2),
             }
-        )
-    return out
+    return [out[stamp] for stamp in sorted(out)]
 
 
 def _fetch_macro_kline_live(meta: dict[str, Any], range_param: str) -> dict[str, Any]:
-    days = _RANGE_DAYS.get((range_param or "1y").strip().lower(), 370)
+    days = _RANGE_DAYS[_range(range_param)]
     end = datetime.now(SHANGHAI_TZ)
     start = end - timedelta(days=days)
     start_s = start.strftime("%Y%m%d")
@@ -178,7 +217,7 @@ def _fetch_macro_kline_live(meta: dict[str, Any], range_param: str) -> dict[str,
             df = pro.sge_daily(ts_code=code, start_date=start_s, end_date=end_s)
         elif api == "index_global":
             last_err: Exception | None = None
-            for cand in (code, "UKOIL", "BRENT"):
+            for cand in dict.fromkeys((code, "UKOIL", "BRENT")):
                 try:
                     tdf = pro.index_global(ts_code=cand, start_date=start_s, end_date=end_s)
                     if tdf is not None and not tdf.empty:
@@ -193,7 +232,7 @@ def _fetch_macro_kline_live(meta: dict[str, Any], range_param: str) -> dict[str,
         else:
             raise ValueError(f"未实现的 api: {api}")
     except Exception as e:
-        raise ValueError(f"Tushare 请求失败: {e}") from e
+        raise ValueError(_provider_error(e)) from None
 
     if df is None or df.empty:
         return {
@@ -210,8 +249,7 @@ def _fetch_macro_kline_live(meta: dict[str, Any], range_param: str) -> dict[str,
     kind = "fx" if api == "fx_daily" else "ohlc"
     candles = _df_to_candles(df, kind)
     raw_cols = [str(c) for c in df.columns.tolist()]
-    sample = df.iloc[-1].to_dict() if len(df) else {}
-    sample_json = {str(k): _cell(v) for k, v in sample.items()}
+    sample_json = _sample(df)
 
     return {
         "series_id": meta["id"],
@@ -234,59 +272,77 @@ def fetch_macro_kline(series_id: str, range_param: str = "1y") -> dict[str, Any]
     if not meta:
         raise ValueError(f"未知 series_id，可选：{list(_SERIES_BY_ID.keys())}")
 
-    rng = (range_param or "1y").strip().lower()
+    rng = _range(range_param)
     cache_key = f"{meta['id']}_{rng}"
     token = (settings.effective_tushare_token or "").strip()
+    ent = load_entry("macro_kline", cache_key)
+    has_cache = bool(ent and (ent.get("payload") or {}).get("candles"))
 
     if not is_configured():
-        ent = load_entry("macro_kline", cache_key)
-        if ent and (ent.get("payload") or {}).get("candles"):
+        if has_cache:
             return merge_stale_kline(ent, current_token="", fetch_error=None, no_token=True)
         raise ValueError("未配置 Tushare：请在控制台 → API 密钥中保存当前账户的 Token")
 
+    cached = fresh_payload(ent, current_token=token, ttl_seconds=MACRO_CACHE_TTL_SECONDS) if has_cache else None
+    if cached is not None:
+        return cached
     try:
-        out = _fetch_macro_kline_live(meta, range_param)
+        out = _fetch_macro_kline_live(meta, rng)
         out["cache_stale"] = False
+        out["cache_hit"] = False
+        out["cache_ttl_seconds"] = MACRO_CACHE_TTL_SECONDS
+        if not out.get("candles"):
+            if has_cache:
+                return merge_stale_kline(ent, current_token=token, fetch_error="本次未返回有效行情，保留最近成功缓存", no_token=False)
+            out.setdefault("warning", "该区间未返回有效行情")
+            return out
         save_payload("macro_kline", cache_key, out, token)
         return out
-    except ValueError as e:
-        err = str(e)
-        ent = load_entry("macro_kline", cache_key)
-        if ent and (ent.get("payload") or {}).get("candles"):
+    except Exception as e:
+        err = _provider_error(e)
+        if has_cache:
             return merge_stale_kline(ent, current_token=token, fetch_error=err, no_token=False)
-        raise ValueError(err) from e
+        raise ValueError(err) from None
 
 
 def _find_recent_sw_daily_trade_date(pro: Any) -> str:
     """向前回溯若干自然日，找到 sw_daily 有数据的一日（用于拉取当日全市场行业指数列表）。"""
     d = datetime.now(SHANGHAI_TZ)
-    last_err: Exception | None = None
-    for _ in range(45):
+    for _ in range(14):
         td = d.strftime("%Y%m%d")
         try:
             df = pro.sw_daily(trade_date=td, fields="ts_code,name")
             if df is not None and not df.empty:
                 return td
         except Exception as e:
-            last_err = e
+            # Credentials/network failures do not improve by issuing the same
+            # paid request for another 44 dates.
+            raise ValueError(_provider_error(e)) from None
         d -= timedelta(days=1)
-    if last_err is not None:
-        raise ValueError(f"无法取得申万行业列表（sw_daily）：{last_err}") from last_err
     raise ValueError("无法取得申万行业列表：近期无返回数据")
 
 
 def fetch_sw_daily_indices(trade_date: str | None = None) -> dict[str, Any]:
     """单日 sw_daily 返回全部行业指数 ts_code + name，供前端下拉。"""
     td_in = (trade_date or "").strip()
+    if td_in:
+        try:
+            _trade_date_to_ts(td_in)
+        except (ValueError, TypeError, OverflowError, OSError):
+            raise ValueError("trade_date 须为有效的 YYYYMMDD 日期") from None
     cache_key = td_in if td_in else "latest"
     token = (settings.effective_tushare_token or "").strip()
+    ent = load_entry("sw_indices", cache_key)
+    has_cache = bool(ent and (ent.get("payload") or {}).get("items"))
 
     if not is_configured():
-        ent = load_entry("sw_indices", cache_key)
-        if ent and (ent.get("payload") or {}).get("items"):
+        if has_cache:
             return merge_stale_indices(ent, current_token="", fetch_error=None, no_token=True)
         raise ValueError("未配置 Tushare：请在控制台 → API 密钥中保存当前账户的 Token")
 
+    cached = fresh_payload(ent, current_token=token, ttl_seconds=SW_INDICES_CACHE_TTL_SECONDS) if has_cache else None
+    if cached is not None:
+        return cached
     try:
         pro = _get_pro()
         if pro is None:
@@ -294,56 +350,52 @@ def fetch_sw_daily_indices(trade_date: str | None = None) -> dict[str, Any]:
         td = td_in
         if not td:
             td = _find_recent_sw_daily_trade_date(pro)
-        elif len(td) != 8 or not td.isdigit():
-            raise ValueError("trade_date 须为 YYYYMMDD")
         df = pro.sw_daily(trade_date=td, fields="ts_code,name")
-        if df is None or df.empty:
-            out = {"trade_date": td, "items": [], "warning": "该日无申万行业指数数据", "tushare_doc_id": 327}
-            out["cache_stale"] = False
-            save_payload("sw_indices", cache_key, out, token)
+        by_code: dict[str, dict[str, str]] = {}
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                code = _text(row.get("ts_code")).upper()
+                name = _text(row.get("name"))
+                if re.fullmatch(r"\d{6}\.SI", code):
+                    by_code[code] = {"ts_code": code, "name": name or code}
+        items = [by_code[code] for code in sorted(by_code)]
+        out = {"trade_date": td, "items": items, "tushare_doc_id": 327,
+               "cache_stale": False, "cache_hit": False, "cache_ttl_seconds": SW_INDICES_CACHE_TTL_SECONDS}
+        if not items:
+            if has_cache:
+                return merge_stale_indices(ent, current_token=token, fetch_error="本次未返回有效行业列表，保留最近成功缓存", no_token=False)
+            out["warning"] = "该日无有效申万行业指数数据"
             return out
-        items: list[dict[str, str]] = []
-        for _, row in df.iterrows():
-            code = str(row.get("ts_code") or "").strip()
-            name = str(row.get("name") or "").strip()
-            if code:
-                items.append({"ts_code": code, "name": name or code})
-        items.sort(key=lambda x: x["ts_code"])
-        out = {"trade_date": td, "items": items, "tushare_doc_id": 327}
-        out["cache_stale"] = False
         save_payload("sw_indices", cache_key, out, token)
         return out
-    except ValueError as e:
-        err = str(e)
-        ent = load_entry("sw_indices", cache_key)
-        if ent and (ent.get("payload") or {}).get("items"):
-            return merge_stale_indices(ent, current_token=token, fetch_error=err, no_token=False)
-        raise ValueError(err) from e
     except Exception as e:
-        err = f"Tushare sw_daily 请求失败: {e}"
-        ent = load_entry("sw_indices", cache_key)
-        if ent and (ent.get("payload") or {}).get("items"):
+        err = _provider_error(e)
+        if has_cache:
             return merge_stale_indices(ent, current_token=token, fetch_error=err, no_token=False)
-        raise ValueError(err) from e
+        raise ValueError(err) from None
 
 
 def fetch_sw_daily_kline(ts_code: str, range_param: str = "1y") -> dict[str, Any]:
     """申万行业指数日线 K 线（sw_daily，按 ts_code + 区间）。"""
-    code = (ts_code or "").strip()
-    if not code:
-        raise ValueError("缺少 ts_code")
-    rng = (range_param or "1y").strip().lower()
+    code = (ts_code or "").strip().upper()
+    if not re.fullmatch(r"\d{6}\.SI", code):
+        raise ValueError("ts_code 须为六位申万行业指数代码.SI，例如 801010.SI")
+    rng = _range(range_param)
     cache_key = f"{code}_{rng}"
     token = (settings.effective_tushare_token or "").strip()
+    ent = load_entry("sw_daily_kline", cache_key)
+    has_cache = bool(ent and (ent.get("payload") or {}).get("candles"))
 
     if not is_configured():
-        ent = load_entry("sw_daily_kline", cache_key)
-        if ent and (ent.get("payload") or {}).get("candles"):
+        if has_cache:
             return merge_stale_kline(ent, current_token="", fetch_error=None, no_token=True)
         raise ValueError("未配置 Tushare：请在控制台 → API 密钥中保存当前账户的 Token")
 
+    cached = fresh_payload(ent, current_token=token, ttl_seconds=SW_KLINE_CACHE_TTL_SECONDS) if has_cache else None
+    if cached is not None:
+        return cached
     try:
-        days = _RANGE_DAYS.get(rng, 370)
+        days = _RANGE_DAYS[rng]
         end = datetime.now(SHANGHAI_TZ)
         start = end - timedelta(days=days)
         start_s = start.strftime("%Y%m%d")
@@ -359,23 +411,25 @@ def fetch_sw_daily_kline(ts_code: str, range_param: str = "1y") -> dict[str, Any
                 "name": code,
                 "tushare_api": "sw_daily",
                 "tushare_doc_id": 327,
-                "range": range_param,
+                "range": rng,
                 "candles": [],
                 "raw_fields": [],
                 "warning": "该区间无返回数据（权限不足、代码错误或暂无行情）",
             }
             out["cache_stale"] = False
-            save_payload("sw_daily_kline", cache_key, out, token)
+            out["cache_hit"] = False
+            out["cache_ttl_seconds"] = SW_KLINE_CACHE_TTL_SECONDS
+            if has_cache:
+                return merge_stale_kline(ent, current_token=token, fetch_error="本次未返回有效行情，保留最近成功缓存", no_token=False)
             return out
 
         candles = _df_to_candles(df, "ohlc")
         raw_cols = [str(c) for c in df.columns.tolist()]
-        sample = df.iloc[-1].to_dict() if len(df) else {}
-        sample_json = {str(k): _cell(v) for k, v in sample.items()}
+        sample_json = _sample(df)
         name = ""
         if "name" in df.columns and len(df):
             try:
-                name = str(df.iloc[-1].get("name") or "").strip()
+                name = _text(df.iloc[-1].get("name"))
             except Exception:
                 name = ""
 
@@ -384,23 +438,23 @@ def fetch_sw_daily_kline(ts_code: str, range_param: str = "1y") -> dict[str, Any
             "name": name or code,
             "tushare_api": "sw_daily",
             "tushare_doc_id": 327,
-            "range": range_param,
+            "range": rng,
             "candles": candles,
             "raw_fields": raw_cols,
             "last_bar_sample": sample_json,
         }
         out["cache_stale"] = False
+        out["cache_hit"] = False
+        out["cache_ttl_seconds"] = SW_KLINE_CACHE_TTL_SECONDS
+        if not candles:
+            if has_cache:
+                return merge_stale_kline(ent, current_token=token, fetch_error="本次未返回有效行情，保留最近成功缓存", no_token=False)
+            out["warning"] = "该区间未返回有效行情"
+            return out
         save_payload("sw_daily_kline", cache_key, out, token)
         return out
-    except ValueError as e:
-        err = str(e)
-        ent = load_entry("sw_daily_kline", cache_key)
-        if ent and (ent.get("payload") or {}).get("candles"):
-            return merge_stale_kline(ent, current_token=token, fetch_error=err, no_token=False)
-        raise ValueError(err) from e
     except Exception as e:
-        err = f"Tushare sw_daily 请求失败: {e}"
-        ent = load_entry("sw_daily_kline", cache_key)
-        if ent and (ent.get("payload") or {}).get("candles"):
+        err = _provider_error(e)
+        if has_cache:
             return merge_stale_kline(ent, current_token=token, fetch_error=err, no_token=False)
-        raise ValueError(err) from e
+        raise ValueError(err) from None

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useAuth } from "./AuthContext.jsx";
+import { Link } from "react-router-dom";
 import dayjs from "dayjs";
 import {
   Layout,
@@ -304,7 +305,7 @@ export default function App() {
 
   const refreshWatchProfilesAll = async () => {
     if (!symbols.length) {
-      message.warning("请先在左侧添加股票");
+      message.warning("请先添加自选股");
       return;
     }
     setProfilesRefreshing(true);
@@ -323,7 +324,7 @@ export default function App() {
       const failed = [profilesResult, companyResult].find((result) => result.status === "rejected");
       if (failed) throw failed.reason;
       if (Object.keys(profilesResult.value.errors || {}).length || ["partial", "stale", "unavailable"].includes(companyResult.value?.status)) {
-        message.warning("部分公司资料刷新失败，已保留可用资料");
+        message.warning("部分资料刷新失败，显示已有资料");
       }
       else message.success("公司信息已刷新");
     } catch (e) {
@@ -334,13 +335,18 @@ export default function App() {
   };
 
   const panels = [
+    { key: "current-research", label: "当前研究", children: <PanelSuspense><LazyPanels.StockResearchContextLazy key={`${user?.id}:${focusSymbol}`} symbol={focusSymbol} /></PanelSuspense> },
+    { key: "financial", label: "财务图表", children: <PanelSuspense><LazyPanels.StockFinancialPanelLazy key={`${user?.id}:${focusSymbol}`} symbol={focusSymbol} /></PanelSuspense> },
     {
       key: "decision",
       label: "决策分析",
-      children: <>
-        <div className="market-analysis-context">
-          <span>多策略观点与研究依据</span>
-          <label className="market-analysis-date">
+      children: <PanelSuspense>
+        <LazyPanels.TransactionAgentPanelLazy
+          key={`${focusSymbol}:${asOf || ""}`}
+          symbol={focusSymbol}
+          displayName={focusSecurityLabel}
+          asOf={asOf}
+          headerControls={<label className="market-analysis-date">
             <span>分析日期</span>
             <DatePicker
               size="small"
@@ -352,21 +358,13 @@ export default function App() {
               aria-label="决策分析日期"
               disabledDate={(current) => current && current > dayjs().endOf("day")}
             />
-          </label>
-        </div>
-        <PanelSuspense>
-          <LazyPanels.TransactionAgentPanelLazy
-            key={`${focusSymbol}:${asOf || ""}`}
-            symbol={focusSymbol}
-            displayName={focusSecurityLabel}
-            asOf={asOf}
-          />
-        </PanelSuspense>
-      </>,
+          </label>}
+        />
+      </PanelSuspense>,
     },
     {
       key: "news",
-      label: "关联新闻",
+      label: "新闻与财报",
       children: <PanelSuspense>
         <LazyPanels.NewsInterpretationPanelLazy key={focusSymbol} symbol={focusSymbol} displayName={focusSecurityLabel} />
       </PanelSuspense>,
@@ -383,7 +381,6 @@ export default function App() {
       label: "公司资料",
       children: <Card
         size="small"
-        title="公司信息"
         variant="borderless"
         className="ex-section-card sva-panel"
         extra={<Button type="text" size="small" icon={<ReloadOutlined />}
@@ -460,9 +457,10 @@ export default function App() {
               <div className="market-security-toolbar">
                 <div className="market-security-heading">
                   <h1 title={focusName}>{focusName}</h1>
-                  <p>{focusSymbol ? <><span>{focusSymbol}</span><span aria-hidden="true"> · </span>{focusMarket}</> : "从自选股开始查看行情与研究"}</p>
+                  <p>{focusSymbol ? <><span>{focusSymbol}</span><span aria-hidden="true"> · </span>{focusMarket}</> : "添加自选股以查看行情"}</p>
                 </div>
                 <div className="market-chart-actions">
+                  {focusSymbol ? <Link className="ant-btn ant-btn-default" to={`/replay?symbol=${encodeURIComponent(focusSymbol)}`}>K线复盘</Link> : null}
                   <div className="market-periods" role="group" aria-label="K线周期">
                     {KLINE_INTERVALS.map((opt) => <button key={opt.value} type="button"
                       aria-pressed={klineInterval === opt.value}
@@ -482,20 +480,19 @@ export default function App() {
                     <LazyPanels.StockKlinePanelLazy
                       ref={klineRef} symbol={focusSymbol} embedded hideChrome
                       chartHeight={isCompact ? 380 : 420}
-                      displayName={focusSecurityLabel} range={KLINE_RANGE} interval={klineInterval}
+                      displayName={focusSecurityLabel} range={KLINE_RANGE} interval={klineInterval} highlightDate={asOf}
                     />
                   </PanelSuspense>
                 </section>
-                <Tabs key={user?.id || "guest"} className="market-analysis-tabs" defaultActiveKey="decision"
+                <Tabs key={user?.id || "guest"} className="market-analysis-tabs" defaultActiveKey="current-research"
                   destroyOnHidden={false} items={panels} aria-label="个股研究内容" />
               </> : <div className="market-empty-workspace">
                 <MenuUnfoldOutlined aria-hidden="true" />
-                <h2>从一只股票开始</h2>
-                <p>搜索股票名称或代码，加入自选后查看行情、新闻与研究观点。</p>
+                <h2>添加自选股</h2>
+                <p>搜索名称或代码，加入自选。</p>
                 {isCompact ? <Button type="primary" onClick={() => setMobileWatchlistOpen(true)}>添加自选股</Button> : null}
               </div>}
             </div>
-            <p className="market-footnote">本地研究 · 持续积累</p>
           </Content>
         </div>
       )}

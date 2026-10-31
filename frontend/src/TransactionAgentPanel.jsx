@@ -23,7 +23,7 @@ function scoreStatus(score) {
   return "normal";
 }
 
-export default function TransactionAgentPanel({ symbol, displayName = "", asOf = null }) {
+export default function TransactionAgentPanel({ symbol, displayName = "", asOf = null, headerControls }) {
   const { user } = useAuth();
   const [selectedView, setSelectedView] = useState(null);
   const [savingView, setSavingView] = useState(null);
@@ -49,10 +49,11 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
       variant="borderless"
       className="ex-transaction-agent-card"
       title={
-        <span className="sva-panel-title">市场研判 · 多策略观点</span>
+        <span className="sva-panel-title">多策略观点</span>
       }
       extra={
-        <Space size={8}>
+        <Space size={12} wrap>
+          {headerControls}
           <Button size="small" type="text" icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => query.refetch()}>
             刷新
           </Button>
@@ -66,15 +67,15 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
 
         {strategies.length ? (
           <div className="sva-summary-row">
-            <span>各观点按自身周期解读，评分是规则强度，不能视为胜率。</span>
+            <span>评分表示规则信号强度。</span>
           </div>
         ) : null}
 
-        <Row gutter={[10, 10]}>
+        <Row gutter={[16, 16]}>
           {strategies.map((view) => {
             const meta = directionMeta(view.direction);
             return (
-              <Col xs={24} md={12} xl={8} key={view.strategy_id || view.strategy}>
+              <Col xs={24} lg={12} xxl={8} key={view.strategy_id || view.strategy}>
                 <div
                   className="ex-transaction-agent-view"
                   role="button"
@@ -100,7 +101,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
                     status={scoreStatus(Number(view.score || 0))}
                     style={{ marginTop: 8, marginBottom: 8 }}
                   />
-                  <Paragraph style={{ marginBottom: 8 }}>
+                  <Paragraph style={{ marginBottom: 12 }}>
                     {fmtText(view.viewpoint)}
                   </Paragraph>
                   <div className="ex-transaction-agent-list">
@@ -120,7 +121,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
                       setSelectedView(view);
                     }}
                   >
-                    查看详细分析
+                    查看分析
                   </Button>
                 </div>
               </Col>
@@ -147,7 +148,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
             </Space>
           ) : null
         }
-        footer={<Button type="primary" onClick={() => { pendingSaveView.current = { view: selectedView, evidence: strategyEvidence(selectedView, data) }; setSelectedView(null); }}>保存这条关注判断</Button>}
+        footer={<Button type="primary" onClick={() => { pendingSaveView.current = { view: selectedView, evidence: strategyEvidence(selectedView, data) }; setSelectedView(null); }}>保存为关注判断</Button>}
         width={880}
         onCancel={() => { pendingSaveView.current = null; setSelectedView(null); }}
         afterClose={() => { const view = pendingSaveView.current; pendingSaveView.current = null; if (view) setSavingView(view); }}
@@ -158,23 +159,19 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
             <Paragraph>{fmtText(selectedDetail.headline || selectedView.viewpoint)}</Paragraph>
             <Text type="secondary">{selectedDetail.score_interpretation}</Text>
 
-            <Divider orientation="left">信号核查</Divider>
+            {(selectedDetail.signal_checks || selectedView.reasons || []).length ? <><Divider orientation="left">信号核查</Divider>
             <ul>
               {(selectedDetail.signal_checks || selectedView.reasons || []).map((x, i) => (
                 <li key={`signal-${i}`}>{fmtText(x)}</li>
               ))}
-            </ul>
+            </ul></> : null}
 
-            <Divider orientation="left">策略知识库强化</Divider>
+            {selectedDetail.knowledge_points?.length ? <><Divider orientation="left">策略依据</Divider>
             <ul>
-              {(selectedDetail.knowledge_points || []).length ? (
-                selectedDetail.knowledge_points.map((x, i) => <li key={`kp-${i}`}>{fmtText(x)}</li>)
-              ) : (
-                <li>暂无额外知识要点，当前使用本地规则化评分。</li>
-              )}
-            </ul>
+              {selectedDetail.knowledge_points.map((x, i) => <li key={`kp-${i}`}>{fmtText(x)}</li>)}
+            </ul></> : null}
 
-            <Divider orientation="left">风险与不做条件</Divider>
+            {(selectedDetail.risk_controls || selectedView.risks || []).length || (selectedDetail.do_not_do || selectedView.do_not_do || []).length ? <><Divider orientation="left">风险与约束</Divider>
             <ul>
               {(selectedDetail.risk_controls || selectedView.risks || []).map((x, i) => (
                 <li key={`risk-${i}`}>{fmtText(x)}</li>
@@ -182,15 +179,14 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
               {(selectedDetail.do_not_do || selectedView.do_not_do || []).map((x, i) => (
                 <li key={`no-${i}`}>不做：{fmtText(x)}</li>
               ))}
-            </ul>
+            </ul></> : null}
 
-            <Divider orientation="left">行动计划</Divider>
-            <Paragraph>{fmtText(selectedDetail.action_plan || selectedView.action_suggestion)}</Paragraph>
+            {selectedDetail.action_plan || selectedView.action_suggestion ? <><Divider orientation="left">行动计划</Divider>
+            <Paragraph>{fmtText(selectedDetail.action_plan || selectedView.action_suggestion)}</Paragraph></> : null}
 
-            <Divider orientation="left">参考来源</Divider>
+            {selectedDetail.sources?.length ? <><Divider orientation="left">参考来源</Divider>
             <div className="ex-transaction-agent-source-list">
-              {(selectedDetail.sources || []).length ? (
-                selectedDetail.sources.map((src, i) => (
+              {selectedDetail.sources.map((src, i) => (
                   <div key={`${src.title || "source"}-${i}`} className="ex-transaction-agent-source">
                     {safeUrl(src.url) ? (
                       <a href={safeUrl(src.url)} target="_blank" rel="noreferrer">
@@ -201,18 +197,17 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
                     )}
                     {src.publisher ? <Text type="secondary"> · {src.publisher}</Text> : null}
                   </div>
-                ))
-              ) : (
-                <Text type="secondary">暂无外部来源，使用本地策略规则。</Text>
-              )}
-            </div>
+                ))}
+            </div></> : null}
 
-            <Divider orientation="left">数据限制</Divider>
+            {selectedDetail.data_limitations?.length ? <details>
+            <summary>数据说明</summary>
             <ul>
-              {(selectedDetail.data_limitations || []).map((x, i) => (
+              {selectedDetail.data_limitations.map((x, i) => (
                 <li key={`limit-${i}`}>{x}</li>
               ))}
             </ul>
+            </details> : null}
           </div>
         ) : null}
       </Modal>

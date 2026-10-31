@@ -552,12 +552,11 @@ def _as_news(row: Any, analyses: list[dict] | None = None, symbol: str | None = 
     return item
 
 
-def _stock_items(conn: sqlite3.Connection, symbol: str, *, since_ts: float | None = None) -> list[dict]:
+def _iter_stock_items(conn: sqlite3.Connection, symbol: str, *, since_ts: float | None = None) -> Iterator[dict]:
     rows = conn.execute(_ARTICLE_WITH_REVISION + """WHERE a.duplicate_of IS NULL AND
       (EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(a.match_evidence) THEN a.match_evidence ELSE '{}' END) e WHERE e.key=?)
        OR EXISTS(SELECT 1 FROM article_stock_analysis s WHERE s.article_id=a.id AND s.stock_code=? AND s.relevance_score>=?))""",
-      [symbol, symbol, _threshold()]).fetchall()
-    output = []
+      [symbol, symbol, _threshold()])
     for row in rows:
         if since_ts is not None and (row["published_ts"] is None or row["published_ts"] < since_ts):
             continue
@@ -574,8 +573,11 @@ def _stock_items(conn: sqlite3.Connection, symbol: str, *, since_ts: float | Non
                 # a finished interpretation under the newly applicable rules.
                 item["analysis_status"] = "pending"
                 item["relevance_recheck_required"] = True
-            output.append(item)
-    return output
+            yield item
+
+
+def _stock_items(conn: sqlite3.Connection, symbol: str, *, since_ts: float | None = None) -> list[dict]:
+    return list(_iter_stock_items(conn, symbol, since_ts=since_ts))
 
 
 def list_archive(limit: int = 40, offset: int = 0, symbol: str | None = None,
@@ -593,40 +595,59 @@ def list_archive(limit: int = 40, offset: int = 0, symbol: str | None = None,
     now = time.time()
     if lookback_days is not None:
         since_ts = max(since_ts or 0, now - lookback_days * 86400)
+    start, page_size = max(0, offset), max(1, min(limit, 200))
     with _connect() as conn:
+        conn.execute("PRAGMA temp_store=FILE")
+        conn.execute("PRAGMA temp.cache_size=-2048")
+        conn.execute("BEGIN")
+        # The ordinary latest page can be counted and sliced entirely in SQL.
+        # Older pages and ranking never materialize the complete archive bodies.
+        if not symbol and sort != "importance" and scope == "related":
+            where, args = "a.duplicate_of IS NULL", []
+            if since_ts is not None:
+                where += " AND COALESCE(a.published_ts,0)>=?"
+                args.append(since_ts)
+            if lookback_days is not None:
+                where += " AND a.published_ts IS NOT NULL AND a.published_ts<=?"
+                args.append(now)
+            total = conn.execute("SELECT COUNT(*) FROM articles a WHERE " + where, args).fetchone()[0]
+            rows = conn.execute(_ARTICLE_WITH_REVISION + "WHERE " + where +
+                " ORDER BY COALESCE(a.published_ts,0) DESC,COALESCE(a.saved_at,0) DESC,a.id DESC LIMIT ? OFFSET ?",
+                [*args, page_size, start])
+            return [_as_news(row, _analysis_rows(conn, row["id"])) for row in rows], total
         if symbol:
-            items = _stock_items(conn, symbol, since_ts=since_ts)
+            items = _iter_stock_items(conn, symbol, since_ts=since_ts)
         else:
-            rows = conn.execute(_ARTICLE_WITH_REVISION + "WHERE a.duplicate_of IS NULL").fetchall()
-            items = [_as_news(row, _analysis_rows(conn, row["id"])) for row in rows
-                     if since_ts is None or (row["published_ts"] or 0) >= since_ts]
-        if lookback_days is not None:
-            # Future/undated items cannot substantiate coverage of a dated window.
-            items = [item for item in items if item.get("published_ts") is not None
-                     and since_ts <= item["published_ts"] <= now]
-        if scope == "analysis":
-            items = [item for item in items if item.get("interpretation_qualified", item["analysis_status"] == "analyzed")]
-        elif scope == "pending" and lookback_days is not None:
-            selected = [symbol] if symbol else watchlist_store.load_all_symbols_union()
-            candidates = []
+            rows = conn.execute(_ARTICLE_WITH_REVISION + "WHERE a.duplicate_of IS NULL")
+            items = (_as_news(row, _analysis_rows(conn, row["id"])) for row in rows
+                     if since_ts is None or (row["published_ts"] or 0) >= since_ts)
+        selected = ([symbol] if symbol else watchlist_store.load_all_symbols_union()) if scope == "pending" and lookback_days is not None else []
+        max_days = int(getattr(settings, "effective_news_max_age_days", getattr(settings, "news_max_age_days", 7)))
+        cutoff = now - max_days * 86400 if max_days > 0 else 0
+        total = 0
+        def candidates():
+            nonlocal total
             for item in items:
-                previous = {row["stock_code"]: row for row in item.get("related_stocks", [])}
-                evidence = item.get("match_evidence") or ([] if symbol else {})
-                eligible = [code for code in selected if _pending_eligible(
-                    previous.get(code, {}), evidence if symbol else evidence.get(code, []))]
-                if not eligible:
+                if lookback_days is not None and (item.get("published_ts") is None or not since_ts <= item["published_ts"] <= now):
                     continue
-                if any(previous.get(code, {}).get("status") == "stale" for code in eligible):
-                    item["analysis_status"] = "pending"
-                    item["age_recheck_required"] = True
-                candidates.append(item)
-            items = candidates
-        elif scope == "pending":
-            max_days = int(getattr(settings, "effective_news_max_age_days", getattr(settings, "news_max_age_days", 7)))
-            cutoff = time.time() - max_days * 86400 if max_days > 0 else 0
-            items = [item for item in items if not item.get("interpretation_qualified")
-                     and item["analysis_status"] not in {"analyzed", "irrelevant", "stale"}
-                     and (item.get("published_ts") is None or item["published_ts"] >= cutoff)]
+                if scope == "analysis" and not item.get("interpretation_qualified", item["analysis_status"] == "analyzed"):
+                    continue
+                if scope == "pending" and lookback_days is not None:
+                    previous = {row["stock_code"]: row for row in item.get("related_stocks", [])}
+                    evidence = item.get("match_evidence") or ([] if symbol else {})
+                    eligible = [code for code in selected if _pending_eligible(
+                        previous.get(code, {}), evidence if symbol else evidence.get(code, []))]
+                    if not eligible:
+                        continue
+                    if any(previous.get(code, {}).get("status") == "stale" for code in eligible):
+                        item["analysis_status"] = "pending"
+                        item["age_recheck_required"] = True
+                elif scope == "pending":
+                    if (item.get("interpretation_qualified") or item["analysis_status"] in {"analyzed", "irrelevant", "stale"}
+                        or (item.get("published_ts") is not None and item["published_ts"] < cutoff)):
+                        continue
+                total += 1
+                yield item
         def order(item):
             chronology = (item.get("published_ts") or 0, item.get("saved_at") or 0, item["id"])
             if sort != "importance":
@@ -637,9 +658,24 @@ def list_archive(limit: int = 40, offset: int = 0, symbol: str | None = None,
             analysis = item.get("analysis") or {}
             importance = _score(analysis) * (analysis.get("impact_strength") or 0) if item.get("interpretation_qualified") else 0
             return (importance, attention, *chronology)
-        items.sort(key=order, reverse=True)
-        start = max(0, offset)
-        return items[start:start + max(1, min(limit, 200))], len(items)
+        # Keep only rank keys/flags in a disk-backed temporary table. Deep offsets
+        # cannot retain old article bodies in a Python heap; only the page is read
+        # back with its original stock-specific eligibility and display flags.
+        conn.execute("CREATE TEMP TABLE archive_page_rank (id TEXT PRIMARY KEY, major REAL, attention REAL, published REAL, saved REAL, flags TEXT)")
+        for item in candidates():
+            rank = order(item)
+            rank = (0, 0, *rank) if sort != "importance" else (0, *rank) if scope == "pending" else rank
+            flags = {key: item[key] for key in ("interpretation_qualified", "relevance_recheck_required", "age_recheck_required", "analysis_status") if key in item}
+            conn.execute("INSERT INTO archive_page_rank VALUES(?,?,?,?,?,?)",
+                         [item["id"], *rank[:-1], json.dumps(flags)])
+        ranked = conn.execute("SELECT id,flags FROM archive_page_rank ORDER BY major DESC,attention DESC,published DESC,saved DESC,id DESC LIMIT ? OFFSET ?", [page_size, start])
+        page = []
+        for key in ranked:
+            row = conn.execute(_ARTICLE_WITH_REVISION + "WHERE a.id=?", [key["id"]]).fetchone()
+            item = _as_news(row, _analysis_rows(conn, row["id"], symbol), symbol)
+            item.update(json.loads(key["flags"]))
+            page.append(item)
+        return page, total
 
 
 def list_recent_for_symbol(symbol: str, limit: int = 20) -> list[dict]:
@@ -708,18 +744,30 @@ def summary_for_symbols(symbols: list[str]) -> list[dict]:
     output = []
     with _connect() as conn:
         for symbol in symbols:
-            items = _stock_items(conn, symbol)
-            recent = [item for item in items if (item.get("published_ts") or 0) >= cutoff]
-            interpreted = [item for item in recent if item["interpretation_qualified"]]
-            counts = {mood: sum(item["analysis"].get("sentiment") == mood for item in interpreted) for mood in ("positive", "neutral", "negative")}
+            total = recent_count = 0
+            counts = {mood: 0 for mood in ("positive", "neutral", "negative")}
+            important = latest = None
+            for item in _iter_stock_items(conn, symbol):
+                total += 1
+                recent = (item.get("published_ts") or 0) >= cutoff
+                recent_count += int(recent)
+                if not item["interpretation_qualified"]:
+                    continue
+                if latest is None or (item.get("published_ts") or 0) > (latest.get("published_ts") or 0):
+                    latest = item
+                if recent:
+                    mood = item["analysis"].get("sentiment")
+                    if mood in counts:
+                        counts[mood] += 1
+                    score = lambda entry: _score(entry["analysis"]) * (entry["analysis"].get("impact_strength") or 0)
+                    if important is None or score(item) > score(important):
+                        important = item
             analyzed = sum(counts.values())
             sentiment = "positive" if counts["positive"] > counts["negative"] else "negative" if counts["negative"] > counts["positive"] else "neutral"
             aggregate = {"status": "analyzed", "sentiment": sentiment, "news_count": analyzed, "sample_count": analyzed,
                          "period_days": 7, "method": "按近7天通过关联筛选的新闻解读方向计数汇总，不是独立模型综合分析。",
                          "reasoning": f"近7天已分析{analyzed}条：正面{counts['positive']}条、中性{counts['neutral']}条、负面{counts['negative']}条。"} if analyzed else None
-            important = max(interpreted, key=lambda item: _score(item["analysis"]) * (item["analysis"].get("impact_strength") or 0), default=None)
-            latest = max((item for item in items if item["interpretation_qualified"]), key=lambda item: item.get("published_ts") or 0, default=None)
-            output.append({"symbol": symbol, "total": len(items), "recent_count": len(recent), "period_days": 7,
+            output.append({"symbol": symbol, "total": total, "recent_count": recent_count, "period_days": 7,
                            **counts, "analyzed": analyzed, "aggregate_analysis": aggregate,
                            "important_news": important, "latest_analysis": latest["analysis"] if latest else None})
     return output

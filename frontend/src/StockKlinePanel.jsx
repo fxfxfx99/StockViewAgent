@@ -5,11 +5,10 @@ import { App as AntApp, Button, Card, Spin, Alert } from "antd";
 import { DownOutlined, LineChartOutlined } from "@ant-design/icons";
 import { useThemeMode } from "./ThemeModeProvider.jsx";
 import * as api from "./api";
-import { buildCandleVolumeChartOption, candlePaletteFromStyles } from "./klineChartOption.js";
-import { SUB_INDICATORS } from "./klineIndicators.js";
+import { buildCandleVolumeChartOption, candlePaletteFromStyles, getKlineChartHeight } from "./klineChartOption.js";
+import KlineIndicatorControls, { useKlineIndicatorSettings } from "./KlineIndicatorControls.jsx";
+import { candleFocus, focusCandleOption } from "./stockContextViewModel.js";
 import { qk } from "./hooks/queryKeys.js";
-
-const SUB_IND_KEY = "sva_kline_sub_indicator";
 
 /** 导出当前 bundle 中 K 线为 CSV（逐根 OHLCV） */
 export function downloadKlineCsv(bundle, symbol, range, interval) {
@@ -97,6 +96,7 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
     hideChrome = false,
     range = "1y",
     interval = "1d",
+    highlightDate = null,
   },
   ref
 ) {
@@ -116,24 +116,8 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
     });
     return () => cancelAnimationFrame(frame);
   }, [mode]);
-  const [subIndicator, setSubIndicator] = useState(() => {
-    try {
-      const saved = localStorage.getItem(SUB_IND_KEY);
-      if (saved && SUB_INDICATORS.some((x) => x.id === saved)) return saved;
-    } catch {
-      /* ignore */
-    }
-    return "vol";
-  });
-
-  const onSubIndicatorChange = (id) => {
-    setSubIndicator(id);
-    try {
-      localStorage.setItem(SUB_IND_KEY, id);
-    } catch {
-      /* ignore */
-    }
-  };
+  const { settings: indicatorSettings, setSettings: setIndicatorSettings } = useKlineIndicatorSettings("stock");
+  const resolvedChartHeight = getKlineChartHeight(chartHeight, indicatorSettings);
   const klineSymbol = symbol.trim().toUpperCase();
 
   const klineQuery = useQuery({
@@ -178,14 +162,14 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
   const chartOption = useMemo(() => {
     const candles = bundle?.candles || [];
     if (!candles.length) return null;
-    return buildCandleVolumeChartOption({
+    const option = buildCandleVolumeChartOption({
       candles,
       palette,
       aggregateFromDaily: false,
       viewMode: "1d",
       defaultShowBars: 50,
       showVolume: true,
-      subIndicator,
+      indicatorSettings,
       volumeInLegend: false,
       layout: "main",
       formatDate: (c) => {
@@ -201,7 +185,9 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
       },
       volumeAxisFormatter: volAxisLabel,
     });
-  }, [bundle, interval, subIndicator, palette]);
+    return focusCandleOption(option, candles, highlightDate);
+  }, [bundle, interval, indicatorSettings, palette, highlightDate]);
+  const focus = candleFocus(bundle?.candles, highlightDate);
 
   const m = bundle?.metrics || {};
 
@@ -302,21 +288,17 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
 
         <div className="market-chart-caption">
           <span>{interval === "1wk" ? "周线走势" : interval === "1mo" ? "月线走势" : "日线走势"}</span>
-          <label className="market-indicator-control">
-            <span>副图</span>
-            <select value={subIndicator} aria-label="副图指标" onChange={(e) => onSubIndicatorChange(e.target.value)}>
-              {SUB_INDICATORS.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
-            </select>
-          </label>
         </div>
+        <KlineIndicatorControls settings={indicatorSettings} onChange={setIndicatorSettings} />
+        {highlightDate ? <p className="market-data-asof">日期定位 {highlightDate}：{focus ? `${focus.exact ? "对应行情" : "最近可用行情"} ${focus.date}${interval !== "1d" ? "（当前为聚合周期）" : ""}` : "已加载行情未覆盖该日期"}。</p> : null}
         {chartOption ? (
           <div className="market-canvas" aria-label={`${displayName || klineSymbol} K 线及技术指标`}>
-            <ReactECharts option={chartOption} style={{ height: chartHeight, width: "100%" }} notMerge lazyUpdate autoResize />
+            <ReactECharts option={chartOption} style={{ height: resolvedChartHeight, width: "100%" }} notMerge lazyUpdate autoResize />
           </div>
         ) : <div className="market-chart-empty" style={{ minHeight: chartHeight }} role="status">
           <LineChartOutlined aria-hidden="true" />
           <strong>{loading ? "正在读取行情" : err ? "行情暂不可用" : "暂无行情数据"}</strong>
-          <span>{loading ? "行情就绪后将在这里显示" : err ? "可稍后刷新重试" : "刷新或选择其他股票查看"}</span>
+          {!loading ? <span>{err ? "刷新重试" : "刷新或选择其他股票"}</span> : null}
         </div>}
       </Spin>
 

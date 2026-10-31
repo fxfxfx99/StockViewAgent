@@ -3,19 +3,22 @@
  * 周/月 K 由日线在前端聚合（宏观 Tushare 等仅返回日线时）。
  */
 
-import { buildSubIndicatorSeries } from "./klineIndicators.js";
+import { boll, buildSubIndicatorSeries, sma } from "./klineIndicators.js";
+import { normalizeIndicatorSettings } from "./klineIndicatorSettings.js";
 
-/** @param {number[]} closes */
-export function sma(closes, period) {
-  const n = closes.length;
-  const out = new Array(n).fill(null);
-  if (period <= 0 || n < period) return out;
-  for (let i = period - 1; i < n; i++) {
-    let s = 0;
-    for (let j = 0; j < period; j++) s += closes[i - j];
-    out[i] = s / period;
-  }
-  return out;
+export { sma } from "./klineIndicators.js";
+
+function finite(value) {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+  const result = Number(value);
+  return Number.isFinite(result) ? result : null;
+}
+
+/** A second/third indicator gets its own space, rather than shrinking prices. */
+export function getKlineChartHeight(baseHeight = 520, settings) {
+  const base = Number.isFinite(Number(baseHeight)) ? Math.max(280, Number(baseHeight)) : 520;
+  const count = normalizeIndicatorSettings(settings).subIndicators.length;
+  return base + Math.max(0, count - 1) * 160;
 }
 
 /** 周一 00:00 本地时间戳（秒）用于分桶 */
@@ -61,25 +64,20 @@ export function aggregateCandlesFromDaily(daily, mode) {
     const bars = buckets.get(key).slice().sort((a, b) => a.t - b.t);
     const first = bars[0];
     const last = bars[bars.length - 1];
-    let h = -Infinity;
-    let l = Infinity;
-    let v = 0;
-    let amount = 0;
-    for (const b of bars) {
-      h = Math.max(h, Number(b.h));
-      l = Math.min(l, Number(b.l));
-      v += Number(b.v) || 0;
-      amount += Number(b.amount) || 0;
-    }
+    const validPrices = bars.every((bar) => [bar.o, bar.h, bar.l, bar.c].every((value) => finite(value) != null));
+    const sumKnown = (field) => bars.every((bar) => finite(bar[field]) != null)
+      ? bars.reduce((total, bar) => total + finite(bar[field]), 0) : null;
     return {
       ...last,
       t: last.t,
-      o: Number(first.o),
-      h,
-      l,
-      c: Number(last.c),
-      v,
-      amount,
+      o: validPrices ? finite(first.o) : null,
+      h: validPrices ? Math.max(...bars.map((bar) => finite(bar.h))) : null,
+      l: validPrices ? Math.min(...bars.map((bar) => finite(bar.l))) : null,
+      c: validPrices ? finite(last.c) : null,
+      v: sumKnown("v"),
+      amount: sumKnown("amount"),
+      // Daily turnover percentages do not define a single aggregate denominator.
+      turnover_rate: null,
     };
   });
 }
@@ -114,21 +112,9 @@ export function candlePaletteFromStyles(styles) {
 }
 
 /**
- * @param {object} opts
- * @param {Array<{t:number,o:number,h:number,l:number,c:number,v?:number,amount?:number,turnover_rate?:number}>} opts.candles
- * @param {'1d'|'1wk'|'1mo'} [opts.viewMode='1d'] 仅当 aggregateFromDaily=true 时使用
- * @param {boolean} [opts.aggregateFromDaily=false]
- * @param {number} [opts.defaultShowBars=50]
- * @param {boolean} [opts.showVolume=true] 是否显示副图；mini 图仍可用
- * @param {string} [opts.subIndicator='vol'] 副图指标 id，见 klineIndicators.SUB_INDICATORS
- * @param {boolean} [opts.volumeInLegend=true] 副图系列是否进入顶部图例
- * @param {'main'|'mini'} [opts.layout='main']
- * @param {string[]} [opts.legendExtra]
- * @param {(c: object) => string} [opts.formatDate] 横轴与 tooltip 日期文案
- * @param {(idx: number, c: object) => string} [opts.tooltipDateLine]
- * @param {(c: object) => string[]} [opts.tooltipExtraLines]
- * @param {(v: number) => string} [opts.volumeAxisFormatter]
- * @param {object} [opts.palette] Resolved CSS theme colors for canvas rendering
+ * Main overlays and up to three independently scaled indicator panes.
+ * Explicit indicatorSettings takes precedence over legacy showVolume/subIndicator.
+ * Every series uses the complete supplied prefix, then dataZoom selects its view.
  */
 export function buildCandleVolumeChartOption({
   candles: rawCandles,
@@ -137,6 +123,7 @@ export function buildCandleVolumeChartOption({
   defaultShowBars = 50,
   showVolume = true,
   subIndicator = "vol",
+  indicatorSettings,
   volumeInLegend = true,
   layout = "main",
   legendExtra = [],
@@ -149,228 +136,141 @@ export function buildCandleVolumeChartOption({
   const colors = { ...DEFAULT_CHART_PALETTE, ...palette };
   const candles = aggregateFromDaily ? aggregateCandlesFromDaily(rawCandles || [], viewMode) : rawCandles || [];
   if (!candles.length) return null;
-
-  const defaultFmt = (c) => {
-    const d = new Date(c.t * 1000);
-    return d.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
-  };
+  const preferences = normalizeIndicatorSettings(indicatorSettings ?? {
+    subIndicators: showVolume ? [subIndicator || "vol"] : [],
+  });
+  const { main, params: settings } = preferences;
+  const mini = layout === "mini";
+  const defaultFmt = (c) => new Date(c.t * 1000).toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
   const dates = candles.map((c) => (formatDate ? formatDate(c) : defaultFmt(c)));
-
-  const closes = candles.map((c) => Number(c.c));
-  const ma20 = sma(closes, 20);
-  const ma60 = sma(closes, 60);
-  const ma250 = sma(closes, 250);
-
-  const kData = candles.map((c) => [c.o, c.c, c.l, c.h]);
-
-  const sub = showVolume
-    ? buildSubIndicatorSeries(candles, subIndicator || "vol", { volumeAxisFormatter })
-    : null;
-
-  const { start: dzStart, end: dzEnd } = dataZoomPercentLastN(candles.length, defaultShowBars);
-
-  const legendItems = ["K线", "MA20", "MA60", "MA250"];
-  if (showVolume && volumeInLegend && sub) legendItems.push(...sub.legend);
-  legendItems.push(...legendExtra);
-
-  const miniTopMain = layout === "mini" && showVolume && !volumeInLegend ? 14 : layout === "mini" ? 22 : 32;
-  const miniHMain = layout === "mini" && showVolume && !volumeInLegend ? "46%" : layout === "mini" ? "42%" : "50%";
-  const miniTopVol = layout === "mini" && showVolume && !volumeInLegend ? "66%" : layout === "mini" ? "68%" : "72%";
-  const miniHVol = layout === "mini" && showVolume && !volumeInLegend ? "24%" : layout === "mini" ? "22%" : "18%";
-
-  const gridMain = layout === "mini"
-    ? [
-        { left: 2, right: 2, top: miniTopMain, height: miniHMain },
-        { left: 2, right: 2, top: miniTopVol, height: miniHVol },
-      ]
-    : [
-        { left: 56, right: 48, top: 36, height: "48%" },
-        { left: 56, right: 48, top: "72%", height: "18%" },
-      ];
-
-  const xAxisMain = [
-    {
-      type: "category",
-      data: dates,
-      boundaryGap: true,
-      axisLine: layout === "mini" ? { show: false } : { lineStyle: { color: colors.line } },
-      axisTick: layout === "mini" ? { show: false } : undefined,
-      axisLabel:
-        layout === "mini"
-          ? { show: false }
-          : { color: colors.muted, fontSize: 10 },
-    },
-  ];
-  if (showVolume) {
-    xAxisMain.push({
-      type: "category",
-      data: dates,
-      gridIndex: 1,
-      boundaryGap: true,
-      axisLine: layout === "mini" ? { show: false } : { lineStyle: { color: colors.line } },
-      axisTick: layout === "mini" ? { show: false } : undefined,
-      axisLabel: { show: false },
-    });
+  const closes = candles.map((c) => finite(c.c));
+  const overlays = [];
+  const lineColors = [colors.ma20, colors.ma60, colors.ma250];
+  function overlay(name, data, color, dashed = false) {
+    overlays.push({ name, data, type: "line", showSymbol: false, smooth: false, connectNulls: false,
+      lineStyle: { width: 1.2, color, ...(dashed ? { type: "dashed" } : {}) },
+      itemStyle: { color }, emphasis: { disabled: true } });
   }
-
-  const yAxisMain = [
-    {
-      scale: true,
-      splitLine: { lineStyle: { color: layout === "mini" ? "transparent" : colors.grid } },
-      axisLabel: layout === "mini" ? { show: false } : { color: colors.muted, fontSize: 10 },
-    },
-  ];
-  if (showVolume && sub) {
-    yAxisMain.push({
-      scale: true,
-      gridIndex: 1,
-      splitNumber: 2,
-      name: layout === "mini" ? undefined : undefined,
-      splitLine: { lineStyle: { color: layout === "mini" ? "transparent" : colors.grid } },
-      axisLabel:
-        layout === "mini"
-          ? { show: false }
-          : {
-              color: colors.muted,
-              fontSize: 10,
-              ...(sub.yAxisFormatter ? { formatter: sub.yAxisFormatter } : {}),
-            },
-    });
+  if (main.ma) settings.ma.periods.forEach((period, index) => overlay(`MA${period}`, sma(closes, period), lineColors[index % lineColors.length]));
+  if (main.boll) {
+    const bands = boll(closes, settings.boll.period, settings.boll.multiplier);
+    overlay("BOLL中轨", bands.mid, colors.accent, true);
+    overlay("BOLL上轨", bands.upper, colors.ma250);
+    overlay("BOLL下轨", bands.lower, colors.ma20);
   }
-
-  const dataZoom =
-    showVolume && candles.length > 1
-      ? [
-          { type: "inside", xAxisIndex: [0, 1], start: dzStart, end: dzEnd },
-          {
-            type: "slider",
-            xAxisIndex: [0, 1],
-            start: dzStart,
-            end: dzEnd,
-            height: layout === "mini" ? 14 : 18,
-            bottom: layout === "mini" ? 0 : 6,
-            borderColor: colors.line,
-            fillerColor: colors.selection,
-            handleStyle: { color: colors.accent },
-            moveHandleStyle: { color: colors.accent },
-            dataBackground: { lineStyle: { color: colors.muted }, areaStyle: { color: colors.grid } },
-            selectedDataBackground: { lineStyle: { color: colors.accent }, areaStyle: { color: colors.selection } },
-            textStyle: { color: colors.muted, fontSize: layout === "mini" ? 9 : 11 },
-          },
-        ]
-      : [{ type: "inside", xAxisIndex: [0], start: dzStart, end: dzEnd }];
-
-  const series = [
-    {
-      name: "K线",
-      type: "candlestick",
-      data: kData,
-      itemStyle: {
-        color: colors.up,
-        color0: colors.down,
-        borderColor: colors.up,
-        borderColor0: colors.down,
-      },
+  const subplots = preferences.subIndicators.map((id) => ({ id,
+    ...buildSubIndicatorSeries(candles, id, { volumeAxisFormatter, params: settings }),
+  }));
+  const count = subplots.length;
+  const indices = Array.from({ length: count + 1 }, (_, index) => index);
+  const legendItems = ["K线", ...overlays.map((line) => line.name),
+    ...(volumeInLegend ? subplots.flatMap((sub) => sub.legend) : []), ...legendExtra];
+  const referenceHeight = getKlineChartHeight(mini ? 330 : 520, preferences);
+  const top = mini ? 32 : 44;
+  const bottom = mini ? 32 : 62;
+  const gap = mini ? 24 : 32;
+  const contentHeight = referenceHeight - top - bottom - count * gap;
+  const priceHeight = count ? contentHeight * [1, 0.68, 0.56, 0.48][count] : contentHeight;
+  const subHeight = count ? (contentHeight - priceHeight) / count : 0;
+  const percent = (value) => `${(value / referenceHeight) * 100}%`;
+  const grid = [{ left: mini ? 2 : 60, right: mini ? 2 : 18, top: percent(top), height: percent(priceHeight) }];
+  const titles = [];
+  const paneLabel = (sub) => {
+    if (sub.id === "macd") return `MACD (${settings.macd.fast}, ${settings.macd.slow}, ${settings.macd.signal}) · DIF / DEA`;
+    if (sub.id === "kdj") return `KDJ (${settings.kdj.period}, ${settings.kdj.k}, ${settings.kdj.d}) · K / D / J`;
+    if (sub.id === "rsi") return `RSI (${settings.rsi.periods.join(", ")})`;
+    return sub.yAxisName || sub.id.toUpperCase();
+  };
+  subplots.forEach((sub, index) => {
+    const paneTop = top + priceHeight + gap + index * (subHeight + gap);
+    grid.push({ left: mini ? 2 : 60, right: mini ? 2 : 18, top: percent(paneTop), height: percent(subHeight) });
+    titles.push({ text: paneLabel(sub), left: mini ? 2 : 60, top: percent(paneTop - 23), padding: 0,
+      textStyle: { color: colors.muted, fontSize: mini ? 10 : 11, fontWeight: "normal" } });
+  });
+  const xAxis = indices.map((index) => ({ type: "category", gridIndex: index, data: dates, boundaryGap: true,
+    axisLine: mini ? { show: false } : { lineStyle: { color: colors.line } },
+    axisTick: { show: false }, axisLabel: { show: !mini && index === count, color: colors.muted, fontSize: 11, margin: 8 },
+  }));
+  const yAxis = indices.map((index) => ({
+    scale: !index || !subplots[index - 1].series.some((item) => item.type === "bar"),
+    gridIndex: index, ...(index ? { splitNumber: 2 } : {}),
+    ...(index && subplots[index - 1].id === "rsi" ? { min: 0, max: 100 } : {}),
+    ...(index && subplots[index - 1].id === "kdj" ? {
+      min: (extent) => Math.min(0, extent.min), max: (extent) => Math.max(100, extent.max),
+    } : {}),
+    splitLine: { lineStyle: { color: mini ? "transparent" : colors.grid } },
+    axisLabel: { show: !mini, color: colors.muted, fontSize: 11, margin: 8,
+      ...(index && subplots[index - 1].yAxisFormatter ? { formatter: subplots[index - 1].yAxisFormatter } : {}),
     },
-    {
-      name: "MA20",
-      type: "line",
-      data: ma20,
-      smooth: false,
-      showSymbol: false,
-      lineStyle: { width: 1, color: colors.ma20 },
-      itemStyle: { color: colors.ma20 },
-      emphasis: { disabled: true },
-    },
-    {
-      name: "MA60",
-      type: "line",
-      data: ma60,
-      smooth: false,
-      showSymbol: false,
-      lineStyle: { width: 1, color: colors.ma60 },
-      itemStyle: { color: colors.ma60 },
-      emphasis: { disabled: true },
-    },
-    {
-      name: "MA250",
-      type: "line",
-      data: ma250,
-      smooth: false,
-      showSymbol: false,
-      lineStyle: { width: 1, color: colors.ma250 },
-      itemStyle: { color: colors.ma250 },
-      emphasis: { disabled: true },
-    },
-  ];
-
-  if (showVolume && sub) {
-    let lineIndex = 0;
-    const lineColors = [colors.ma20, colors.ma60, colors.ma250];
+  }));
+  const { start, end } = dataZoomPercentLastN(candles.length, defaultShowBars);
+  const dataZoom = [{ type: "inside", xAxisIndex: indices, start, end }];
+  if (candles.length > 1) dataZoom.push({ type: "slider", xAxisIndex: indices, start, end,
+    height: mini ? 20 : 24, bottom: mini ? 0 : 8,
+    borderColor: colors.line, fillerColor: colors.selection,
+    handleStyle: { color: colors.accent }, moveHandleStyle: { color: colors.accent },
+    dataBackground: { lineStyle: { color: colors.muted }, areaStyle: { color: colors.grid } },
+    selectedDataBackground: { lineStyle: { color: colors.accent }, areaStyle: { color: colors.selection } },
+    textStyle: { color: colors.muted, fontSize: 12, lineHeight: 18 },
+  });
+  const series = [{ name: "K线", type: "candlestick",
+    data: candles.map((c) => [c.o, c.c, c.l, c.h].every((value) => finite(value) != null)
+      ? [c.o, c.c, c.l, c.h].map(finite) : ["-", "-", "-", "-"]),
+    itemStyle: { color: colors.up, color0: colors.down, borderColor: colors.up, borderColor0: colors.down },
+  }, ...overlays];
+  subplots.forEach((sub, panelIndex) => {
+    let colorIndex = 0;
     series.push(...sub.series.map((item) => {
+      const axes = { xAxisIndex: panelIndex + 1, yAxisIndex: panelIndex + 1 };
       if (item.type === "line") {
-        const color = lineColors[lineIndex++ % lineColors.length];
-        return { ...item, lineStyle: { ...item.lineStyle, color }, itemStyle: { ...item.itemStyle, color } };
+        const color = lineColors[colorIndex++ % lineColors.length];
+        return { ...item, ...axes, connectNulls: false, lineStyle: { ...item.lineStyle, color }, itemStyle: { ...item.itemStyle, color } };
       }
-      if (item.type === "bar") {
-        return { ...item, data: item.data.map((point, index) => {
-          if (point == null) return point;
-          const value = typeof point === "object" ? point.value : point;
-          const rises = item.name === "MACD" ? Number(value) >= 0 : Number(candles[index].c) >= Number(candles[index].o);
-          return { ...(typeof point === "object" ? point : {}), value,
-            itemStyle: { ...(point?.itemStyle || {}), color: rises ? colors.up : colors.down } };
-        }) };
-      }
-      return item;
+      if (item.type === "bar") return { ...item, ...axes, itemStyle: { ...item.itemStyle, color: colors.up }, data: item.data.map((point, index) => {
+        if (point == null) return null;
+        const value = typeof point === "object" ? point.value : point;
+        const rises = sub.id === "macd" ? Number(value) >= 0 : Number(candles[index].c) >= Number(candles[index].o);
+        return { ...(typeof point === "object" ? point : {}), value,
+          itemStyle: { ...(point?.itemStyle || {}), color: rises ? colors.up : colors.down } };
+      }) };
+      return { ...item, ...axes };
     }));
-  }
-
-  const tooltipFormatter = (params) => {
-    if (!params?.length) return "";
-    const idx = params[0].dataIndex;
-    const c = candles[idx];
-    if (!c) return "";
-    const header = tooltipDateLine
-      ? tooltipDateLine(idx, c)
-      : `<div style="font-weight:600">${dates[idx]}</div>`;
-    const lines = [`开 ${c.o}　收 ${c.c}　高 ${c.h}　低 ${c.l}`];
-    if (tooltipExtraLines) lines.push(...tooltipExtraLines(c));
-    if (sub?.tooltipLines) lines.push(...sub.tooltipLines(idx, c));
-    for (const p of params) {
-      if (p.seriesType === "line" && p.seriesName?.startsWith("MA") && p.value != null && p.value !== "") {
-        lines.push(`${p.seriesName}: ${Number(p.value).toFixed(3)}`);
-      }
+  });
+  const tooltipFormatter = (points) => {
+    if (!points?.length) return "";
+    const index = points[0].dataIndex;
+    const candle = candles[index];
+    if (!candle) return "";
+    const header = tooltipDateLine ? tooltipDateLine(index, candle) : `<div style="font-weight:600">${dates[index]}</div>`;
+    const lines = [`开 ${finite(candle.o) ?? "—"}　收 ${finite(candle.c) ?? "—"}　高 ${finite(candle.h) ?? "—"}　低 ${finite(candle.l) ?? "—"}`];
+    if (tooltipExtraLines) lines.push(...tooltipExtraLines(candle));
+    for (const item of overlays) {
+      const value = item.data[index];
+      lines.push(`${item.name}: ${value == null ? "—" : value.toFixed(3)}`);
+    }
+    for (const sub of subplots) {
+      const values = sub.tooltipLines?.(index, candle) || [];
+      lines.push(...(values.length ? values : [`${sub.yAxisName}: —（数据不足）`]));
     }
     return [header, ...lines].join("<br/>");
   };
-
   return {
     backgroundColor: "transparent",
-    textStyle: { color: colors.text, fontFamily: "-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif" },
+    textStyle: { color: colors.text, fontSize: 12, lineHeight: 18, fontFamily: "-apple-system, BlinkMacSystemFont, PingFang SC, sans-serif" },
     animation: false,
-    legend: {
-      data: legendItems,
-      top: layout === "mini" ? 0 : 2,
-      textStyle: { color: colors.muted, fontSize: layout === "mini" ? 9 : 11 },
-      itemWidth: 14,
-      itemHeight: layout === "mini" ? 8 : 10,
-      ...(layout === "mini" ? { itemGap: 5, left: 0, right: 0 } : {}),
+    title: titles,
+    legend: { data: legendItems, top: mini ? 0 : 2, type: "scroll", left: 0, right: 0,
+      textStyle: { color: colors.muted, fontSize: 12, lineHeight: 18 }, itemWidth: 16, itemHeight: 10, itemGap: mini ? 8 : 16,
+      pageIconSize: 16, pageButtonItemGap: 8, pageButtonGap: 12, pageIconColor: colors.muted,
+      pageIconInactiveColor: colors.line, pageTextStyle: { color: colors.muted, fontSize: 12, lineHeight: 18 },
     },
-    tooltip: {
-      trigger: "axis",
-      backgroundColor: colors.surface,
-      borderColor: colors.line,
-      textStyle: { color: colors.text, fontSize: 12 },
-      axisPointer: { type: "cross", lineStyle: { color: colors.muted },
-        crossStyle: { color: colors.muted }, label: { backgroundColor: colors.surface, color: colors.text } },
-      confine: true,
-      formatter: tooltipFormatter,
+    tooltip: { trigger: "axis", backgroundColor: colors.surface, borderColor: colors.line,
+      padding: [10, 12], textStyle: { color: colors.text, fontSize: 12, lineHeight: 20 },
+      axisPointer: { type: "cross", lineStyle: { color: colors.muted }, crossStyle: { color: colors.muted },
+        label: { backgroundColor: colors.surface, color: colors.text, fontSize: 12, padding: [4, 8] } },
+      confine: true, formatter: tooltipFormatter,
     },
-    axisPointer: { link: [{ xAxisIndex: showVolume ? [0, 1] : [0] }] },
-    grid: showVolume ? gridMain : [gridMain[0]],
-    xAxis: xAxisMain,
-    yAxis: yAxisMain,
-    dataZoom,
-    series,
+    axisPointer: { link: [{ xAxisIndex: indices }] },
+    grid, xAxis, yAxis, dataZoom, series,
   };
 }

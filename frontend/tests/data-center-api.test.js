@@ -14,7 +14,7 @@ axios.defaults.adapter = originalAdapter;
 test("data center overview and inventory read through the admin endpoint with abortable filters", async () => {
   const signal = new AbortController().signal;
   await api.getLocalDataOverview({ signal });
-  assert.equal(captured.url, "/data-center/overview");
+  assert.equal(captured.url, "/data-center/inventory/summary");
   assert.equal(captured.signal, signal);
   const params = { category: "market", lifecycle: "protected", offset: 20, limit: 20, source: "腾讯" };
   await api.getLocalDataFiles(params, { signal });
@@ -86,3 +86,5 @@ test("collected public records expose source and query filters without reading a
   assert.deepEqual(captured.params, params);
   assert.equal(captured.signal, signal);
 });
+
+test("collector status is a lightweight cancellable GET, separate from inventory", async () => { const signal=new AbortController().signal; await api.getCollectionStatus({signal}); assert.equal(captured.url,"/data-center/collection/status"); assert.equal(captured.method,"get"); assert.equal(captured.signal,signal); });

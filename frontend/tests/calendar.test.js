@@ -78,7 +78,7 @@ test("stale successful sources require an update while failures always take prio
 test("elapsed precise schedules require verification without claiming release or creating actual values", () => {
   const now = "2026-10-24T12:00:00Z";
   const event = { id: "past", status: "scheduled", scheduled_at: "2026-10-24T11:59:00Z", all_day: false, actual: null };
-  assert.deepEqual(eventStatusInfo(event, now), { label: "日程已过·结果待核验", color: "orange" });
+  assert.deepEqual(eventStatusInfo(event, now), { label: "已到期·待核验", color: "orange" });
   assert.equal(eventStatusInfo({ ...event, scheduled_at: "2026-10-24T12:01:00Z" }, now).label, "待公布");
   assert.equal(eventStatusInfo({ ...event, status: "released" }, now).label, "已公布");
   assert.equal(eventStatusInfo({ ...event, status: "cancelled" }, now).label, "已取消");
@@ -92,7 +92,7 @@ test("date-only schedules wait until the source-local date ends, regardless of U
   const event = { status: "scheduled", all_day: true, scheduled_date: "2026-10-24", scheduled_at: "2026-10-24T04:00:00Z", timezone: "America/New_York" };
   // Already Oct 25 in UTC and Shanghai, but still Oct 24 in New York.
   assert.equal(eventStatusInfo(event, "2026-10-25T03:59:00Z").label, "待公布");
-  assert.equal(eventStatusInfo(event, "2026-10-25T04:00:00Z").label, "日程已过·结果待核验");
-  assert.equal(eventStatusInfo({ ...event, timezone: "Asia/Tokyo" }, "2026-10-24T15:00:00Z").label, "日程已过·结果待核验");
+  assert.equal(eventStatusInfo(event, "2026-10-25T04:00:00Z").label, "已到期·待核验");
+  assert.equal(eventStatusInfo({ ...event, timezone: "Asia/Tokyo" }, "2026-10-24T15:00:00Z").label, "已到期·待核验");
   assert.equal(eventStatusInfo({ ...event, timezone: "Invalid/Zone" }, "2026-10-26T00:00:00Z").label, "待公布");
 });

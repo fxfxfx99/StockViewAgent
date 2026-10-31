@@ -294,7 +294,7 @@ def get_data_center(_: Annotated[UserRecord, Depends(get_current_user)]):
 
 
 @router.post("/data-center/refresh")
-def refresh_data_center(_: Annotated[UserRecord, Depends(require_admin)]):
+async def refresh_data_center(_: Annotated[UserRecord, Depends(require_admin)]):
     from app.services import startup_data_check
     return startup_data_check.schedule_background_refresh()
 

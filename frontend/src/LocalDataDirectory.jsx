@@ -31,19 +31,19 @@ export default function LocalDataDirectory({ userId, active }) {
   const view = localDataSummary(query.data);
   return <section className="sva-admin-section sva-local-data" aria-label="本地数据目录">
     <div className="sva-admin-section__head"><Text strong>本地数据目录</Text><Button size="small" icon={<ReloadOutlined />} loading={refresh.isPending} disabled={query.isPending || !active} onClick={() => refresh.mutate()}>刷新索引</Button></div>
-    {query.isError ? <Alert type="warning" showIcon message="目录信息暂时无法读取" description={query.data ? "下方保留上次读取的统计。" : undefined} action={<Button size="small" loading={query.isFetching} onClick={() => void query.refetch()}>重试</Button>} /> : null}
-    {query.isPending ? <Paragraph className="sva-local-data__caption"><Spin size="small" /> 正在读取目录索引…</Paragraph> : <>
-      <Text className="sva-local-data__path" copyable={view.path ? { text: view.path } : false}>{view.path || "实际目录暂未提供"}</Text>
+    {query.isError ? <Alert type="warning" showIcon message="目录读取失败" description={query.data ? "显示上次统计。" : undefined} action={<Button size="small" loading={query.isFetching} onClick={() => void query.refetch()}>重试</Button>} /> : null}
+    {query.isPending ? <Paragraph className="sva-local-data__caption"><Spin size="small" /> 读取索引…</Paragraph> : <>
+      <Text className="sva-local-data__path" copyable={view.path ? { text: view.path } : false}>{view.path || "目录未提供"}</Text>
       <div className="sva-local-data__totals"><span>总大小 <strong>{formatDataSize(view.size)}</strong></span><span><strong>{formatDataFiles(view.files)}</strong></span></div>
       {view.categories.length ? <dl className="sva-local-data__categories" aria-label="核心资产分类">{view.categories.map((category) => <div key={category.id}><dt>{category.label}</dt><dd>{formatDataFiles(category.files)} · {formatDataSize(category.size_bytes)}{category.retentionLabel ? ` · ${category.retentionLabel}` : ""}</dd></div>)}</dl> : null}
-      <Paragraph className="sva-local-data__caption">{view.indexPath ? <>索引：<Text code>{view.indexPath}</Text>。 </> : null}刷新索引会重新扫描已保存的文件。</Paragraph>
-      {view.indexGuide ? <Paragraph className="sva-local-data__caption">目录说明保存在 <Text code>{view.indexGuide}</Text>，随数据文件夹一同搬迁。</Paragraph> : null}
+      {view.indexPath ? <Paragraph className="sva-local-data__caption">索引：<Text code>{view.indexPath}</Text></Paragraph> : null}
+      {view.indexGuide ? <Paragraph className="sva-local-data__caption">目录说明：<Text code>{view.indexGuide}</Text></Paragraph> : null}
       {view.indexTime ? <Paragraph className="sva-local-data__caption">索引更新于 {view.indexTime}</Paragraph> : null}
-      {view.commands ? <Collapse size="small" items={[{ key: "migration", label: "搬迁到另一目录或电脑", children: <>
-        <Paragraph className="sva-local-data__caption">先停止 API、研究 worker 和其它写入进程，核对并替换命令中的目标路径，再在项目根目录执行。</Paragraph>
+      {view.commands ? <Collapse size="small" items={[{ key: "migration", label: "迁移数据", children: <>
+        {!view.notes.length ? <Paragraph className="sva-local-data__caption">先停止 API 和研究任务等写入进程，再替换目标路径，在项目根目录执行。</Paragraph> : null}
         {view.notes.map((note, index) => <Paragraph className="sva-local-data__caption" key={index}>{note}</Paragraph>)}
         <Paragraph className="sva-local-data__migration" copyable={{ text: view.commands, tooltips: ["复制离线迁移步骤", "已复制"] }}>{view.commands}</Paragraph>
-      </> }]} /> : <Paragraph className="sva-local-data__caption">搬迁前请停止所有写入进程，保留整个数据目录；迁移命令暂未提供。</Paragraph>}
+      </> }]} /> : <Paragraph className="sva-local-data__caption">未提供迁移命令。迁移前请停止写入进程，保留完整数据目录。</Paragraph>}
     </>}
   </section>;
 }

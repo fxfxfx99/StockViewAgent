@@ -109,7 +109,7 @@ print(json.dumps(store.enqueue("parallel_process_source", {"scheduled": False}))
         assert len({result["id"] for result in results}) == 1
         with store.connection() as conn:
             assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
             assert conn.execute("SELECT COUNT(*) FROM dc_jobs").fetchone()[0] == 1
     finally:
         gate.touch()
@@ -144,7 +144,7 @@ def test_existing_v0_schema_is_migrated_without_losing_data(tmp_path):
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
     assert store.get_state("legacy") == {"kept": True}
     with store.connection() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
@@ -166,7 +166,7 @@ def test_replaced_database_is_reinitialized_without_process_global_cache(tmp_pat
     path.rename(tmp_path / "old.sqlite3")
     assert store.get_state("retained") is None
     with store.connection() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
     with sqlite3.connect(tmp_path / "old.sqlite3") as conn:
         assert json.loads(conn.execute("SELECT payload FROM dc_settings WHERE key='retained'").fetchone()[0]) == 42
 

@@ -77,10 +77,10 @@ export function useWatchlistServerState(userId) {
           qc.setQueryData(qk.watchlistProfiles(watchlistProfileKey(saved), userId), d.profiles || {});
           if (Object.keys(d.errors || {}).length) {
             message.warning(
-              "部分公司资料未加载，可点「刷新公司资料」重试"
+              "部分公司资料加载失败，可在「公司资料」中刷新"
             );
           } else {
-            message.success(`已自动拉取 ${added.length} 个新标的的公司资料`);
+            message.success(`已更新 ${added.length} 只股票的公司资料`);
           }
         } catch {
           try {
@@ -89,7 +89,7 @@ export function useWatchlistServerState(userId) {
           } catch {
             // 保留已加载资料，下一次刷新可重试。
           }
-          message.warning("新标的资料拉取失败，请稍后点「刷新公司资料」重试");
+          message.warning("公司资料加载失败，可在「公司资料」中刷新");
         } finally {
           setProfilesRefreshing?.(false);
         }

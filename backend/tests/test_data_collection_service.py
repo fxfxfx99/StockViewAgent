@@ -21,6 +21,8 @@ NOW = 1792800000.0
 
 @pytest.fixture(autouse=True)
 def service_runtime(monkeypatch):
+    monkeypatch.setattr(settings, "enable_data_collection", True)
+    service.update_config({"enabled": False})
     monkeypatch.setattr(service.time, "time", lambda: NOW)
     monkeypatch.setattr(service.shutil, "disk_usage", lambda root: SimpleNamespace(free=20 * 1024 ** 3))
     monkeypatch.setattr(runtime_telemetry, "record_collection", lambda *args, **kwargs: None)
@@ -37,7 +39,7 @@ def test_config_partial_merge_and_rag_switch():
     assert service.default_config()["rag_enabled"] is True
     value = service.update_config({"rag_enabled": False, "symbols": ["600000.ss", "600000.SS"], "sources": {"public_kline": {"interval_minutes": 720}}})
     assert value["rag_enabled"] is False and value["symbols"] == ["600000.SS"]
-    assert value["sources"]["public_kline"] == {"enabled": True, "interval_minutes": 720}
+    assert value["sources"]["public_kline"] == {"enabled": True, "interval_minutes": 720, "schedule_mode": "daily", "daily_at": "17:30"}
     assert service.update_config({"enabled": False})["rag_enabled"] is False
 
 
@@ -115,11 +117,15 @@ def test_disabled_automatic_queue_is_cancelled_without_spending_budget(monkeypat
 
 
 def test_disabled_source_cancels_only_its_automatic_job(monkeypatch):
-    monkeypatch.setattr(settings, "enable_scheduler", True)
+    monkeypatch.setattr(settings, "enable_data_collection", True)
+    service.update_config({"enabled": True, "symbols": ["600000.SS"]})
     service.update_config({"sources": {row["id"]: {"enabled": row["id"] == "public_company"} for row in service.catalog()}})
     store.enqueue("public_kline", {"scheduled": True})
     async def collect(sid):
         assert sid == "public_company"
+        job = service._current_job.get()
+        for symbol in store.pending_job_symbols(job["id"]):
+            store.checkpoint_symbol(job["id"], symbol)
         return {"status": "success"}
     monkeypatch.setattr(service, "collect_source", collect)
     asyncio.run(service.run_cycle())

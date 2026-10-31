@@ -12,10 +12,10 @@ axios.defaults.adapter = async (config) => {
 const api = await import("../src/api.js");
 axios.defaults.adapter = originalAdapter;
 
-test("news synchronization allows slow providers to finish within ten minutes", async () => {
+test("news synchronization queues work with a short submission timeout", async () => {
   assert.deepEqual(await api.syncArchiveFeeds(["600519.SS"]), { ok: true });
   assert.equal(captured.url, "/news/sync-archive-feeds");
-  assert.equal(captured.timeout, 600_000);
+  assert.equal(captured.timeout, 15_000);
   assert.deepEqual(JSON.parse(captured.data), { symbols: ["600519.SS"], lookback_days: 30 });
 });
 
@@ -42,4 +42,19 @@ test("company polling reads server cache and manual refresh explicitly requests 
   assert.deepEqual(captured.params, { symbol: "600519.SS" });
   await api.getXueqiuCompany("600519.SS", { force: true });
   assert.deepEqual(captured.params, { symbol: "600519.SS", force: true });
+});
+
+test("overseas feed polling preserves search pagination and cancellation without triggering collection", async () => {
+  const signal = new AbortController().signal;
+  const params = { source: "reuters", query: "inflation", offset: 50, limit: 50 };
+  await api.getOverseasNews(params, { signal });
+  assert.equal(captured.method, "get");
+  assert.equal(captured.url, "/news/overseas");
+  assert.deepEqual(captured.params, params);
+  assert.equal(captured.signal, signal);
+  assert.equal(captured.timeout, 15_000);
+  await api.getOverseasNewsStatus({ signal });
+  assert.equal(captured.method, "get");
+  assert.equal(captured.url, "/news/overseas/status");
+  assert.equal(captured.signal, signal);
 });

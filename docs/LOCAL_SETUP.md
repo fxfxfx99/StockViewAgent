@@ -34,7 +34,9 @@ cd StockViewAgent
 
 浏览器未自动打开时访问 <http://127.0.0.1:5175/>。按 `Ctrl+C` 停止本次所有服务，收尾超时后只清理本次进程组；研究队列、预算和数据保留。监督器不是操作系统开机服务：关闭后或电脑重启后，需再次执行 `./start.sh`。Docker 部署可使用其 `restart: unless-stopped` 策略，仍依赖 Docker 服务已启动。
 
-新账户首次初始化时准备 5 只示例自选；已有自选列表，包括主动清空的列表，保持不变。**设置 → 运行日志** 显示“待配置 / 正在准备 / 运行中 / 需关注”，详细任务在 <http://127.0.0.1:5175/research>。默认每日研究预算为 30 次模型请求、15 万总 token，每周最多 60 个候选尝试；研究实验室可暂停候选研究、关闭账户调度或调整预算。自动采集行情不保证具备严格回测证据，可信导入及模拟晋升流程见 [RESEARCH_LAB.md](RESEARCH_LAB.md)。
+新账户首次初始化时准备 5 只示例自选；已有自选列表，包括主动清空的列表，保持不变。**设置 → 运行日志** 显示“待配置 / 正在准备 / 运行中 / 需关注”，量化详细任务在 **工具 → 量化实验室**（<http://127.0.0.1:5175/lab>）。默认每日量化研究预算为 30 次模型请求、15 万总 token，每周最多 60 个候选尝试；研究实验室可暂停候选研究、关闭账户调度或调整预算。自动采集行情不保证具备严格回测证据，可信导入及模拟晋升流程见 [RESEARCH_LAB.md](RESEARCH_LAB.md)。
+
+主入口是关注个股（`/`）、研究（`/research`）和监控（`/monitor`）。新研究档案与量化实验室分别保存，默认每天12次独立模型额度；公司／股票列表／主题研究按用户明确提交才调用，生成报告后还需明确采用。新研究配置模型即可使用，监控另需验证连接。完整步骤见 [研究工作台](INVESTMENT_WORKSPACE.md)。
 
 通过页面右上角的 **设置 → 运行日志** 查看调用量、Token、采集量和最近记录，可切换“今日 / 近 7 天 / 累计”。它统计实际模型请求和采集量，区别于研究预算预留；从功能启用后开始记录，不回填旧用量。Token 未知、共享采集及获取量与新增量的口径见 [运行日志](RESEARCH_LAB.md#运行日志)。
 
@@ -50,7 +52,7 @@ cd StockViewAgent
 
 配置写入本机数据目录，默认 `backend/data/`（已 gitignore），**不要**把 Key 贴进 Issue 或提交到 Git。
 
-新闻「补充分析」依赖大模型；Key 或模型名错误时卡片会提示 HTTP 4xx，回到配置台核对 Base 与 Model。
+新闻「补充解读」依赖大模型；Key 或模型名错误时卡片会提示 HTTP 4xx，回到配置台核对 Base 与 Model。
 
 ## 分步命令
 
@@ -100,8 +102,13 @@ API 文档：<http://127.0.0.1:8001/docs>
 | `KLINESHARE_API_KEY` | 行情（也可只在配置台填写） |
 | `TUSHARE_TOKEN` | 行情 / 宏观兜底 |
 | `ENABLE_SCHEDULER` | 本地默认可开；多副本部署只让一个实例为 `true` |
-| `ENABLE_DATA_COLLECTION` | 默认 `true`，在 API 内运行中央公共数据采集队列；自动排队另受 `ENABLE_SCHEDULER` 和数据中心页面开关控制 |
+| `ENABLE_DATA_COLLECTION` | 默认 `true`，在 API 内运行中央公共数据采集队列；独立于 `ENABLE_SCHEDULER`，自动排队由数据中心页面开关控制 |
 | `ENABLE_RESEARCH_WORKER` | 默认 `true`，控制独立研究 worker 的调度和执行；与 `ENABLE_SCHEDULER` 分开 |
+| `ENABLE_INVESTMENT_RESEARCH` | 默认 `true`，在API内处理手动提交的私人研究及PDF解析，不自动开启监控或量化候选研究 |
+| `INVESTMENT_RESEARCH_DAILY_CALL_LIMIT` | 每账户北京时间每日私人研究模型请求上限，默认12，范围1–100；独立于监控、财报与量化实验室 |
+| `ENABLE_MONITORING` | 默认 `true`，运行观察与复盘 worker；仅处理用户明确创建并启用的计划，须先验证账户模型 |
+| `ENABLE_EARNINGS` | 默认 `true`，处理新闻区用户手动提交的财报查找、下载解析与解读任务 |
+| `EARNINGS_DAILY_CALL_LIMIT` | 每账户每日财报模型请求上限，默认 12，范围 1–100；独立于监控与研究额度 |
 | `STOCKVIEW_DATA_DIR` | 数据根目录，可写入 `backend/.env` 或通过 shell `export` 指定；相对路径以 `backend/` 为基准，修改后重启全部服务 |
 | `SVA_OPEN_BROWSER` | 启动器环境变量，设为 `false` 可禁止自动打开浏览器，与 `--no-browser` 等效 |
 | `SVA_DEV_RELOAD` | 启动器环境变量，设为 `true` 开启后端重载，与 `--reload` 等效 |
@@ -114,7 +121,25 @@ API 文档：<http://127.0.0.1:8001/docs>
 
 管理员访问 `/data` 可浏览分类文件、来源状态和任务队列，调整自动采集、股票轮询、每日额度、磁盘下限与公共资料 RAG。默认开启中央采集，每天最多启动 120 个逻辑任务，每个股票类任务最多 10 个标的，剩余空间低于 1 GiB 时暂停领取任务；一个逻辑任务可能请求多项上游数据。采集本身不调用模型。
 
-`ENABLE_DATA_COLLECTION=true`（默认）在 API 内启动中央采集 worker；`ENABLE_SCHEDULER` 控制自动排队。页面关闭自动采集后，手动任务仍可处理；设 `ENABLE_DATA_COLLECTION=false` 并重启会停止中央 worker，日历在 `ENABLE_SCHEDULER=true` 时回退独立监控。缓存自动回收另有开关，默认关闭，回收区仍占用磁盘。完整来源、开关含义、PIT 限制与清理流程见 [数据中心说明](DATA_CENTER.md)。
+`ENABLE_DATA_COLLECTION=true`（默认）在 API 内启动中央采集 worker；它独立于 `ENABLE_SCHEDULER`，Docker 默认关闭旧调度时也能自动采集。默认单并发、可调 1–3，每次轮询最多八次任务尝试；失败按完成时间退避。数据中心可设置每日北京时间计划，股票池分批处理并保存进度；当前 API 进程 RSS 默认达到 768 MiB 时暂缓新任务，回落后恢复，这不是硬内存上限。页面刷新只读取已保存结果，后台计划在独立设置中保存。空股票列表仍采集五个大盘指数、公共新闻、政策与宏观数据、经济日历，依赖股票的任务暂不自动排队。
+
+页面关闭自动采集后，手动任务仍可处理；设 `ENABLE_DATA_COLLECTION=false` 并重启会停止中央 worker，日历在 `ENABLE_SCHEDULER=true` 时回退独立监控。缓存自动回收另有开关，默认关闭，回收区仍占用磁盘。完整来源、开关含义、PIT 限制与清理流程见 [数据中心说明](DATA_CENTER.md)。
+
+### 市场研判与宏观行情
+
+访问 `/macro` 使用整合后的大盘、宏观、资金与 K 线解读。五个 A 股主要指数无需 Key；黄金、离岸人民币、布伦特和申万行业需当前账户可用的 Tushare Token 与相应权限。K 线解读、问答使用账户模型，只有点击生成或发送问题时才调用。共享参考资料由管理员管理。功能清单及缓存规则见 [市场研判说明](MARKET_WORKSPACE.md)。
+
+### 观察、监控与复盘
+
+进入 `/monitor`，在 **配置观察模型** 中保存 API Key、接口与模型，然后点击 **验证已保存连接**。验证是一次计入额度的小请求；修改配置后需重新验证。此入口不额外提交研究任务；模型凭据与账户其它功能共用，已启用的自动研究会继续按自己的设置和额度使用更新后的凭据。已有配置也需完成首次观察连接验证。
+
+验证通过后创建个股、股票列表、指数或主题计划，填写目标、观察／失效条件、来源、频率与复盘日期。可选新闻、行情、技术指标、策略观点、公司公告、论坛讨论六类来源，默认新闻与行情；观点类材料不能单独证明条件成立。默认每 6 小时检查、30 天后复盘，每账户每天最多 12 次模型请求，可在页面调整。后台读取已归档资料，没变化则复用报告；无需保持页面打开，但 API 服务须持续运行。到期会提醒并在下一次检查时生成一次 AI 复盘，人工复盘另行保存。提醒已读和处理决定分开，处理时保存理由和来源。
+
+暂停账户或单个计划会停止新任务，已经发送的请求可能仍完成并保留历史。暂停账户后仍可显式验证新凭据。`ENABLE_MONITORING=false` 并重启会停止执行，已有报告仍可阅读。额度、数据覆盖、失败恢复和接口见 [观察与复盘说明](OBSERVATION_MONITORING.md)。
+
+### 私人研究与材料
+
+进入 `/research` 建立档案、保存问题与个人判断、添加笔记或上传TXT／Markdown／PDF。材料与历史按账户保存，PDF无OCR，解析不调用模型。配置账户模型后可明确生成一次研究；同输入可复用结果，未发送任务可取消，已发送任务不自动重复计费重试。关闭页面后API继续处理已提交任务；`ENABLE_INVESTMENT_RESEARCH=false` 并重启停止执行，但仍可读取和维护文字档案。研究报告需明确采用才成为当前研究，下一步观察仅预填监控草稿；监控证据导回研究不会自动调用模型。
 
 ## 本地数据目录与搬迁
 
@@ -124,6 +149,9 @@ API 文档：<http://127.0.0.1:8001/docs>
 |---|---|
 | `research.sqlite3`、`research/`、其它业务数据库 | 策略、实验、队列、模拟账户、运行用量、新闻及财务修订 |
 | `tracking.sqlite3` | 关注判断、历史修订、冻结证据、人工复盘、变化游标与阅读反馈 |
+| `monitoring.sqlite3` | 账户观察计划、版本、模型报告、人工复盘、站内提醒、任务及每日请求计数 |
+| `investment_research.sqlite3`、`investment_research/` | 账户私人研究档案、问题、材料原PDF、逐页文字、报告、采用记录、任务与独立额度 |
+| `earnings.sqlite3`、`earnings/` | 公告与财报版本、原始 PDF、逐页文本、个人解读、任务及请求计数 |
 | `data_center.sqlite3`、`datasets/` | 采集任务、预算、来源状态、公开数据不可变批次与检索修订 |
 | `issuer_uploads/`、`kline_learning/` | 上传原件、资料清单、提示词与资料索引 |
 | `imports/company_fundamentals/` | 财务、管理层讨论和公司基本信息 CSV 原件 |
@@ -193,7 +221,7 @@ cp backend/.env.example backend/.env
 docker compose up -d --build
 ```
 
-默认入口 <http://127.0.0.1:8080/>，研究实验室为 `/research`。Compose 启动独立 `research-worker` 服务，与 API 共用 `stockviewagent_data` 数据卷（实际 Docker 卷名通常有项目名前缀）。可用 `docker compose logs -f research-worker` 检查任务运行情况。
+默认入口 <http://127.0.0.1:8080/>，私人研究为 `/research`，量化研究实验室为 `/lab`。Compose 启动独立量化 `research-worker` 服务，与 API 共用 `stockviewagent_data` 数据卷（实际 Docker 卷名通常有项目名前缀）。可用 `docker compose logs -f research-worker` 检查量化任务运行情况；私人研究与监控 worker 在 API 进程内运行，各自受独立环境变量控制。
 
 研究记录同时依赖 SQLite 与不可变 JSON/Parquet，备份需保留整套数据目录或数据卷；管理页的 JSON 版本备份不能替代完整备份。步骤见 [研究数据备份与恢复](RESEARCH_LAB.md#备份与恢复)。
 
@@ -230,7 +258,7 @@ docker compose up -d --build
 | 浏览器未自动打开 | 手动访问输出地址，或检查是否设置了 `--no-browser` / `SVA_OPEN_BROWSER=false` |
 | 配置已保存但自动运行“需关注” | 查看设置中的运行日志及研究实验室；worker 离线、列表已清空或任务失败都需按实际原因处理，付费行情 Key 不是必填项 |
 | 局域网/部署域名请求返回 403「不允许的浏览器来源 / 请求主机」 | 将浏览器实际协议、主机与端口加入 `CORS_ALLOWED_ORIGINS`；自定义反代保留该 Host，重启后端 |
-| 新闻补充分析失败 / LLM HTTP 404 | 配置台核对 API Base、模型名与 Key 权限 |
+| 新闻补充解读失败 / LLM HTTP 404 | 配置台核对 API Base、模型名与 Key 权限 |
 | 「更新新闻」很久或超时 | 多源抓取可能超过 3 分钟；可稍后刷新「待解读」 |
 | 首次启动很慢 | 启动时会检查并更新数据库结构，较大的 `news.db` 可能需要更长时间 |
 

@@ -30,11 +30,16 @@ _GUIDE = """# StockViewAgent 本地数据目录
 | `research.sqlite3`、`research/` | 任务、策略版本、实验、数据清单、不可变行情批次、前向模拟、运行用量 | 长期保留，勿单独删改 |
 | `strategy_knowledge.db`、`decision_signals.db` | 正反研究证据和信号评价 | 长期保留 |
 | `tracking.sqlite3` | 个人关注判断、不可覆盖的修改与复盘历史、证据快照、变化和阅读状态 | 长期保留，随目录备份与搬迁 |
+| `monitoring.sqlite3` | 用户观察计划、模型验证状态、调用预算、任务、证据报告、站内提醒和人工复盘 | 长期保留，随目录备份与搬迁 |
+| `earnings.sqlite3`、`earnings/` | 正式财报版本、原始PDF、逐页文本、个人解读、任务和调用记录 | 长期保留，随目录备份与搬迁 |
+| `investment_research.sqlite3`、`investment_research/` | 个人研究档案、问题、材料、历史报告、明确采用记录和模型任务 | 长期保留，随目录备份与搬迁 |
 | `economic_events.sqlite3` | 官方经济日历、不可变事件修订、全文检索索引与各账户 Agent 检索配置 | 长期保留 |
 | `data_center.sqlite3`、`datasets/` | 公共数据采集配置、队列、预算、来源状态、不可变内容批次与检索修订 | 长期保留，不作为普通缓存清理 |
+| `merrill.sqlite3` | 美林时钟跨资产周度历史、宏观月数据、采集覆盖、每周状态和个人模型解读 | 长期保留，随数据目录备份与搬迁 |
 | `issuer_uploads/`、`kline_learning/` | 原始上传文件、提示词、资料清单、RAG 索引 | 保留原文件；向量索引可重建 |
 | `imports/company_fundamentals/` | 财务、管理层讨论和公司信息 CSV | 导入原件，长期保留 |
 | `news.db`、`company_fundamentals.db`、`company_updates/` | 新闻、财务修订和公司资料 | 长期保留 |
+| `overseas_news.db` | 海外快讯、来源健康、抓取游标和采集租约 | 长期保留；来源异常不清空新闻 |
 | `users.db`、`watchlists/`、配置 JSON | 账户、API 配置、自选股、接口优先级 | 私有文件，搬迁会一并携带凭据 |
 | `market_source_cache/`、`kline_bundle_cache/`、`tushare_daily_cache/` | 已知格式的行情与接口缓存 | 到期并通过预览校验后可回收，不等于研究快照 |
 | `market_history_cache/` | 累计市场历史序列 | 可能无法完整重建，长期保留 |

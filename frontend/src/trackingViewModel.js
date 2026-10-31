@@ -88,7 +88,7 @@ export function strategyEvidence(view, data) {
 }
 
 export function trackingError(error) {
-  if (error?.response?.status === 409) return "这条判断已在别处更新。你的输入已保留，请载入最新记录，核对后重新提交。";
+  if (error?.response?.status === 409) return "判断已更新，输入已保留。请载入最新记录后重新提交。";
   const detail = error?.response?.data?.detail;
   if (Array.isArray(detail)) return detail.slice(0, 3).map((item) => item.msg).join("；");
   return typeof detail === "string" ? detail : error?.response ? "保存未完成，请重试。" : "暂时无法连接服务，你的输入已保留。";
@@ -97,17 +97,17 @@ export function trackingError(error) {
 export function trackingStatusNotices(status) {
   if (!status) return [];
   const notices = [];
-  if (status.automatic_enabled === false) notices.push({ key: "paused", type: "warning", title: "自动跟踪已停止", text: "仍可保存与复盘判断，点击“检查本地变化”可手动更新。" });
-  else if (status.worker?.healthy === false) notices.push({ key: "worker", type: "warning", title: "自动跟踪执行器未连接", text: "后台检查暂时无法继续，可手动检查已归档的证据。" });
+  if (status.automatic_enabled === false) notices.push({ key: "paused", type: "warning", title: "自动跟踪已停止", text: "可点击“检查本地变化”手动更新。" });
+  else if (status.worker?.healthy === false) notices.push({ key: "worker", type: "warning", title: "后台跟踪未连接", text: "可手动检查本地变化。" });
   for (const [key, label] of [["news", "新闻"], ["calendar", "日历"]]) {
     const source = status[key];
     if (source && ["error", "failed", "partial", "stale", "unavailable", "limited"].includes(source.status)) {
-      notices.push({ key, type: "warning", title: `${label}数据覆盖需核查`, text: source.message || "请核对最新采集时间；当前结果基于已归档的数据。" });
+      notices.push({ key, type: "warning", title: `${label}覆盖受限`, text: source.message || "当前使用已归档数据，请核对采集时间。" });
     }
-    if (source?.pending) notices.push({ key: `${key}-pending`, type: "info", title: `${label}仍有修订待处理`, text: "当前检查尚未覆盖全部归档证据，可继续检查本地变化。" });
+    if (source?.pending) notices.push({ key: `${key}-pending`, type: "info", title: `${label}仍有修订待处理`, text: "可再次检查本地变化。" });
   }
   if (status.coverage?.status === "limited" && !notices.some((item) => ["news", "calendar"].includes(item.key))) {
-    notices.push({ key: "coverage", type: "info", title: "数据覆盖有限", text: "本页按本地已归档证据检查变化，暂无变化不代表外部信息没有更新。" });
+    notices.push({ key: "coverage", type: "info", title: "数据覆盖有限", text: "请核对采集与扫描范围。" });
   }
   return notices;
 }

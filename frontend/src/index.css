@@ -2,6 +2,28 @@
   box-sizing: border-box;
 }
 
+/* Shared spacing and typography scale across pages and overlays. */
+:root {
+  --sva-space-1: 4px;
+  --sva-space-2: 8px;
+  --sva-space-3: 12px;
+  --sva-space-4: 16px;
+  --sva-space-5: 20px;
+  --sva-space-6: 24px;
+  --sva-space-8: 32px;
+  --sva-font-xs: 12px;
+  --sva-font-sm: 13px;
+  --sva-font-base: 14px;
+  --sva-font-lg: 16px;
+  --sva-font-xl: 20px;
+  --sva-title-size: clamp(24px, 2vw, 28px);
+  --sva-line-height: 1.65;
+  --sva-line-height-compact: 1.4;
+  --sva-line-height-reading: 1.75;
+  --sva-page-padding: clamp(16px, 2.4vw, 32px);
+  --sva-content-max: 1440px;
+}
+
 .sva-auth-page {
   min-height: 100vh;
   display: flex;
@@ -36,7 +58,7 @@
 .sva-auth-footnote.ant-typography {
   margin: 20px 0 0;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
 }
 
 .sva-header-user {
@@ -160,6 +182,8 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--sva-font);
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height);
   background: var(--sva-bg);
   color: var(--sva-text);
   -webkit-font-smoothing: antialiased;
@@ -179,8 +203,8 @@ a:hover {
 }
 
 .ex-app-content {
-  font-size: 13px;
-  line-height: 1.47;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height);
 }
 
 .ex-app-content .ant-card {
@@ -188,17 +212,17 @@ a:hover {
 }
 
 .ex-section-card > .ant-card-head {
-  min-height: 44px;
-  padding: 0 16px;
+  min-height: 52px;
+  padding: 0 var(--sva-space-5);
   border-bottom: 1px solid var(--sva-separator);
 }
 
 .ex-section-card > .ant-card-body {
-  padding: 14px 16px 16px;
+  padding: var(--sva-space-5);
 }
 
 .ex-app-content .ant-typography {
-  line-height: 1.47;
+  line-height: var(--sva-line-height);
 }
 
 /* 公司信息：可拖拽缩放文本区 */
@@ -207,10 +231,11 @@ a:hover {
   overflow: auto;
   min-width: 120px;
   max-width: 100%;
-  padding: 10px 12px;
+  padding: var(--sva-space-3) var(--sva-space-4);
   border: 1px solid var(--sva-separator);
   border-radius: var(--sva-radius-sm);
   background: var(--sva-fill);
+  line-height: var(--sva-line-height-reading);
 }
 
 .ex-company-text-box--short {
@@ -228,19 +253,19 @@ a:hover {
 }
 
 .ex-xueqiu-section {
-  margin-top: 16px;
+  margin-top: var(--sva-space-6);
 }
 
 .ex-xueqiu-section-body {
-  margin-top: 8px;
+  margin-top: var(--sva-space-3);
   border: 1px solid var(--sva-separator);
   border-radius: var(--sva-radius-sm);
   background: var(--sva-fill);
-  padding: 6px 10px;
+  padding: var(--sva-space-3) var(--sva-space-4);
 }
 
 .ex-xueqiu-feed-list .ant-list-item {
-  padding: 10px 4px;
+  padding: var(--sva-space-3) 0;
   border-block-end-color: var(--sva-separator);
 }
 
@@ -253,7 +278,7 @@ a:hover {
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
 }
 
 .ex-xueqiu-feed-title {
@@ -263,12 +288,13 @@ a:hover {
 
 .ex-xueqiu-feed-body {
   margin: 0 0 4px !important;
-  font-size: 12px;
+  font-size: var(--sva-font-base);
   color: var(--sva-text-secondary);
+  line-height: var(--sva-line-height-reading);
 }
 
 .ex-stock-kline-embedded {
-  font-size: 13px;
+  font-size: var(--sva-font-base);
 }
 
 .sva-metrics {
@@ -296,13 +322,13 @@ a:hover {
 }
 
 .sva-metric__label {
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: var(--sva-font-xs);
+  line-height: var(--sva-line-height-compact);
   color: var(--sva-text-tertiary);
 }
 
 .sva-metric__value {
-  font-size: 14px;
+  font-size: var(--sva-font-base);
   font-weight: 600;
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
@@ -322,14 +348,14 @@ a:hover {
 
 .sva-metric__unit {
   margin-left: 3px;
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   font-weight: 500;
   color: var(--sva-text-tertiary);
 }
 
 .sva-metric__sub {
-  font-size: 10px;
-  line-height: 1.2;
+  font-size: var(--sva-font-xs);
+  line-height: var(--sva-line-height-compact);
   color: var(--sva-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -338,7 +364,7 @@ a:hover {
 
 .sva-data-asof {
   margin: 8px 2px 0;
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   color: var(--sva-text-tertiary);
 }
 
@@ -347,14 +373,18 @@ a:hover {
 }
 
 .ex-transaction-agent-view {
-  min-height: 220px;
-  padding: 14px 14px 12px;
+  min-height: 240px;
+  padding: var(--sva-space-4);
   border: 1px solid var(--sva-separator);
   border-radius: var(--sva-radius-sm);
   background: var(--sva-fill);
-  font-size: 13px;
+  font-size: var(--sva-font-base);
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  line-height: var(--sva-line-height);
 }
 
 .ex-transaction-agent-view:hover,
@@ -365,17 +395,17 @@ a:hover {
 }
 
 .ex-transaction-agent-card > .ant-card-head {
-  min-height: 40px;
-  padding: 0 12px;
+  min-height: 52px;
+  padding: 0 var(--sva-space-5);
 }
 
 .ex-transaction-agent-card > .ant-card-head .ant-card-head-title {
-  padding: 9px 0;
-  font-size: 13px;
+  padding: var(--sva-space-3) 0;
+  font-size: var(--sva-font-lg);
 }
 
 .ex-transaction-agent-card > .ant-card-body {
-  padding: 10px 12px 12px;
+  padding: var(--sva-space-5);
 }
 
 .ex-transaction-agent-card .ant-card-extra {
@@ -389,27 +419,30 @@ a:hover {
 .ex-transaction-agent-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--sva-space-2);
   min-height: 40px;
-  margin-bottom: 6px;
+  margin-bottom: var(--sva-space-3);
 }
 
 .ex-transaction-agent-action {
   display: block;
-  padding-top: 6px;
+  padding-top: var(--sva-space-3);
   border-top: 1px solid var(--sva-separator);
   color: var(--sva-text-secondary);
+  margin-top: auto;
 }
 
 .ex-transaction-agent-detail-btn {
-  margin-top: 6px;
+  margin-top: var(--sva-space-2);
   padding: 0 !important;
   height: auto !important;
+  align-self: flex-start;
+  min-height: 32px;
 }
 
 .ex-transaction-agent-detail {
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height-reading);
 }
 
 .ex-transaction-agent-detail ul {
@@ -418,13 +451,13 @@ a:hover {
 }
 
 .ex-transaction-agent-detail li {
-  margin-bottom: 5px;
+  margin-bottom: var(--sva-space-2);
 }
 
 .ex-transaction-agent-detail .ant-divider {
-  margin: 14px 0 10px;
+  margin: var(--sva-space-6) 0 var(--sva-space-3);
   color: var(--sva-text);
-  font-size: 13px;
+  font-size: var(--sva-font-lg);
 }
 
 .ex-transaction-agent-source-list {
@@ -434,7 +467,7 @@ a:hover {
 }
 
 .ex-transaction-agent-source {
-  padding: 7px 9px;
+  padding: var(--sva-space-3) var(--sva-space-4);
   border: 1px solid var(--sva-separator-strong);
   border-radius: 6px;
   background: var(--sva-source-bg);
@@ -479,17 +512,6 @@ a:hover {
   align-self: center;
   flex-shrink: 0;
   margin-inline-start: 16px;
-}
-
-.sva-setup-page {
-  padding: 16px 20px;
-  max-width: 640px;
-  margin: 0 auto;
-}
-
-.sva-config-console .sva-admin-section {
-  border-top: 1px solid var(--sva-separator);
-  padding-top: 12px;
 }
 
 .sva-header-settings {
@@ -573,7 +595,7 @@ a:hover {
 }
 
 .sva-field__label {
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   color: var(--sva-text-tertiary);
   flex-shrink: 0;
 }
@@ -585,7 +607,7 @@ a:hover {
 }
 
 .sva-datepicker .ant-picker-input > input {
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   color: var(--sva-text);
 }
 
@@ -608,7 +630,7 @@ a:hover {
   border-radius: 8px;
   background: transparent;
   color: var(--sva-text-secondary);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   font-weight: 500;
   letter-spacing: -0.01em;
   cursor: pointer;
@@ -634,7 +656,7 @@ a:hover {
   border-radius: var(--sva-radius-sm);
   background: var(--sva-accent);
   color: var(--sva-on-accent);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   font-weight: 500;
   letter-spacing: -0.01em;
   cursor: pointer;
@@ -703,7 +725,7 @@ a:hover {
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%239ca3af' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E")
     no-repeat right 7px center;
   color: var(--sva-text);
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
   cursor: pointer;
@@ -740,28 +762,28 @@ a:hover {
 
 .sva-panel > .ant-card-head,
 .ex-transaction-agent-card > .ant-card-head {
-  min-height: 40px;
-  padding: 0 14px;
+  min-height: 52px;
+  padding: 0 var(--sva-space-5);
   border-bottom: 1px solid var(--sva-separator);
 }
 
 .sva-panel > .ant-card-head .ant-card-head-title,
 .ex-transaction-agent-card > .ant-card-head .ant-card-head-title,
 .sva-panel-title {
-  padding: 10px 0;
-  font-size: 13px;
+  padding: var(--sva-space-3) 0;
+  font-size: var(--sva-font-lg);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: var(--sva-text);
 }
 
 .sva-panel > .ant-card-body,
 .ex-transaction-agent-card > .ant-card-body {
-  padding: 12px 14px 14px;
+  padding: var(--sva-space-5);
 }
 
 .sva-meta {
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   color: var(--sva-text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -769,9 +791,9 @@ a:hover {
 .sva-summary-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
-  margin-bottom: 10px;
-  font-size: 12px;
+  gap: var(--sva-space-2) var(--sva-space-4);
+  margin-bottom: var(--sva-space-4);
+  font-size: var(--sva-font-sm);
   font-variant-numeric: tabular-nums;
   color: var(--sva-text-secondary);
 }
@@ -790,7 +812,7 @@ a:hover {
 
 .sva-footnote {
   margin: 4px 2px 0;
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   color: var(--sva-text-tertiary);
 }
 
@@ -831,7 +853,7 @@ a:hover {
   gap: 10px;
   margin-top: 14px;
   color: var(--sva-text-secondary);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   letter-spacing: 0.12em;
 }
 
@@ -839,7 +861,7 @@ a:hover {
   writing-mode: horizontal-tb;
   min-width: 20px;
   text-align: center;
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   font-variant-numeric: tabular-nums;
   color: var(--sva-text-tertiary);
 }
@@ -855,7 +877,7 @@ a:hover {
   display: inline-flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--sva-font-base);
   font-weight: 600;
   color: var(--sva-text);
 }
@@ -863,7 +885,7 @@ a:hover {
 .sva-watch-sider__title em {
   font-style: normal;
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   color: var(--sva-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
@@ -939,7 +961,7 @@ a:hover {
 .sva-watch-sider__empty {
   display: block;
   padding: 18px 4px;
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   color: var(--sva-text-tertiary);
 }
 
@@ -977,7 +999,7 @@ a:hover {
 }
 
 .sva-watch-sider__name {
-  font-size: 13px;
+  font-size: var(--sva-font-base);
   font-weight: 600;
   line-height: 1.35;
   color: var(--sva-text);
@@ -988,7 +1010,7 @@ a:hover {
 }
 
 .sva-watch-sider__code {
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
   color: var(--sva-text-tertiary);
@@ -1003,7 +1025,7 @@ a:hover {
 }
 
 .sva-watch-sider__pct {
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   font-variant-numeric: tabular-nums;
   min-width: 54px;
   text-align: right;
@@ -1036,7 +1058,7 @@ a:hover {
 .sva-watch-sider__batch .ant-collapse-header {
   padding: 8px 2px !important;
   color: var(--sva-text-secondary) !important;
-  font-size: 12px !important;
+  font-size: var(--sva-font-sm) !important;
 }
 
 .sva-watch-sider__batch .ant-collapse-content-box {
@@ -1102,7 +1124,7 @@ a:hover {
 }
 
 .sva-error-boundary__code {
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   word-break: break-all;
   color: var(--sva-stock-up);
 }
@@ -1116,7 +1138,7 @@ a:hover {
 }
 
 .sva-stock-opt__mkt {
-  font-size: 11px;
+  font-size: var(--sva-font-xs);
   color: var(--sva-text-tertiary);
 }
 
@@ -1194,9 +1216,9 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--sva-space-3);
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: var(--sva-space-4);
 }
 
 .sva-news-toolbar__left {
@@ -1218,7 +1240,7 @@ a:hover {
 .news-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sva-space-4);
 }
 
 .news-card {
@@ -1229,18 +1251,18 @@ a:hover {
 .news-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: var(--sva-space-2) var(--sva-space-3);
   align-items: center;
   color: var(--sva-text-tertiary);
-  font-size: 12px;
-  margin-bottom: 8px;
+  font-size: var(--sva-font-xs);
+  margin-bottom: var(--sva-space-3);
 }
 
 .news-title {
-  font-size: 16px;
+  font-size: var(--sva-font-lg);
   font-weight: 600;
-  line-height: 1.55;
-  margin-bottom: 8px;
+  line-height: 1.5;
+  margin-bottom: var(--sva-space-3);
   overflow-wrap: anywhere;
 }
 
@@ -1254,16 +1276,16 @@ a:hover {
 }
 
 .analysis-tags {
-  margin: 0 0 10px;
-  gap: 6px !important;
+  margin: 0 0 var(--sva-space-4);
+  gap: var(--sva-space-2) !important;
 }
 
 .impact-reason {
-  padding: 11px 14px;
+  padding: var(--sva-space-3) var(--sva-space-4);
   border-left: 2px solid var(--sva-accent);
   background: var(--sva-accent-soft);
   border-radius: 0 6px 6px 0;
-  margin-bottom: 8px;
+  margin-bottom: var(--sva-space-3);
 }
 
 .impact-reason > .ant-typography {
@@ -1273,7 +1295,7 @@ a:hover {
 
 .relevance-reason {
   margin: 8px 0 !important;
-  font-size: 13px;
+  font-size: var(--sva-font-base);
   line-height: 1.8;
 }
 
@@ -1288,26 +1310,28 @@ a:hover {
 .original-link {
   display: inline-block;
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   color: var(--sva-link);
   text-decoration: none;
 }
 
 .evidence-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 28px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sva-space-4) var(--sva-space-6);
 }
 
 .analysis-list {
-  font-size: 13px;
-  line-height: 1.9;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height-reading);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .analysis-list ul {
-  padding-left: 17px;
+  padding-left: 20px;
   color: var(--sva-text-secondary);
-  margin: 8px 0;
+  margin: var(--sva-space-2) 0 0;
 }
 
 .news-match-evidence {
@@ -1316,7 +1340,7 @@ a:hover {
   gap: 3px 14px;
   margin-bottom: 8px;
   color: var(--sva-text-tertiary);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -1324,7 +1348,7 @@ a:hover {
 .news-combined-sources {
   margin-top: 8px;
   color: var(--sva-text-tertiary);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   line-height: 1.7;
 }
 
@@ -1346,12 +1370,12 @@ a:hover {
 }
 
 .news-card .ant-collapse-header {
-  padding: 6px 0 !important;
-  font-size: 13px;
+  padding: var(--sva-space-3) 0 !important;
+  font-size: var(--sva-font-base);
 }
 
 .news-card .ant-collapse-content-box {
-  padding: 8px 0 !important;
+  padding: 0 0 var(--sva-space-4) !important;
 }
 
 .news-card .analysis-quality {
@@ -1359,18 +1383,18 @@ a:hover {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 5px 10px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
+  padding: var(--sva-space-3) var(--sva-space-4);
+  margin-bottom: var(--sva-space-4);
   border: 1px solid var(--sva-separator);
   border-radius: 6px;
   color: var(--sva-text-secondary);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   line-height: 1.7;
 }
 
 .news-card .analysis-interpretation > .ant-typography {
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: var(--sva-font-base);
 }
 
 .news-card .analysis-impact-channels ol {
@@ -1380,24 +1404,24 @@ a:hover {
 
 .news-card .analysis-source-list {
   display: grid;
-  gap: 10px;
+  gap: var(--sva-space-3);
 }
 
 .news-card .analysis-source {
   min-width: 0;
-  padding: 10px 12px;
+  padding: var(--sva-space-4);
   border: 1px solid var(--sva-separator);
   border-radius: 6px;
 }
 
 .news-card .analysis-source-quote {
   margin: 8px 0;
-  padding: 7px 10px;
+  padding: var(--sva-space-3);
   border-left: 2px solid var(--sva-accent);
   background: var(--sva-fill);
   color: var(--sva-text);
-  font-size: 13px;
-  line-height: 1.75;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height-reading);
   white-space: pre-wrap;
 }
 
@@ -1409,6 +1433,7 @@ a:hover {
 @media (max-width: 700px) {
   .evidence-grid {
     grid-template-columns: minmax(0, 1fr);
+    gap: var(--sva-space-4);
   }
 }
 
@@ -1424,7 +1449,7 @@ a:hover {
 .sva-comments-disclaimer {
   margin: 12px 0;
   color: var(--sva-text-secondary);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   line-height: 1.75;
 }
 
@@ -1438,7 +1463,7 @@ a:hover {
   border-radius: 8px;
   background: var(--sva-accent-soft);
   border: 1px solid var(--sva-accent-border);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
 }
 
 .sva-comments-progress__label {
@@ -1454,14 +1479,14 @@ a:hover {
   flex-wrap: wrap;
   gap: 5px 16px;
   margin-top: 12px;
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   line-height: 1.7;
   color: var(--sva-text-secondary);
 }
 
 .sva-comments-schedule {
   margin: 6px 0 16px;
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
   line-height: 1.7;
   color: var(--sva-text-secondary);
 }
@@ -1475,12 +1500,12 @@ a:hover {
 
 .sva-comments-list {
   display: grid;
-  gap: 12px;
+  gap: var(--sva-space-4);
 }
 
 .sva-comment-card {
   min-width: 0;
-  padding: 16px;
+  padding: var(--sva-space-5);
   border: 1px solid var(--sva-separator);
   border-radius: var(--sva-radius-sm);
   background: var(--sva-surface);
@@ -1501,7 +1526,7 @@ a:hover {
 .sva-comment-card__relevance,
 .sva-comment-card__score {
   color: var(--sva-text-secondary);
-  font-size: 12px;
+  font-size: var(--sva-font-sm);
 }
 
 .sva-comment-card__score {
@@ -1509,28 +1534,28 @@ a:hover {
 }
 
 .sva-comment-card__score strong {
-  font-size: 20px;
+  font-size: var(--sva-font-xl);
   color: var(--sva-text);
   font-variant-numeric: tabular-nums;
 }
 
 .sva-comment-card__title {
   margin: 12px 0 8px;
-  font-size: 15px;
+  font-size: var(--sva-font-lg);
   line-height: 1.65;
   font-weight: 600;
 }
 
 .sva-comment-card__summary,
 .sva-comment-card__reason {
-  margin: 12px 0 0;
-  font-size: 13px;
-  line-height: 1.85;
+  margin: var(--sva-space-3) 0 0;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height-reading);
   white-space: pre-wrap;
 }
 
 .sva-comment-card__summary {
-  padding: 9px 12px;
+  padding: var(--sva-space-3) var(--sva-space-4);
   background: var(--sva-accent-soft);
   border-left: 2px solid var(--sva-accent);
   border-radius: 0 6px 6px 0;
@@ -1542,13 +1567,13 @@ a:hover {
 
 .sva-comment-card__risks {
   margin-top: 12px;
-  padding: 9px 12px;
+  padding: var(--sva-space-3) var(--sva-space-4);
   border: 1px solid var(--sva-warning-border);
   background: var(--sva-warning-bg);
   border-radius: 6px;
   color: var(--sva-text-secondary);
-  font-size: 12px;
-  line-height: 1.8;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height-reading);
 }
 
 .sva-comment-card__risks ul {
@@ -1562,8 +1587,8 @@ a:hover {
 
 .sva-comment-card__original {
   margin: 12px 0 0;
-  font-size: 12px;
-  line-height: 1.8;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height-reading);
   color: var(--sva-text-secondary);
 }
 
@@ -1575,7 +1600,7 @@ a:hover {
 
 .sva-comment-card__original blockquote {
   margin: 8px 0;
-  padding: 10px 12px;
+  padding: var(--sva-space-3) var(--sva-space-4);
   border-left: 2px solid var(--sva-separator-strong);
   background: var(--sva-fill);
   white-space: pre-wrap;
@@ -1592,10 +1617,10 @@ a:hover {
   flex-wrap: wrap;
   gap: 5px 14px;
   margin-top: 12px;
-  padding-top: 10px;
+  padding-top: var(--sva-space-3);
   border-top: 1px solid var(--sva-separator);
   color: var(--sva-text-secondary);
-  font-size: 12px;
+  font-size: var(--sva-font-xs);
   line-height: 1.7;
 }
 
@@ -1614,7 +1639,7 @@ a:hover {
   }
 
   .sva-comment-card {
-    padding: 12px;
+    padding: var(--sva-space-4);
   }
 
   .sva-comment-card__meta a {
@@ -1623,5 +1648,5 @@ a:hover {
 }
 
 /* Research entry is styled before its lazy route is loaded. */
-.sva-research-link { font-size: 13px; white-space: nowrap; padding: 6px 10px; border-radius: 8px; color: var(--sva-link); }
+.sva-research-link { font-size: var(--sva-font-base); white-space: nowrap; padding: 6px 10px; border-radius: 8px; color: var(--sva-link); }
 .sva-research-link:hover { background: var(--sva-accent-soft); }

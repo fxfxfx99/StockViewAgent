@@ -7,6 +7,7 @@ export function useNewsActions() {
   const updated = () => invalidateNewsData(client);
   const sync = useMutation({
     mutationFn: (symbols) => api.syncArchiveFeeds(symbols),
+    retry: false, // Submission queues work; never retry a POST automatically.
     onSuccess: updated,
   });
   const analyze = useMutation({

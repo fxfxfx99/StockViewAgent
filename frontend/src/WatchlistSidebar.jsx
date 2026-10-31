@@ -105,7 +105,7 @@ export default function WatchlistSidebar({
     try {
       const r = await api.parseWatchlistImport(t, true);
       const n = Array.isArray(r.added) ? r.added.length : 0;
-      message.success(n ? `已加入 ${n} 只` : "没有新代码（可能已在列表中）");
+      message.success(n ? `已加入 ${n} 只` : "没有新代码");
       setBatchText("");
       if (reloadWatchlist) await reloadWatchlist();
     } catch (e) {

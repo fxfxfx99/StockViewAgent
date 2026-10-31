@@ -83,8 +83,8 @@ function SectionFreshness({ data, field }) {
   if (!data) return null;
   const fetchedAt = data.section_fetched_at?.[field];
   return (
-    <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-      资料采集：{fetchedAt ? formatXueqiuTime(fetchedAt) : "时间未知"}
+    <Text type="secondary" style={{ marginLeft: 8, fontSize: 13 }}>
+      采集于 {fetchedAt ? formatXueqiuTime(fetchedAt) : "时间未知"}
       {data.stale_fields?.includes(field) ? " · 缓存" : ""}
     </Text>
   );
@@ -108,12 +108,12 @@ function FeedList({ items, emptyText, sourceLabel }) {
               {item.source_label || sourceLabel ? <Text type="secondary">{item.source_label || sourceLabel}</Text> : null}
             </div>
             <Text strong className="ex-xueqiu-feed-title">{item.title || "—"}</Text>
-            {item.message ? (
+            {item.message && item.message !== item.title ? (
               <Paragraph className="ex-xueqiu-feed-body" ellipsis={{ rows: 3, expandable: true, symbol: "展开" }}>
                 {item.message}
               </Paragraph>
             ) : null}
-            {item.text_excerpt && item.text_excerpt !== item.title ? (
+            {item.text_excerpt && item.text_excerpt !== item.title && item.text_excerpt !== item.message ? (
               <Paragraph className="ex-xueqiu-feed-body" ellipsis={{ rows: 3, expandable: true, symbol: "展开" }}>
                 {item.text_excerpt}
               </Paragraph>
@@ -188,7 +188,7 @@ export default function WatchlistProfilePanel({
         [editSymbol]: d.profile,
       }));
       setEditOpen(false);
-      message.success("已保存手动补充");
+      message.success("已保存");
     } catch (e) {
       if (e?.errorFields) return;
       message.error(api.getApiErrorMessage(e));
@@ -206,7 +206,7 @@ export default function WatchlistProfilePanel({
       <Alert
         type="info"
         showIcon
-        message={`当前标的 ${sym} 不在股票列表中，请先添加后再查看公司信息。`}
+        message={`请先将 ${sym} 加入自选。`}
       />
     );
   }
@@ -233,12 +233,12 @@ export default function WatchlistProfilePanel({
           <Alert
             type="warning"
             showIcon
-            style={{ marginBottom: 10 }}
+            style={{ marginBottom: 16 }}
             message={api.getApiErrorMessage(stockDetailError || xueqiuError)}
           />
         ) : null}
-        <Space wrap style={{ marginBottom: 14 }}>
-          <Text strong>{securityLabel(sym, { ...p, name: merged.name || p.name })}</Text>
+        <Space wrap style={{ marginBottom: 16 }}>
+          {!embedded ? <Text strong>{securityLabel(sym, { ...p, name: merged.name || p.name })}</Text> : null}
           {sources.company ? <Tag color="blue">{sources.company}</Tag> : null}
           {p.manual_fields?.length ? <Tag color="purple">含手动补充</Tag> : null}
           {AUTH_LABELS[authStatus] ? (
@@ -246,7 +246,7 @@ export default function WatchlistProfilePanel({
               {AUTH_LABELS[authStatus]}
             </Tag>
           ) : null}
-          {needsConnection ? <RouterLink to="/setup">{authStatus === "expired" ? "更新雪球连接" : "连接雪球（可选）"}</RouterLink> : null}
+          {needsConnection ? <RouterLink to="/setup">{authStatus === "expired" ? "更新雪球连接" : "连接雪球"}</RouterLink> : null}
           {err ? (
             <Tag color="orange" title={err}>
               东财 F10：{err.length > 24 ? `${err.slice(0, 24)}…` : err}
@@ -255,18 +255,18 @@ export default function WatchlistProfilePanel({
         </Space>
 
         {xueqiuData ? (
-          <Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+          <Paragraph type="secondary" style={{ marginBottom: 16, fontSize: 13 }}>
             {xueqiuData.auto_refresh_enabled
               ? `每 ${Math.round((xueqiuData.refresh_interval_sec || 900) / 60)} 分钟自动更新`
               : "自动更新已关闭"}
             {xueqiuData.fetched_at ? ` · 最近更新：${formatXueqiuTime(xueqiuData.fetched_at)}` : " · 等待首次更新"}
-            {xueqiuData.status === "stale" ? " · 当前保留上次成功数据" : ""}
-            {xueqiuFetching ? " · 正在检查更新…" : ""}
+            {xueqiuData.status === "stale" ? " · 缓存数据" : ""}
+            {xueqiuFetching ? " · 检查更新中…" : ""}
           </Paragraph>
         ) : null}
 
         {needsConnection && xueqiuData?.auth_message ? (
-          <Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+          <Paragraph type="secondary" style={{ marginBottom: 16, fontSize: 13 }}>
             {xueqiuData.auth_message}
           </Paragraph>
         ) : null}
@@ -275,8 +275,8 @@ export default function WatchlistProfilePanel({
           <Alert
             type="warning"
             showIcon
-            style={{ marginBottom: 10 }}
-            message={xueqiuData?.status === "stale" ? "部分资料更新暂时失败，已保留上次成功数据" : "部分公司信息暂不可用"}
+            style={{ marginBottom: 16 }}
+            message={xueqiuData?.status === "stale" ? "部分资料更新失败" : "部分公司资料不可用"}
             description={sectionErrors.join("；")}
           />
         ) : null}
@@ -285,17 +285,17 @@ export default function WatchlistProfilePanel({
           <Alert
             type="warning"
             showIcon
-            style={{ marginBottom: 10 }}
-            message="东财公司资料部分未加载"
+            style={{ marginBottom: 16 }}
+            message="东财资料加载不完整"
             description={companyErrors.join("；")}
           />
         ) : null}
 
-        <Space wrap style={{ marginBottom: 10 }}>
+        <Space wrap style={{ marginBottom: 16 }}>
           <Button size="small" icon={<EditOutlined />} onClick={openEdit}>
-            手动补充 / 覆盖
+            编辑资料
           </Button>
-          <Button
+          {!embedded ? <Button
             size="small"
             type="primary"
             ghost
@@ -303,8 +303,8 @@ export default function WatchlistProfilePanel({
             loading={refreshing || xueqiuFetching}
             onClick={onRefreshAll}
           >
-            刷新公司资料
-          </Button>
+            刷新资料
+          </Button> : null}
           {(stockDetailLoading || loading) && !hasCompanyData ? (
             <Text type="secondary">公司资料加载中…</Text>
           ) : null}
@@ -315,8 +315,8 @@ export default function WatchlistProfilePanel({
           ) : null}
         </Space>
 
-        <div style={{ marginBottom: 6 }}>
-          <Text strong>公司资料</Text>
+        <div style={{ marginBottom: 8 }}>
+          <Text strong>基本信息</Text>
           <SectionFreshness data={xueqiuData} field="company" />
         </div>
         <Descriptions column={1} size="small" bordered styles={{ label: { width: 108 } }}>
@@ -360,7 +360,7 @@ export default function WatchlistProfilePanel({
       </Spin>
 
       <Modal
-        title={`手动补充 — ${editSymbol}`}
+        title={`编辑资料 · ${editSymbol}`}
         open={editOpen}
         onCancel={() => setEditOpen(false)}
         onOk={submitManual}
@@ -368,21 +368,21 @@ export default function WatchlistProfilePanel({
         width={640}
         destroyOnHidden
       >
-        <Paragraph type="secondary" style={{ fontSize: 12 }}>
-          保存时会提交本页全部字段：某行留空表示清除该字段的「手动值」。手动值优先于自动更新的公司资料。
+        <Paragraph type="secondary" style={{ fontSize: 13 }}>
+          手动填写优先；留空恢复自动资料。
         </Paragraph>
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="证券简称">
-            <Input placeholder="可选" />
+            <Input />
           </Form.Item>
           <Form.Item name="org_name" label="企业全称">
-            <Input placeholder="可选" />
+            <Input />
           </Form.Item>
           <Form.Item name="industry" label="行业">
-            <Input placeholder="可选" />
+            <Input />
           </Form.Item>
           <Form.Item name="intro" label="简介">
-            <Input.TextArea rows={5} placeholder="可选" />
+            <Input.TextArea rows={5} />
           </Form.Item>
         </Form>
       </Modal>

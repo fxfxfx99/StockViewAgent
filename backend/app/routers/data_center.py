@@ -25,6 +25,17 @@ def overview(user: Admin):
     return data_collection.overview()
 
 
+@router.get("/collection/status")
+def collection_status(user: Admin):
+    """Small runtime snapshot; polling never scans files or starts collection."""
+    return data_collection.collection_overview()
+
+
+@router.get("/inventory/summary")
+def inventory_summary(user: Admin):
+    return data_asset_manager.scan_data_assets(include_items=False)
+
+
 @router.get("/files")
 def files(user: Admin, category: str = "", q: str = Query("", max_length=200), source: str = "", lifecycle: str = "",
           offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200), sort: str = "updated_at", descending: bool = True):

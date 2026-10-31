@@ -1,6 +1,6 @@
 # 本地研究实验室
 
-研究实验室位于 `/research`，从首页顶部进入。它把历史行情、策略版本、实验结果和模拟账户保存在本机，按预算反复执行“提出假设 → 固定数据验证 → 保存失败原因 → 改进候选”。当前范围是 A 股日线、只做多、持有 5–20 个交易日的研究与模拟，不连接实盘委托。
+量化研究实验室位于 `/lab`，从顶部「工具 → 量化实验室」进入。它把历史行情、策略版本、实验结果和模拟账户保存在本机，按预算反复执行“提出假设 → 固定数据验证 → 保存失败原因 → 改进候选”。当前范围是 A 股日线、只做多、持有 5–20 个交易日的研究与模拟，不连接实盘委托。`/research` 现在是独立的[个股与问题研究工作台](INVESTMENT_WORKSPACE.md)。
 
 该功能用于本地或完整 Docker 部署。公开试用部署的接口白名单仍不开放 `/api/research/*`，不能通过公开试用入口提交研究任务。
 
@@ -20,7 +20,7 @@
 
 保存配置后，后台自动安排采集、GitHub 来源学习、候选研究和模拟维护。首次按 5 年日线取数，收到完整股票池快照后才开始相应研究。**设置 → 运行日志** 以“待配置 / 正在准备 / 运行中 / 需关注”显示实际状态；配置已保存、任务已入队都不代表采集或研究已经完成。
 
-需要查看证据或手动控制时进入 <http://127.0.0.1:5175/research>：
+需要查看证据或手动控制时进入 <http://127.0.0.1:5175/lab>：
 
 1. 查看预算、任务与快照覆盖。普通行情源和旧缓存通常缺少历史时点、交易状态及公司行动证据，只能用于探索；可通过“导入 JSON 快照”补充可信历史资料。
 2. 根据需要手动采集、刷新 GitHub 来源、创建策略 JSON 或验证已有策略。研究只允许受限 JSON 表达式，不运行模型生成的 Python。
@@ -54,7 +54,7 @@ docker compose up -d --build
 docker compose logs -f research-worker
 ```
 
-Docker 入口为 <http://127.0.0.1:8080/research>。`backend` 与 `research-worker` 共用 `stockviewagent_data` 卷，研究调度独立于 API 的进程数。`ENABLE_RESEARCH_WORKER` 默认 `true`；Docker Compose 中如需全局关闭，可在启动命令前设置 `ENABLE_RESEARCH_WORKER=false`。`ENABLE_SCHEDULER` 控制原有后台任务，不是研究 worker 的开关。
+Docker 入口为 <http://127.0.0.1:8080/lab>。`backend` 与 `research-worker` 共用 `stockviewagent_data` 卷，研究调度独立于 API 的进程数。`ENABLE_RESEARCH_WORKER` 默认 `true`；Docker Compose 中如需全局关闭，可在启动命令前设置 `ENABLE_RESEARCH_WORKER=false`。`ENABLE_SCHEDULER` 控制原有后台任务，不是研究 worker 的开关。
 
 自定义本地数据目录时，在启动进程前设置环境变量，或写入 `backend/.env`；API、worker 与启动监督器必须使用同一路径。相对路径相对 `backend/`，修改后需重启：
 

@@ -77,7 +77,7 @@ export function getApiErrorMessage(error) {
   const data = error.response.data;
   if (typeof data?.detail === "string") return data.detail;
   if (typeof data?.message === "string") return data.message;
-  return "请求未完成，请检查配置或稍后重试。";
+  return "请求失败，请重试。";
 }
 
 export async function getHealth() {
@@ -178,6 +178,14 @@ export async function getKline(symbol, rangeParam = "1y", interval = "1d") {
   return data;
 }
 
+/** Historical daily data only; current quote snapshots must never enter replay. */
+export async function getKlineReplay(symbol, { start_date, end_date, refresh = false, signal } = {}) {
+  const { data } = await client.get(`/kline-replay/${encodeURIComponent(symbol)}`, {
+    params: { start_date, end_date, refresh }, signal,
+  });
+  return data;
+}
+
 export async function getTransactionAgentViews(symbol, strategy, asOf) {
   const params = {};
   if (strategy) params.strategy = strategy;
@@ -224,6 +232,91 @@ export async function putSettingsIntegrations(body) {
 
 export async function getSetupStatus() {
   const { data } = await client.get("/settings/setup-status", { timeout: 15000 });
+  return data;
+}
+
+export async function getEarningsReports(symbol, { signal } = {}) {
+  const { data } = await client.get("/news/earnings", { params: { symbol }, signal, timeout: 20_000 });
+  return data;
+}
+
+export async function refreshEarningsReports(symbol) {
+  const { data } = await client.post("/news/earnings/refresh", { symbol }, { timeout: 20_000 });
+  return data;
+}
+
+export async function getEarningsReport(id, { signal } = {}) {
+  const { data } = await client.get(`/news/earnings/${encodeURIComponent(id)}`, { signal, timeout: 20_000 });
+  return data;
+}
+
+export async function prepareEarningsReport(id) {
+  const { data } = await client.post(`/news/earnings/${encodeURIComponent(id)}/prepare`, {}, { timeout: 20_000 });
+  return data;
+}
+
+export async function analyzeEarningsReport(id, focus = "") {
+  const { data } = await client.post(`/news/earnings/${encodeURIComponent(id)}/analyze`, { focus }, { timeout: 20_000 });
+  return data;
+}
+
+export async function downloadEarningsPdf(id, { signal } = {}) {
+  const { data } = await client.get(`/news/earnings/${encodeURIComponent(id)}/pdf`, { signal, responseType: "blob", timeout: 60_000 });
+  return data;
+}
+
+export async function getMonitoringOverview({ signal, symbol } = {}) {
+  const { data } = await client.get("/monitoring/overview", { signal, params: symbol ? { symbol } : undefined, timeout: 15_000 });
+  return data;
+}
+
+export async function getLlmSettings({ signal } = {}) {
+  const { data } = await client.get("/settings/llm", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function saveMonitoringModel(body) {
+  const { data } = await client.put("/monitoring/model", body, { timeout: 30_000 });
+  return data;
+}
+
+export async function verifyMonitoringModel() {
+  const { data } = await client.post("/monitoring/model/verify", {}, { timeout: 90_000 });
+  return data;
+}
+
+export async function createMonitoringPlan(body) {
+  const { data } = await client.post("/monitoring/plans", body, { timeout: 15_000 });
+  return data;
+}
+
+export async function getMonitoringPlan(id, { signal } = {}) {
+  const { data } = await client.get(`/monitoring/plans/${encodeURIComponent(id)}`, { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function updateMonitoringPlan(id, body) {
+  const { data } = await client.patch(`/monitoring/plans/${encodeURIComponent(id)}`, body, { timeout: 15_000 });
+  return data;
+}
+
+export async function runMonitoringPlan(id, kind = "observe") {
+  const { data } = await client.post(`/monitoring/plans/${encodeURIComponent(id)}/runs`, { kind }, { timeout: 15_000 });
+  return data;
+}
+
+export async function reviewMonitoringPlan(id, body) {
+  const { data } = await client.post(`/monitoring/plans/${encodeURIComponent(id)}/reviews`, body, { timeout: 15_000 });
+  return data;
+}
+
+export async function updateMonitoringNotification(id, isRead) {
+  const { data } = await client.patch(`/monitoring/notifications/${encodeURIComponent(id)}`, { is_read: isRead }, { timeout: 15_000 });
+  return data;
+}
+
+export async function updateMonitoringConfig(body) {
+  const { data } = await client.patch("/monitoring/config", body, { timeout: 15_000 });
   return data;
 }
 
@@ -308,6 +401,17 @@ export async function getNewsArchive(params) {
   return data;
 }
 
+/** Read the background collector's archive without triggering collection. */
+export async function getOverseasNews(params = {}, { signal } = {}) {
+  const { data } = await client.get("/news/overseas", { params, signal, timeout: 15_000 });
+  return data;
+}
+
+export async function getOverseasNewsStatus({ signal } = {}) {
+  const { data } = await client.get("/news/overseas/status", { signal, timeout: 15_000 });
+  return data;
+}
+
 export const NEWS_ANALYSIS_BATCH_SIZE = 3;
 const NEWS_TASK_TIMEOUT_MS = 600_000;
 
@@ -315,7 +419,7 @@ export async function syncArchiveFeeds(symbols = null) {
   const { data } = await client.post(
     "/news/sync-archive-feeds",
     symbols ? { symbols, lookback_days: 30 } : { lookback_days: 30 },
-    { timeout: NEWS_TASK_TIMEOUT_MS }
+    { timeout: 15_000 }
   );
   return data;
 }
@@ -411,7 +515,7 @@ export async function searchCalendarEvents(params, { signal } = {}) {
 
 /** Administrator-only local data inventory, collection and reversible cache management. */
 export async function getLocalDataOverview({ signal } = {}) {
-  const { data } = await client.get("/data-center/overview", { signal, timeout: 60_000 });
+  const { data } = await client.get("/data-center/inventory/summary", { signal, timeout: 60_000 });
   return data;
 }
 
@@ -525,3 +629,129 @@ export async function refreshTracking() {
   const { data } = await client.post("/tracking/refresh", {}, { timeout: 60_000 });
   return data;
 }
+
+/** Market judgement reads remain independent from explicit, paid AI analysis. */
+export async function getMacroIndices({ signal } = {}) {
+  const { data } = await client.get("/macro/indices", { signal, timeout: 15_000 });
+  return data;
+}
+export async function getMacroIndexKline(params, { signal } = {}) {
+  const { data } = await client.get("/macro/index-kline", { params, signal, timeout: 120_000 });
+  return data;
+}
+export async function getMacroCatalog({ signal } = {}) {
+  const { data } = await client.get("/macro/catalog", { signal, timeout: 15_000 });
+  return data;
+}
+export async function getMacroKline(seriesId, range = "1y", { signal } = {}) {
+  const { data } = await client.get("/macro/kline", { params: { series_id: seriesId, range }, signal, timeout: 120_000 });
+  return data;
+}
+export async function getMacroIndustryIndices({ signal } = {}) {
+  const { data } = await client.get("/macro/sw-daily/indices", { signal, timeout: 120_000 });
+  return data;
+}
+export async function getMacroIndustryKline(tsCode, range = "1y", { signal } = {}) {
+  const { data } = await client.get("/macro/sw-daily/kline", { params: { ts_code: tsCode, range }, signal, timeout: 120_000 });
+  return data;
+}
+export async function getMarketFundFlowDashboard({ signal } = {}) {
+  const { data } = await client.get("/market/fund-flow/dashboard", { params: { limit: 40 }, signal, timeout: 120_000 });
+  return data;
+}
+export async function getMarketNorthFlow({ signal } = {}) {
+  const { data } = await client.get("/market/sentiment/north-flow", { params: { mode: "history" }, signal, timeout: 120_000 });
+  return data;
+}
+export async function getMarketMargin({ signal } = {}) {
+  const { data } = await client.get("/market/sentiment/margin", { signal, timeout: 120_000 });
+  return data;
+}
+export async function getMarketHot({ signal } = {}) {
+  const { data } = await client.get("/market/sentiment/hot", { signal, timeout: 120_000 });
+  return data;
+}
+export async function getEtfCurrent(code, { signal } = {}) {
+  const { data } = await client.get(`/market/etf/${encodeURIComponent(code)}/adata/current`, { signal, timeout: 60_000 });
+  return data;
+}
+export async function getStockCapitalFlow(symbol, { signal } = {}) {
+  const { data } = await client.get(`/market/stock/${encodeURIComponent(symbol)}/adata/capital-flow`, { signal, timeout: 120_000 });
+  return data;
+}
+export async function getKlineLearningPrompt({ signal } = {}) {
+  const { data } = await client.get("/kline-learning/prompt", { signal, timeout: 15_000 });
+  return data;
+}
+export async function getKlineLearningMaterials({ signal } = {}) {
+  const { data } = await client.get("/kline-learning/materials", { signal, timeout: 15_000 });
+  return data;
+}
+export async function uploadKlineLearningMaterial(file) {
+  const body = new FormData(); body.append("file", file); body.append("summary", "");
+  const { data } = await client.post("/kline-learning/materials", body, { timeout: 60_000 });
+  return data;
+}
+export async function deleteKlineLearningMaterial(id) {
+  const { data } = await client.delete(`/kline-learning/materials/${encodeURIComponent(id)}`, { timeout: 15_000 });
+  return data;
+}
+export async function analyzeKlineMarket(body) {
+  const { data } = await client.post("/kline-learning/analyze-market", body, { timeout: 600_000 });
+  return data;
+}
+export async function chatKlineMarket(body) {
+  const { data } = await client.post("/kline-learning/market-chat", body, { timeout: 600_000 });
+  return data;
+}
+export async function analyzeKlineStock(body) {
+  const { data } = await client.post("/kline-learning/analyze", body, { timeout: 600_000 });
+  return data;
+}
+
+// Account-owned question research, separate from the quantitative research API.
+export async function getInvestmentOverview(params = {}, { signal } = {}) { const { data } = await client.get("/investment-research/overview", { params, signal }); return data; }
+export async function getInvestmentDossier(id, { signal } = {}) { const { data } = await client.get(`/investment-research/dossiers/${encodeURIComponent(id)}`, { signal }); return data; }
+export async function createInvestmentDossier(body) { const { data } = await client.post("/investment-research/dossiers", body); return data; }
+export async function updateInvestmentDossier(id, body) { const { data } = await client.patch(`/investment-research/dossiers/${encodeURIComponent(id)}`, body); return data; }
+export async function createInvestmentQuestion(id, body) { const { data } = await client.post(`/investment-research/dossiers/${encodeURIComponent(id)}/questions`, body); return data; }
+export async function updateInvestmentQuestion(id, body) { const { data } = await client.patch(`/investment-research/questions/${encodeURIComponent(id)}`, body); return data; }
+export async function deleteInvestmentQuestion(id, revision) { const { data } = await client.delete(`/investment-research/questions/${encodeURIComponent(id)}`, { params: { revision } }); return data; }
+export async function createInvestmentMaterial(id, body) { const { data } = await client.post(`/investment-research/dossiers/${encodeURIComponent(id)}/materials`, body); return data; }
+export async function uploadInvestmentMaterial(id, file, title = "") { const form = new FormData(); form.append("file", file); if (title) form.append("title", title); const { data } = await client.post(`/investment-research/dossiers/${encodeURIComponent(id)}/materials/upload`, form, { timeout: 120_000 }); return data; }
+export async function getInvestmentMaterial(id, { signal } = {}) { const { data } = await client.get(`/investment-research/materials/${encodeURIComponent(id)}`, { signal }); return data; }
+export async function deleteInvestmentMaterial(id) { const { data } = await client.delete(`/investment-research/materials/${encodeURIComponent(id)}`); return data; }
+export async function importInvestmentMonitoring(id, monitor_run_id) { const { data } = await client.post(`/investment-research/dossiers/${encodeURIComponent(id)}/monitoring-updates`, { monitor_run_id }); return data; }
+export async function generateInvestmentReport(id, focus) { const { data } = await client.post(`/investment-research/dossiers/${encodeURIComponent(id)}/generate`, { focus }); return data; }
+export async function cancelInvestmentJob(id) { const { data } = await client.post(`/investment-research/jobs/${encodeURIComponent(id)}/cancel`, {}); return data; }
+export async function getInvestmentReport(id, { signal } = {}) { const { data } = await client.get(`/investment-research/reports/${encodeURIComponent(id)}`, { signal }); return data; }
+export async function adoptInvestmentReport(id, revision) { const { data } = await client.post(`/investment-research/reports/${encodeURIComponent(id)}/adopt`, { revision }); return data; }
+export async function readInvestmentReport(id, is_read = true) { const { data } = await client.post(`/investment-research/reports/${encodeURIComponent(id)}/read`, { is_read }); return data; }
+export async function getMonitoringRunContext(id, { signal } = {}) { const { data } = await client.get(`/monitoring/runs/${encodeURIComponent(id)}/context`, { signal }); return data; }
+export async function handleMonitoringNotification(id, body) { const { data } = await client.post(`/monitoring/notifications/${encodeURIComponent(id)}/handling`, body); return data; }
+export async function getStockFinancialHistory(symbol, { signal } = {}) { const { data } = await client.get(`/stocks/${encodeURIComponent(symbol)}/fundamentals/history`, { params: { limit: 12 }, signal }); return data; }
+export async function prepareInvestmentMaterial(id) { const { data } = await client.post(`/investment-research/materials/${encodeURIComponent(id)}/prepare`, {}); return data; }
+
+// Merrill clock: shared observations; account-owned analysis and preferences.
+export async function getMerrillOverview(region = "US", { signal } = {}) {
+  const { data } = await client.get("/merrill-clock", { params: { region }, signal });
+  return data;
+}
+export async function getMerrillSeries(ids, years = 10, { signal } = {}) {
+  const { data } = await client.get("/merrill-clock/series", { params: { ids: ids.join(","), years }, signal });
+  return data;
+}
+export async function refreshMerrillData() {
+  const { data } = await client.post("/merrill-clock/refresh", {});
+  return data;
+}
+export async function analyzeMerrillClock(region = "US") {
+  const { data } = await client.post("/merrill-clock/analyze", { region });
+  return data;
+}
+export async function updateMerrillPreferences(autoAnalysis) {
+  const { data } = await client.put("/merrill-clock/preferences", { auto_analysis: autoAnalysis });
+  return data;
+}
+
+export async function getCollectionStatus({ signal } = {}) { const { data } = await client.get("/data-center/collection/status", { signal, timeout: 15_000 }); return data; }

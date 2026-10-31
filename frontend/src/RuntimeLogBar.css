@@ -1,79 +1,59 @@
 .runtime-log {
+  --sva-runtime-padding: var(--sva-space-5);
+  min-width: 0;
   color: var(--sva-text);
   background: var(--sva-header-bg);
   border-bottom: 1px solid var(--sva-separator);
-  font-size: 12px;
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height);
 }
-
 .runtime-log--card {
-  margin-bottom: 22px;
+  margin-bottom: var(--sva-space-6);
   border: 1px solid var(--sva-separator);
   border-radius: var(--sva-radius);
   background: var(--sva-surface);
   overflow: hidden;
 }
-
+.runtime-log .ant-btn {
+  min-height: 36px;
+  height: auto;
+  padding-inline: var(--sva-space-3);
+  font-size: var(--sva-font-base);
+  line-height: var(--sva-line-height-compact);
+}
 .runtime-log__summary {
   display: flex;
   align-items: center;
-  gap: 20px;
-  min-height: 58px;
-  padding: 10px 24px;
+  gap: var(--sva-space-5);
+  max-width: var(--sva-content-max);
+  min-height: 72px;
+  margin-inline: auto;
+  padding: var(--sva-runtime-padding);
 }
-
 .runtime-log__heading {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sva-space-2);
   flex-shrink: 0;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--sva-font-lg);
   font-weight: 600;
+  line-height: var(--sva-line-height-compact);
 }
-
-.runtime-log__icon {
-  width: 15px;
-  height: 15px;
-  color: var(--sva-accent);
-}
-
-.runtime-log__metrics {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  flex-shrink: 0;
-  margin: 0;
-}
-
-.runtime-log__metric {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-
-.runtime-log__metric dt {
-  color: var(--sva-text-secondary);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
+.runtime-log__icon { width: 20px; height: 20px; color: var(--sva-accent); }
+.runtime-log__metrics { display: flex; align-items: center; gap: var(--sva-space-6); flex-shrink: 0; margin: 0; }
+.runtime-log__metric { display: flex; align-items: baseline; gap: var(--sva-space-2); }
+.runtime-log__metric dt { color: var(--sva-text-secondary); font-size: var(--sva-font-sm); white-space: nowrap; }
 .runtime-log__metric dd {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--sva-font-xl);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
+  line-height: var(--sva-line-height-compact);
   white-space: nowrap;
 }
-
-.runtime-log__metric-note {
-  margin-left: 4px;
-  color: var(--sva-text-secondary);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: normal;
-}
-
+.runtime-log__metric-note { margin-left: var(--sva-space-1); color: var(--sva-text-secondary); font-size: var(--sva-font-xs); font-weight: 400; letter-spacing: normal; }
 .runtime-log__latest {
   flex: 1;
   min-width: 100px;
@@ -82,126 +62,41 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--sva-text-secondary);
-  font-size: 11px;
+  font-size: var(--sva-font-sm);
 }
+.runtime-log__controls { display: flex; align-items: center; gap: var(--sva-space-2); flex-shrink: 0; margin-left: auto; }
+.runtime-log__controls .ant-segmented { font-size: var(--sva-font-sm); line-height: var(--sva-line-height-compact); }
+.runtime-log__controls .ant-segmented-item-label { display: flex; align-items: center; justify-content: center; min-height: 32px; padding-inline: var(--sva-space-2); line-height: var(--sva-line-height-compact); }
+.runtime-log__toggle.ant-btn { color: var(--sva-text-secondary); }
+.runtime-log__details { max-width: var(--sva-content-max); margin-inline: auto; padding: 0 var(--sva-runtime-padding) var(--sva-runtime-padding); border-top: 1px solid var(--sva-separator); }
+.runtime-log__details-heading { display: flex; justify-content: space-between; align-items: center; gap: var(--sva-space-3); padding-block: var(--sva-space-4); color: var(--sva-text-secondary); font-size: var(--sva-font-lg); line-height: var(--sva-line-height-compact); }
+.runtime-log__facts { display: flex; flex-wrap: wrap; gap: var(--sva-space-2) var(--sva-space-4); color: var(--sva-text-secondary); font-size: var(--sva-font-sm); line-height: var(--sva-line-height); }
+.runtime-log__facts strong { font-weight: 500; color: var(--sva-text); }
+.runtime-log__notice { margin: var(--sva-space-3) 0 0; color: var(--sva-text-secondary); font-size: var(--sva-font-sm); line-height: var(--sva-line-height); }
+.runtime-log__error { color: var(--sva-text); }
+.runtime-log__records { max-height: 360px; overflow: auto; overscroll-behavior: contain; padding: 0; margin: var(--sva-space-4) 0 0; list-style: none; }
+.runtime-log__record { display: grid; grid-template-columns: 108px minmax(0, 1fr) auto; align-items: start; gap: var(--sva-space-3); padding: var(--sva-space-4) 0; border-top: 1px solid var(--sva-separator); line-height: var(--sva-line-height); }
+.runtime-log__record time { color: var(--sva-text-tertiary); font-size: var(--sva-font-xs); font-variant-numeric: tabular-nums; }
+.runtime-log__record-title { overflow-wrap: anywhere; }
+.runtime-log__record-detail { margin-top: var(--sva-space-1); color: var(--sva-text-secondary); font-size: var(--sva-font-sm); overflow-wrap: anywhere; }
+.runtime-log__record .ant-tag { margin: 0; font-size: var(--sva-font-xs); line-height: var(--sva-line-height); }
+.runtime-log__empty { margin: var(--sva-space-5) 0 0; color: var(--sva-text-secondary); font-size: var(--sva-font-sm); }
 
-.runtime-log__controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-.runtime-log__controls .ant-segmented {
-  font-size: 11px;
-}
-
-.runtime-log__toggle.ant-btn {
-  padding-inline: 5px;
-  color: var(--sva-text-secondary);
-  font-size: 11px;
-}
-
-.runtime-log__details {
-  padding: 0 24px 16px;
-  border-top: 1px solid var(--sva-separator);
-}
-
-.runtime-log__details-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding-top: 12px;
-  color: var(--sva-text-secondary);
-}
-
-.runtime-log__facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 18px;
-  color: var(--sva-text-secondary);
-  line-height: 1.7;
-}
-
-.runtime-log__facts strong {
-  font-weight: 500;
-  color: var(--sva-text);
-}
-
-.runtime-log__notice {
-  margin: 10px 0 0;
-  color: var(--sva-text-secondary);
-  font-size: 11px;
-  line-height: 1.7;
-}
-
-.runtime-log__error {
-  color: var(--sva-text);
-}
-
-.runtime-log__records {
-  max-height: 290px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 0;
-  margin: 10px 0 0;
-  list-style: none;
-}
-
-.runtime-log__record {
-  display: grid;
-  grid-template-columns: 108px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid var(--sva-separator);
-  line-height: 1.7;
-}
-
-.runtime-log__record time {
-  color: var(--sva-text-tertiary);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.runtime-log__record-title {
-  overflow-wrap: anywhere;
-}
-
-.runtime-log__record-detail {
-  margin-top: 2px;
-  color: var(--sva-text-secondary);
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-
-.runtime-log__record .ant-tag {
-  margin: 0;
-  font-size: 10px;
-  line-height: 19px;
-}
-
-.runtime-log__empty {
-  margin: 18px 0 6px;
-  color: var(--sva-text-secondary);
-}
-
-@media (max-width: 1120px) {
-  .runtime-log__summary { gap: 14px; flex-wrap: wrap; }
-  .runtime-log__metrics { flex: 1; gap: 20px; }
-  .runtime-log__latest { order: 4; flex-basis: 100%; margin-top: -6px; }
+@media (max-width: 1280px) {
+  .runtime-log__summary { gap: var(--sva-space-4); flex-wrap: wrap; }
+  .runtime-log__metrics { flex: 1; gap: var(--sva-space-5); }
+  .runtime-log__latest { order: 4; flex-basis: 100%; }
 }
 
 @media (max-width: 640px) {
-  .runtime-log__summary { padding: 10px 14px; gap: 10px 12px; }
-  .runtime-log__controls { order: 1; gap: 3px; }
-  .runtime-log__metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); order: 2; flex-basis: 100%; gap: 10px; }
+  .runtime-log { --sva-runtime-padding: var(--sva-space-4); }
+  .runtime-log .ant-btn { min-height: 40px; }
+  .runtime-log__summary { gap: var(--sva-space-4) var(--sva-space-3); }
+  .runtime-log__controls { order: 1; gap: var(--sva-space-2); }
+  .runtime-log__controls .ant-segmented-item-label { min-height: 36px; }
+  .runtime-log__metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); order: 2; flex-basis: 100%; gap: var(--sva-space-3); }
   .runtime-log__metric { display: block; min-width: 0; }
-  .runtime-log__metric dd { font-size: 15px; }
-  .runtime-log__latest { margin-top: 0; }
-  .runtime-log__details { padding: 0 14px 14px; }
-  .runtime-log__record { grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; }
+  .runtime-log__metric dd { margin-top: var(--sva-space-1); }
+  .runtime-log__record { grid-template-columns: minmax(0, 1fr) auto; gap: var(--sva-space-1) var(--sva-space-3); }
   .runtime-log__record time { grid-column: 1 / -1; }
 }

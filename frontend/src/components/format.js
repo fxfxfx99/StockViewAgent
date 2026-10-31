@@ -9,12 +9,12 @@ export const sentimentColors = {
   negative: "red",
 };
 export const directionLabels = {
-  bullish: "潜在正向",
-  neutral: "潜在中性",
-  bearish: "潜在负向",
-  偏多: "潜在正向",
-  偏空: "潜在负向",
-  中性: "潜在中性",
+  bullish: "偏多",
+  neutral: "中性",
+  bearish: "偏空",
+  偏多: "偏多",
+  偏空: "偏空",
+  中性: "中性",
   不确定: "方向待评估",
 };
 export function formatTime(value) {

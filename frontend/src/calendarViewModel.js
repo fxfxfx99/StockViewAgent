@@ -111,7 +111,7 @@ export function eventNeedsVerification(event, now = new Date()) {
 
 export function eventStatusInfo(eventOrStatus, now = new Date()) {
   const status = typeof eventOrStatus === "string" ? eventOrStatus : eventOrStatus?.status;
-  if (eventNeedsVerification(eventOrStatus, now)) return { label: "日程已过·结果待核验", color: "orange" };
+  if (eventNeedsVerification(eventOrStatus, now)) return { label: "已到期·待核验", color: "orange" };
   return EVENT_STATUSES[status] || { label: "状态未知", color: "default" };
 }
 

@@ -34,8 +34,8 @@ test("automatic sessions permit refresh and initial enqueue without a manually s
   assert.equal(claimCommentsAutoStart({}, qk.xueqiuComments("600519.SS", 1), automaticNotStarted), true);
   assert.equal(commentsPrerequisiteNotice(automaticNotStarted, true), null);
   assert.equal(commentsPrerequisiteNotice(automaticNotStarted, false), null);
-  assert.match(commentsEmptyText(automaticNotStarted), /自动准备雪球会话/);
-  assert.match(commentsSessionText(automaticNotStarted), /无需手动填写/);
+  assert.match(commentsEmptyText(automaticNotStarted), /配置完成后自动开始/);
+  assert.match(commentsSessionText(automaticNotStarted), /会话自动更新/);
   assert.equal(commentsConfigured(notStarted), true, "old backends with a manual Cookie remain compatible");
   assert.equal(commentsConfigured({ ...notStarted, prerequisites: { xueqiu_configured: false, llm_configured: true } }), false);
   assert.equal(commentsConfigured({ ...automaticNotStarted, prerequisites: { ...automaticNotStarted.prerequisites, llm_configured: false } }), false);
@@ -49,12 +49,12 @@ test("automatic sessions still require a personal model key but never request a 
     prerequisites: { ...automaticNotStarted.prerequisites, llm_configured: false },
   };
   const notice = commentsPrerequisiteNotice(blocked, false);
-  assert.match(notice.message, /AI 模型/);
+  assert.match(notice.message, /模型接口/);
   assert.match(notice.description, /API Key/);
   assert.doesNotMatch(notice.description, /Cookie/);
   assert.equal(notice.showSetup, true);
   assert.equal(commentsServerErrorText(blocked), "");
-  assert.match(commentsEmptyText(blocked), /个人 AI 模型/);
+  assert.match(commentsEmptyText(blocked), /模型接口/);
   assert.equal(claimCommentsAutoStart({}, qk.xueqiuComments("600519.SS", 1), blocked), false);
 });
 
@@ -68,8 +68,8 @@ test("only actual login or verification responses request one manual administrat
     };
     const adminNotice = commentsPrerequisiteNotice(blocked, true);
     const memberNotice = commentsPrerequisiteNotice(blocked, false);
-    assert.match(adminNotice.description, /官网完成登录或验证/);
-    assert.match(adminNotice.description, /作为回退/);
+    assert.match(adminNotice.description, /登录或验证雪球/);
+    assert.match(adminNotice.description, /设置中更新 Cookie/);
     assert.equal(adminNotice.showSetup, true);
     assert.match(memberNotice.description, /联系管理员/);
     assert.equal(memberNotice.showSetup, false);
@@ -216,14 +216,14 @@ test("comment excerpts remove markup and scripts while remaining bounded plain s
 });
 
 test("empty-state messages distinguish first use, filtering, source failure and model failure", () => {
-  assert.match(commentsEmptyText(notStarted), /尚未抓取/);
-  assert.match(commentsEmptyText({ status: "empty", raw_count: 100 }), /没有符合/);
+  assert.match(commentsEmptyText(notStarted), /配置完成后自动采集/);
+  assert.match(commentsEmptyText({ status: "empty", raw_count: 100 }), /暂无符合/);
   assert.match(commentsEmptyText({ status: "empty", raw_count: 0 }), /未抓取到评论/);
   assert.match(commentsEmptyText({ status: "error", error: "雪球 Cookie 已失效" }), /接口暂不可用/);
   assert.match(commentsEmptyText({ status: "blocked", error: "雪球 Cookie 已失效", prerequisites: { xueqiu_configured: true, llm_configured: true } }), /接口暂不可用/);
-  assert.match(commentsEmptyText({ status: "error", error: "LLM 筛选失败" }), /AI 筛选未完成/);
-  assert.doesNotMatch(commentsEmptyText({ status: "error", error: "Request failed" }), /AI 筛选未完成/);
-  assert.match(commentsEmptyText({ status: "partial", raw_count: 20 }), /部分/);
+  assert.match(commentsEmptyText({ status: "error", error: "LLM 筛选失败" }), /筛选失败/);
+  assert.doesNotMatch(commentsEmptyText({ status: "error", error: "Request failed" }), /筛选失败/);
+  assert.match(commentsEmptyText({ status: "partial", raw_count: 20 }), /已筛选/);
 });
 
 test("cached daily scopes retain their actual date and timestamps use Beijing time", () => {

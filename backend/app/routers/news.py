@@ -8,13 +8,13 @@ from app.services import (
     china_tech_media_feeds,
     cn_headline_source_registry,
     cn_market_news,
+    data_collection,
     impact_analyzer,
-    news_feed_sync,
     news_watchlist_matcher,
     research_sources,
     rss_fetcher,
 )
-from app.storage import news_store, watchlist_store
+from app.storage import data_collection_store, news_store, watchlist_store
 from app.storage.users_store import UserRecord
 
 # 新闻抓取和解读可能调用账户凭证；开放模式仍由依赖自动使用本地默认账户。
@@ -28,7 +28,7 @@ class AnalyzeBody(BaseModel):
 
 
 class SyncArchiveBody(BaseModel):
-    symbols: list[str] | None = Field(default=None, description="若为空则使用当前股票列表")
+    symbols: list[str] | None = Field(default=None, max_length=3000, description="省略则使用当前股票列表")
     lookback_days: int | None = Field(default=None, ge=1, le=30)
 
 
@@ -128,15 +128,21 @@ def news_status():
     }
 
 
-@router.post("/sync-archive-feeds")
+@router.post("/sync-archive-feeds", status_code=202)
 async def sync_archive_feeds(
     user: Annotated[UserRecord, Depends(get_current_user)],
     body: SyncArchiveBody | None = None,
 ):
-    """合并拉取 RSS + A 股快讯 + 36氪/虎嗅，写入 SQLite，并更新 matched_symbols。"""
-    syms = body.symbols if body and body.symbols else watchlist_store.load_symbols(user.id)
+    """提交可追踪的后台采集任务；页面读取不负责联网抓取。"""
+    syms = body.symbols if body and body.symbols is not None else watchlist_store.load_symbols(user.id)
     lookback = body.lookback_days if body else None
-    return await news_feed_sync.sync_all_sources_to_archive(syms, lookback_days=lookback)
+    try:
+        result = data_collection.enqueue_news(syms, lookback_days=lookback)
+    except data_collection_store.CollectionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**result, "symbols_queried": syms, "lookback_days": lookback}
 
 
 @router.post("/analyze-symbol-archive")

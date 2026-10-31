@@ -107,7 +107,7 @@ def test_news_archive_counts_network_and_excludes_media_cache(monkeypatch):
     from app.storage import news_store
     raw = article()
 
-    async def rss(symbols, *, collection_stats):
+    async def rss(symbols, *, collection_stats, collector=None):
         collection_stats["records_received"] = 2
         return [copy.deepcopy(raw), copy.deepcopy(raw)]
 

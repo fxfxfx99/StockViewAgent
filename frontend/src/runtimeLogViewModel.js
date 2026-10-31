@@ -63,7 +63,7 @@ export function runtimeRecordView(record, index = 0) {
     if (runtimeCount(record?.records_added) !== null) detail.push(`新增 / 修订 ${formatRuntimeCount(record.records_added, false)} 条`);
   }
   if (record?.status === "failed") detail.push(failureLabel(record.error_code) || "请稍后重试");
-  if (record?.status === "unfinished") detail.push("超过 15 分钟未返回完成结果");
+  if (record?.status === "unfinished") detail.push("超过 15 分钟未返回结果");
   return {
     id: record?.id || `runtime-${index}`, time: record?.started_at,
     title: `${label}${llm && record?.model ? ` · ${record.model}` : ""}`,
@@ -88,6 +88,6 @@ export function runtimeOverviewView(data) {
       ["采集失败", collection?.failed], ["采集待完成", collection?.pending],
       ["共享采集记录", collection?.shared_records_received],
     ].map(([label, value]) => ({ label, value: formatRuntimeCount(value, false) })) : [],
-    notice: `${data?.tracking_started_at ? `自 ${runtimeTime(data.tracking_started_at, { dateOnly: true, full: true })} 开始记录` : "从运行日志功能启用后统计"}。LLM 按当前账户实际请求计数，含重试。采集覆盖行情、新闻、公司资料和 GitHub，公共来源由本机共享；按业务批次计数，分别列出获取量和新增 / 修订量。缓存读取、来源维护探测、股票搜索等未计入。`,
+    notice: `${data?.tracking_started_at ? `自 ${runtimeTime(data.tracking_started_at, { dateOnly: true, full: true })} 开始记录` : "自日志启用后统计"}。统计行情、新闻、公司资料和 GitHub；缓存读取、来源维护探测、股票搜索等未计入。`,
   };
 }

@@ -1,0 +1,7 @@
+.sva-display-refresh { display:flex; justify-content:space-between; align-items:center; gap:18px; padding:18px 20px; margin-bottom:24px; border:1px solid var(--sva-separator); border-radius:var(--sva-radius); background:var(--sva-surface); }
+.sva-display-refresh > div:first-child { min-width:0; }
+.sva-display-refresh strong { color:var(--sva-text); font-size:var(--sva-font-sm); }
+.sva-display-refresh p { color:var(--sva-text-secondary); font-size:var(--sva-font-xs); margin:6px 0 0; line-height:1.8; }
+.sva-display-refresh-actions { display:flex; align-items:center; flex-shrink:0; flex-wrap:wrap; gap:10px; }
+.sva-display-refresh-actions .ant-select { min-width:155px; }
+@media(max-width:700px) { .sva-display-refresh { align-items:flex-start; flex-direction:column; padding:16px; } .sva-display-refresh-actions { width:100%; } .sva-display-refresh-actions .ant-select { flex:1; } }

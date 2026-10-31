@@ -28,7 +28,7 @@ export class ErrorBoundary extends Component {
             description={
               <div>
                 <Paragraph className="sva-error-boundary__desc">
-                  请刷新页面重试。若持续出现，请打开浏览器开发者工具 (F12) → Console 查看报错。
+                  刷新重试；仍失败时，请反馈下方错误。
                 </Paragraph>
                 <Text code className="sva-error-boundary__code">
                   {String(this.state.error?.message || this.state.error)}

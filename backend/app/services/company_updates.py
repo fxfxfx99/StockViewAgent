@@ -210,6 +210,11 @@ async def refresh_watchlist_once() -> None:
     for symbol in symbols:
         if not xueqiu_pipeline.yahoo_to_xq_symbol(symbol):
             continue
+        from app.services import collector_resources, data_collection
+        resources = await asyncio.to_thread(collector_resources.snapshot, data_collection.get_config()["max_memory_mb"])
+        if resources["pressure"]:
+            logger.info("公司资料自动更新等待内存回落 rss_mb=%s", resources["rss_mb"])
+            break
         try:
             await asyncio.to_thread(get_company_bundle, symbol)
         except Exception:

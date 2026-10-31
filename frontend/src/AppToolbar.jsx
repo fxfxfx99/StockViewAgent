@@ -2,6 +2,11 @@ import { useLayoutEffect } from "react";
 import { Button, Dropdown, Tooltip } from "antd";
 import { CalendarOutlined, DatabaseOutlined, ExperimentOutlined, LineChartOutlined, LogoutOutlined, UserOutlined } from "@ant-design/icons";
 import RadarChartOutlined from "@ant-design/icons/es/icons/RadarChartOutlined";
+import GlobalOutlined from "@ant-design/icons/es/icons/GlobalOutlined";
+import FundOutlined from "@ant-design/icons/es/icons/FundOutlined";
+import EyeOutlined from "@ant-design/icons/es/icons/EyeOutlined";
+import PlaySquareOutlined from "@ant-design/icons/es/icons/PlaySquareOutlined";
+import DashboardOutlined from "@ant-design/icons/es/icons/DashboardOutlined";
 import { Link, useLocation } from "react-router-dom";
 import ThemeModeToggle from "./ThemeModeToggle.jsx";
 
@@ -21,23 +26,21 @@ export default function AppToolbar({ active = "market", settingsAction, user, au
         </Link>
       </div>
       <nav className="sva-app-nav" aria-label="主要导航">
-        <Link to="/today" className={active === "today" ? "is-active" : undefined} aria-current={active === "today" ? "page" : undefined}>
-          <RadarChartOutlined aria-hidden="true" /><span>今日变化</span>
-        </Link>
-        <Link to="/" className={active === "market" ? "is-active" : undefined} aria-current={active === "market" ? "page" : undefined}>
-          <LineChartOutlined aria-hidden="true" /><span>行情工作台</span>
-        </Link>
-        <Link to="/research" className={active === "research" ? "is-active" : undefined} aria-current={active === "research" ? "page" : undefined}>
-          <ExperimentOutlined aria-hidden="true" /><span>研究实验室</span>
-        </Link>
-        <Link to="/calendar" className={active === "calendar" ? "is-active" : undefined} aria-current={active === "calendar" ? "page" : undefined}>
-          <CalendarOutlined aria-hidden="true" /><span>经济日历</span>
-        </Link>
-        <Link to="/data" className={active === "data" ? "is-active" : undefined} aria-current={active === "data" ? "page" : undefined}>
-          <DatabaseOutlined aria-hidden="true" /><span>数据中心</span>
-        </Link>
+        <Link to="/" className={active === "market" ? "is-active" : undefined} aria-current={active === "market" ? "page" : undefined}><LineChartOutlined aria-hidden="true" /><span>关注个股</span></Link>
+        <Link to="/research" className={active === "research" ? "is-active" : undefined} aria-current={active === "research" ? "page" : undefined}><ExperimentOutlined aria-hidden="true" /><span>研究</span></Link>
+        <Link to="/monitor" className={active === "monitor" ? "is-active" : undefined} aria-current={active === "monitor" ? "page" : undefined}><EyeOutlined aria-hidden="true" /><span>监控</span></Link>
+        <Link to="/replay" className={active === "replay" ? "is-active" : undefined} aria-current={active === "replay" ? "page" : undefined}><PlaySquareOutlined aria-hidden="true" /><span>K线复盘</span></Link>
+        <Link to="/merrill-clock" className={active === "merrill-clock" ? "is-active" : undefined} aria-current={active === "merrill-clock" ? "page" : undefined}><DashboardOutlined aria-hidden="true" /><span>美林时钟</span></Link>
       </nav>
       <div className="sva-app-toolbar__actions">
+        <Dropdown trigger={["click"]} menu={{ items: [
+          { key: "today", icon: <RadarChartOutlined />, label: <Link to="/today">今日变化</Link> },
+          { key: "lab", icon: <ExperimentOutlined />, label: <Link to="/lab">量化实验室</Link> },
+          { key: "macro", icon: <FundOutlined />, label: <Link to="/macro">市场研判</Link> },
+          { key: "calendar", icon: <CalendarOutlined />, label: <Link to="/calendar">经济日历</Link> },
+          { key: "news", icon: <GlobalOutlined />, label: <Link to="/news">海外快讯</Link> },
+          { key: "data", icon: <DatabaseOutlined />, label: <Link to="/data">数据中心</Link> },
+        ] }}><Button type="text" aria-label="打开辅助工具">工具</Button></Dropdown>
         <ThemeModeToggle />
         {settingsAction ? <><span className="sva-toolbar-divider" aria-hidden="true" />{settingsAction}</> : null}
         {authRequired && user ? (

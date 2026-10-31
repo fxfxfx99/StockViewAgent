@@ -7,6 +7,8 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -682,3 +684,55 @@ def latest_for_symbol(symbol: str) -> dict[str, Any]:
         "financial": dict(financial) if financial else None,
         "mda": dict(mda) if mda else None,
     }
+
+
+def financial_history(symbol: str, limit: int = 12) -> dict[str, Any]:
+    """Read local reported values, preserving source fields and unknown units."""
+    from datetime import date
+    from zoneinfo import ZoneInfo
+    from app.schemas.tracking import canonical_symbol
+    symbol = canonical_symbol(symbol)
+    result = {"symbol": symbol, "items": [],
+              "note": "仅本地导入记录；原始字段未附单位时不推断、不换算。请按同报表类型与同报告期比较，报告期不是披露时间。"}
+    path = settings.data_dir / DB_NAME
+    if not path.exists():
+        return result
+    metadata = {"stkcd", "symbol", "shortname", "accper", "enddate", "typrep", "source", "source_type",
+                "indcd1", "indnme1", "report_date", "report_type", "updated_at", "published_at", "unit", "currency",
+                "annodt", "availableat", "available_at", "publishedat", "created_at", "observed_at", "recorded_at"}
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='financial_indicator_records'").fetchone():
+            return result
+        rows = conn.execute("SELECT * FROM financial_indicator_records WHERE symbol=? AND report_date<=? ORDER BY report_date DESC,report_type LIMIT ?",
+                            (symbol[:6], today.isoformat(), max(1, min(int(limit), 100)))).fetchall()
+    for row in rows:
+        try:
+            report_date = date.fromisoformat(row["report_date"])
+        except (TypeError, ValueError):
+            continue
+        if report_date > today:
+            continue
+        raw = json.loads(row["raw_json"])
+        values, units = {}, {}
+        for key, value in raw.items():
+            if key.split(".")[-1].lower() in metadata or re.search(r"(?:date|time|_id|code|单位)$", key, re.I) or isinstance(value, bool):
+                continue
+            text = str(value).strip()
+            percent = text.endswith("%")
+            try:
+                number = float(text[:-1] if percent else text)
+            except (ValueError, TypeError):
+                continue
+            if not math.isfinite(number):
+                continue
+            values[key] = number
+            explicit = raw.get(key + "_unit") or raw.get(key + ".unit")
+            units[key] = "%" if percent else str(explicit)[:50] if explicit else None
+        published, _, _ = _publication_metadata(raw)
+        result["items"].append({"report_date": row["report_date"], "report_type": row["report_type"],
+                                "source_type": row["source_type"], "source_name": Path(row["source_path"]).name,
+                                "observed_at": row["updated_at"], "published_at": published, "row_hash": row["row_hash"],
+                                "values": values, "units": units})
+    return result

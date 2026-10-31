@@ -93,9 +93,19 @@ def test_only_existing_built_assets_are_served(client):
     "/api/admin/users", "/api/ready", "/api/settings/llm", "/api/quant/orders",
     "/api/market/history/export", "/api/watchlist/profiles/unknown", "/api/xueqiu/bundle",
     "/api/news/source-config", "/api/transaction-agent/knowledge/ingest-local",
+    "/news", "/api/news/overseas", "/api/news/overseas/status", "/api/news/overseas/refresh",
+    "/macro", "/api/macro/catalog", "/api/macro/indices", "/api/macro/index-kline",
+    "/api/kline-learning/materials", "/api/market/fund-flow/dashboard",
     "/calendar", "/api/events/calendar", "/api/events/config", "/api/events/search",
     "/data", "/api/data-center/overview", "/api/data-center/files", "/api/data-center/records",
     "/today", "/api/tracking/theses", "/api/tracking/changes", "/api/tracking/refresh",
+    "/monitor", "/api/monitoring/overview", "/api/monitoring/model/verify", "/api/monitoring/plans",
+    "/research", "/lab", "/api/investment-research", "/api/investment-research/overview",
+    "/api/investment-research/dossiers", "/api/investment-research/dossiers/private",
+    "/api/investment-research/materials/private", "/api/investment-research/materials/private/pdf",
+    "/api/investment-research/reports/private", "/api/investment-research/jobs/private",
+    "/api/stocks/600519.SS/fundamentals/history",
+    "/api/news/earnings", "/api/news/earnings/refresh", "/api/news/earnings/report/pdf",
     "/api/market/kline/some%2Fother%2Fpath",
 ])
 def test_unlisted_paths_never_fall_back_to_spa(client, path):
@@ -123,7 +133,9 @@ def test_allowlist_covers_frontend_api_contract(client):
         response = client.request(method.upper(), "/api" + path)
         # The persistent research worker belongs to the local deployment. Adding
         # its authenticated UI must not silently expose it on the public trial.
-        if path.startswith(("/research/", "/tracking/", "/events/", "/data-center/", "/autopilot/", "/runtime/", "/admin/data-assets", "/settings/llm")):
+        # Overseas collection can include a configured licensed Benzinga feed;
+        # adding its local page does not expose it through the public trial.
+        if path.startswith(("/research/", "/investment-research/", "/tracking/", "/monitoring/", "/events/", "/data-center/", "/autopilot/", "/runtime/", "/admin/data-assets", "/settings/llm", "/news/overseas", "/news/earnings", "/macro/", "/merrill-clock", "/kline-learning/", "/kline-replay/")) or (path.startswith("/market/") and not path.startswith("/market/kline/")) or (path.startswith("/stocks/") and path.endswith("/fundamentals/history")):
             assert response.status_code == 404
             continue
         assert response.status_code == 200, (method, path, response.text)
@@ -138,6 +150,28 @@ def test_allowlist_covers_frontend_api_contract(client):
 ])
 def test_unlisted_methods_are_not_exposed(client, method, path):
     assert client.request(method, path).status_code == 404
+
+
+@pytest.mark.parametrize("method,path", [
+    ("HEAD", "/lab"), ("HEAD", "/research"),
+    ("POST", "/api/investment-research/dossiers"),
+    ("PATCH", "/api/investment-research/dossiers/private"),
+    ("POST", "/api/investment-research/dossiers/private/materials/upload"),
+    ("POST", "/api/investment-research/dossiers/private/monitoring-updates"),
+    ("POST", "/api/investment-research/dossiers/private/generate"),
+    ("DELETE", "/api/investment-research/materials/private"),
+    ("POST", "/api/investment-research/reports/private/adopt"),
+    ("POST", "/api/investment-research/reports/private/read"),
+    ("POST", "/api/monitoring/notifications/private/handling"),
+    ("GET", "/api/monitoring/runs/private/context"),
+    ("OPTIONS", "/api/investment-research/dossiers/private/materials/upload"),
+    ("OPTIONS", "/api/stocks/600519.SS/fundamentals/history"),
+])
+def test_personal_research_never_reaches_public_trial_backend(client, method, path):
+    response = client.request(method, path)
+    assert response.status_code == 404
+    if method != "HEAD":
+        assert response.json() == {"detail": "Not Found"}
 
 
 def test_only_allowlisted_cors_preflights_reach_backend(client):

@@ -60,22 +60,31 @@ def load_symbols(user_id: int) -> list[str]:
 
 
 def load_all_symbols_union() -> list[str]:
-    """所有登录用户自选股的并集（用于新闻命中、后台同步等）。"""
-    migrate_legacy_watchlist_for_admin(1)
-    d = _watchlists_dir()
+    """Read existing watchlists for shared jobs without creating default holdings.
+
+    Explicit user-facing load_symbols keeps its first-use defaults and legacy
+    migration. Background collectors can read the legacy admin list directly.
+    """
+    directory = settings.data_dir / "watchlists"
+    paths = sorted(directory.glob("*.json")) if directory.exists() and not directory.is_symlink() else []
+    legacy = settings.data_dir / _LEGACY_FILE
+    if not (directory / "1.json").exists() and legacy.exists():
+        paths.append(legacy)
     seen: set[str] = set()
     out: list[str] = []
-    for p in sorted(d.glob("*.json")):
+    for path in paths:
+        if path.is_symlink() or not path.is_file():
+            continue
         try:
-            raw = json.loads(p.read_text(encoding="utf-8"))
-            for s in raw.get("symbols") or []:
-                t = str(s).strip().upper()
-                if t and _SYMBOL_RE.match(t) and t not in seen:
-                    seen.add(t)
-                    out.append(t)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            for symbol in raw.get("symbols") or []:
+                value = str(symbol).strip().upper()
+                if value and _SYMBOL_RE.fullmatch(value) and value not in seen:
+                    seen.add(value)
+                    out.append(value)
         except (OSError, json.JSONDecodeError, AttributeError):
             continue
-    return out if out else load_symbols(1)
+    return out
 
 
 def save_symbols(user_id: int, symbols: list[str]) -> list[str]:

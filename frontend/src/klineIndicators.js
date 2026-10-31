@@ -3,7 +3,10 @@
  * 蜡烛升序：{ o,h,l,c,v,amount?,turnover_rate? }
  */
 
+// Missing observations are gaps, never zero-price observations. Numeric API strings
+// are accepted, while null, blanks, booleans and non-finite numbers are not.
 function num(v, fallback = 0) {
+  if (typeof v !== "number" && (typeof v !== "string" || !v.trim())) return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -12,80 +15,118 @@ function fills(n, val = null) {
   return Array.from({ length: n }, () => val);
 }
 
+function validPeriod(period) {
+  return Number.isInteger(period) && period > 0;
+}
+
+/** A trailing mean requires `period` consecutive valid observations. */
 export function sma(arr, period) {
-  const n = arr.length;
-  const out = fills(n);
-  if (period <= 0) return out;
-  for (let i = period - 1; i < n; i++) {
-    let s = 0;
-    let ok = true;
-    for (let j = 0; j < period; j++) {
-      const v = arr[i - j];
-      if (v == null || Number.isNaN(v)) { ok = false; break; }
-      s += v;
-    }
-    out[i] = ok ? s / period : null;
+  const out = fills(arr.length);
+  if (!validPeriod(period)) return out;
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < arr.length; i++) {
+    const value = num(arr[i], null);
+    if (value == null) { sum = 0; count = 0; continue; }
+    sum += value;
+    count += 1;
+    if (count > period) sum -= num(arr[i - period], null);
+    if (count >= period) out[i] = Number.isFinite(sum) ? sum / period : null;
   }
   return out;
 }
 
+/**
+ * EMA uses the first complete period's SMA as its seed, then alpha=2/(period+1).
+ * A missing observation resets the seed and warm-up. This deliberately preserves
+ * the chart's existing convention, which differs from MyTT/pandas ewm's first
+ * observation seed used by some backend indicators. No future bars are read.
+ */
 function emaClean(src, period) {
-  const n = src.length;
-  const out = fills(n);
-  if (period <= 0) return out;
-  const k = 2 / (period + 1);
-  let buf = [];
+  const out = fills(src.length);
+  if (!validPeriod(period)) return out;
+  const alpha = 2 / (period + 1);
+  let count = 0;
+  let mean = 0;
   let prev = null;
-  let started = false;
-  for (let i = 0; i < n; i++) {
-    if (src[i] == null || Number.isNaN(src[i])) { out[i] = null; continue; }
-    if (!started) {
-      buf.push(src[i]);
-      if (buf.length === period) {
-        prev = buf.reduce((a, b) => a + b, 0) / period;
-        out[i] = prev;
-        started = true;
-      }
+  for (let i = 0; i < src.length; i++) {
+    const value = num(src[i], null);
+    if (value == null) { count = 0; mean = 0; prev = null; continue; }
+    if (prev == null) {
+      count += 1;
+      mean += (value - mean) / count;
+      if (count === period) { prev = mean; out[i] = mean; }
     } else {
-      prev = src[i] * k + prev * (1 - k);
-      out[i] = prev;
+      prev += (value - prev) * alpha;
+      out[i] = Number.isFinite(prev) ? prev : null;
     }
   }
   return out;
 }
 
+/** MACD histogram uses the customary A-share scale: 2 * (DIF - DEA). */
 export function macd(closes, fast = 12, slow = 26, signal = 9) {
+  const dif = fills(closes.length);
+  const dea = fills(closes.length);
+  const hist = fills(closes.length);
+  if (![fast, slow, signal].every(validPeriod) || fast >= slow) return { dif, dea, hist };
   const emaFast = emaClean(closes, fast);
   const emaSlow = emaClean(closes, slow);
-  const n = closes.length;
-  const dif = fills(n);
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < closes.length; i++) {
     dif[i] = emaFast[i] != null && emaSlow[i] != null ? emaFast[i] - emaSlow[i] : null;
   }
-  const dea = emaClean(dif, signal);
-  const hist = fills(n);
-  for (let i = 0; i < n; i++) {
+  const signalLine = emaClean(dif, signal);
+  for (let i = 0; i < closes.length; i++) {
+    dea[i] = signalLine[i];
     hist[i] = dif[i] != null && dea[i] != null ? (dif[i] - dea[i]) * 2 : null;
   }
   return { dif, dea, hist };
 }
 
+/** Bollinger bands: trailing SMA ± multiplier * population standard deviation. */
+export function boll(closes, period = 20, multiplier = 2) {
+  const empty = () => ({ mid: fills(closes.length), upper: fills(closes.length), lower: fills(closes.length) });
+  if (!validPeriod(period) || !Number.isFinite(multiplier) || multiplier <= 0) return empty();
+  const mid = sma(closes, period);
+  const upper = fills(closes.length);
+  const lower = fills(closes.length);
+  for (let i = period - 1; i < closes.length; i++) {
+    if (mid[i] == null) continue;
+    let squared = 0;
+    for (let j = i - period + 1; j <= i; j++) squared += (num(closes[j], null) - mid[i]) ** 2;
+    const width = multiplier * Math.sqrt(squared / period);
+    upper[i] = Number.isFinite(mid[i] + width) ? mid[i] + width : null;
+    lower[i] = Number.isFinite(mid[i] - width) ? mid[i] - width : null;
+  }
+  return { mid, upper, lower };
+}
+
+/** K/D start at 50 after each complete N-bar window; a flat range has RSV=50. */
 export function kdj(highs, lows, closes, n = 9, m1 = 3, m2 = 3) {
   const len = closes.length;
   const kArr = fills(len);
   const dArr = fills(len);
   const jArr = fills(len);
+  if (![n, m1, m2].every(validPeriod)) return { k: kArr, d: dArr, j: jArr };
   let k = 50;
   let d = 50;
+  let validCount = 0;
   for (let i = 0; i < len; i++) {
-    if (i < n - 1) continue;
+    const high = num(highs[i], null);
+    const low = num(lows[i], null);
+    const close = num(closes[i], null);
+    if (high == null || low == null || close == null || high < low) {
+      validCount = 0; k = 50; d = 50; continue;
+    }
+    validCount += 1;
+    if (validCount < n) continue;
     let hh = -Infinity;
     let ll = Infinity;
     for (let j = i - n + 1; j <= i; j++) {
-      hh = Math.max(hh, highs[j]);
-      ll = Math.min(ll, lows[j]);
+      hh = Math.max(hh, num(highs[j], null));
+      ll = Math.min(ll, num(lows[j], null));
     }
-    const rsv = hh === ll ? 50 : ((closes[i] - ll) / (hh - ll)) * 100;
+    const rsv = hh === ll ? 50 : ((close - ll) / (hh - ll)) * 100;
     k = (rsv + (m1 - 1) * k) / m1;
     d = (k + (m2 - 1) * d) / m2;
     kArr[i] = k;
@@ -95,26 +136,32 @@ export function kdj(highs, lows, closes, n = 9, m1 = 3, m2 = 3) {
   return { k: kArr, d: dArr, j: jArr };
 }
 
+/** Wilder smoothing, requiring period valid changes after each data gap. */
 export function rsi(closes, period = 14) {
-  const n = closes.length;
-  const out = fills(n);
-  if (n <= period) return out;
+  const out = fills(closes.length);
+  if (!validPeriod(period)) return out;
+  let previous = null;
+  let count = 0;
   let gain = 0;
   let loss = 0;
-  for (let i = 1; i <= period; i++) {
-    const ch = closes[i] - closes[i - 1];
-    if (ch >= 0) gain += ch; else loss -= ch;
-  }
-  let avgGain = gain / period;
-  let avgLoss = loss / period;
-  out[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-  for (let i = period + 1; i < n; i++) {
-    const ch = closes[i] - closes[i - 1];
-    const g = ch > 0 ? ch : 0;
-    const l = ch < 0 ? -ch : 0;
-    avgGain = (avgGain * (period - 1) + g) / period;
-    avgLoss = (avgLoss * (period - 1) + l) / period;
-    out[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  for (let i = 0; i < closes.length; i++) {
+    const value = num(closes[i], null);
+    if (value == null) { previous = null; count = 0; gain = 0; loss = 0; continue; }
+    if (previous == null) { previous = value; continue; }
+    const change = value - previous;
+    previous = value;
+    count += 1;
+    const up = Math.max(change, 0);
+    const down = Math.max(-change, 0);
+    if (count <= period) { gain += up; loss += down; }
+    if (count < period) continue;
+    if (count === period) { gain /= period; loss /= period; }
+    else {
+      gain = (gain * (period - 1) + up) / period;
+      loss = (loss * (period - 1) + down) / period;
+    }
+    // A completely flat window is neutral; rises with no losses are 100.
+    out[i] = loss === 0 ? (gain === 0 ? 50 : 100) : 100 - 100 / (1 + gain / loss);
   }
   return out;
 }
@@ -281,13 +328,13 @@ function line(name, data, color, width = 1.2) {
   return { name, type: "line", xAxisIndex: 1, yAxisIndex: 1, data, showSymbol: false, lineStyle: { width, color }, emphasis: { disabled: true } };
 }
 
-export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormatter } = {}) {
-  const closes = candles.map((c) => num(c.c));
-  const highs = candles.map((c) => num(c.h));
-  const lows = candles.map((c) => num(c.l));
-  const volumes = candles.map((c) => num(c.v));
-  const amounts = candles.map((c) => num(c.amount));
-  const turns = candles.map((c) => (c.turnover_rate != null ? num(c.turnover_rate) : null));
+export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormatter, params = {} } = {}) {
+  const closes = candles.map((c) => num(c.c, null));
+  const highs = candles.map((c) => num(c.h, null));
+  const lows = candles.map((c) => num(c.l, null));
+  const volumes = candles.map((c) => num(c.v, null));
+  const amounts = candles.map((c) => num(c.amount, null));
+  const turns = candles.map((c) => (c.turnover_rate != null ? num(c.turnover_rate, null) : null));
   const id = indicatorId || "vol";
   const barTone = (i) => ({ color: closes[i] >= num(candles[i].o) ? "#f87171" : "#4ade80", opacity: 0.85 });
 
@@ -299,18 +346,18 @@ export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormat
       yAxisName: "成交量",
       yAxisFormatter: volumeAxisFormatter,
       series: [
-        { name: "成交量", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volumes.map((v, i) => ({ value: v, itemStyle: barTone(i) })) },
+        { name: "成交量", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: volumes.map((v, i) => (v == null ? null : { value: v, itemStyle: barTone(i) })) },
         line("VOL-MA5", ma5, "#eab308", 1),
         line("VOL-MA10", ma10, "#60a5fa", 1),
       ],
-      tooltipLines: (i) => [`成交量 ${volumes[i]}`, ma5[i] != null ? `MA5 ${ma5[i].toFixed(0)}` : null, ma10[i] != null ? `MA10 ${ma10[i].toFixed(0)}` : null].filter(Boolean),
+      tooltipLines: (i) => [`成交量 ${volumes[i] ?? "—"}`, ma5[i] != null ? `MA5 ${ma5[i].toFixed(0)}` : null, ma10[i] != null ? `MA10 ${ma10[i].toFixed(0)}` : null].filter(Boolean),
     };
   }
   if (id === "amount") {
     return {
       legend: ["成交额"], yAxisName: "成交额",
-      series: [{ name: "成交额", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: amounts.map((v, i) => ({ value: v, itemStyle: barTone(i) })) }],
-      tooltipLines: (i) => [`成交额 ${amounts[i]}`],
+      series: [{ name: "成交额", type: "bar", xAxisIndex: 1, yAxisIndex: 1, data: amounts.map((v, i) => (v == null ? null : { value: v, itemStyle: barTone(i) })) }],
+      tooltipLines: (i) => [`成交额 ${amounts[i] ?? "—"}`],
     };
   }
   if (id === "turnover") {
@@ -321,7 +368,8 @@ export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormat
     };
   }
   if (id === "macd") {
-    const { dif, dea, hist } = macd(closes);
+    const { fast = 12, slow = 26, signal = 9 } = params.macd || {};
+    const { dif, dea, hist } = macd(closes, fast, slow, signal);
     return {
       legend: ["DIF", "DEA", "MACD"], yAxisName: "MACD",
       series: [
@@ -332,7 +380,8 @@ export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormat
     };
   }
   if (id === "kdj") {
-    const { k, d, j } = kdj(highs, lows, closes);
+    const { period = 9, k: smoothK = 3, d: smoothD = 3 } = params.kdj || {};
+    const { k, d, j } = kdj(highs, lows, closes, period, smoothK, smoothD);
     return {
       legend: ["K", "D", "J"], yAxisName: "KDJ",
       series: [line("K", k, "#eab308"), line("D", d, "#60a5fa"), line("J", j, "#f472b6")],
@@ -340,11 +389,13 @@ export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormat
     };
   }
   if (id === "rsi") {
-    const r6 = rsi(closes, 6), r12 = rsi(closes, 12), r24 = rsi(closes, 24);
+    const periods = params.rsi?.periods || [6, 12, 24];
+    const colors = ["#eab308", "#60a5fa", "#a78bfa"];
+    const curves = periods.map((period) => ({ name: `RSI${period}`, data: rsi(closes, period) }));
     return {
-      legend: ["RSI6", "RSI12", "RSI24"], yAxisName: "RSI",
-      series: [line("RSI6", r6, "#eab308"), line("RSI12", r12, "#60a5fa"), line("RSI24", r24, "#a78bfa")],
-      tooltipLines: (i) => [r6[i] != null ? `RSI6 ${r6[i].toFixed(2)}` : null, r12[i] != null ? `RSI12 ${r12[i].toFixed(2)}` : null, r24[i] != null ? `RSI24 ${r24[i].toFixed(2)}` : null].filter(Boolean),
+      legend: curves.map(({ name }) => name), yAxisName: "RSI",
+      series: curves.map(({ name, data }, index) => line(name, data, colors[index % colors.length])),
+      tooltipLines: (i) => curves.flatMap(({ name, data }) => (data[i] != null ? [`${name} ${data[i].toFixed(2)}`] : [])),
     };
   }
   if (id === "bias") {
@@ -412,5 +463,5 @@ export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormat
     const e = emv(highs, lows, volumes, 14);
     return { legend: ["EMV"], yAxisName: "EMV", series: [line("EMV", e, "#4ade80")], tooltipLines: (i) => (e[i] != null ? [`EMV ${e[i].toFixed(4)}`] : []) };
   }
-  return buildSubIndicatorSeries(candles, "vol", { volumeAxisFormatter });
+  return buildSubIndicatorSeries(candles, "vol", { volumeAxisFormatter, params });
 }

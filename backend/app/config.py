@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.runtime_paths import resolve_data_dir
 
@@ -31,6 +32,14 @@ class Settings(BaseSettings):
 
     # 合并后返回的最大条数（多源聚合）
     news_feed_max_items: int = 250
+
+    # 海外公开新闻流独立运行；SQLite 租约防止多个 API worker 重复采集。
+    # 不依赖 ENABLE_SCHEDULER、股票列表、登录或大模型配置。
+    overseas_news_enabled: bool = True
+    overseas_news_poll_interval_sec: int = Field(default=120, ge=30, le=3600)
+    overseas_news_timeout_sec: float = Field(default=15.0, ge=1.0, le=60.0)
+    overseas_news_proxy_urls: str = Field(default="", repr=False)
+    overseas_news_benzinga_api_key: str = Field(default="", repr=False)
 
     # 新闻解读：仅分析 published_ts 在 N 天内的条目；0=不限制。
     news_max_age_days: int = 0
@@ -89,6 +98,15 @@ class Settings(BaseSettings):
     enable_scheduler: bool = True
     # Persistent public-data queue; no model calls or paid source selection.
     enable_data_collection: bool = True
+    # Shared weekly public history and account-scoped Merrill Clock interpretation.
+    enable_merrill_clock: bool = True
+    # Opt-in per-account observation plans; no model requests without verification.
+    enable_monitoring: bool = True
+    # Explicit filing lookup/download/interpretation jobs; no automatic model calls.
+    enable_earnings: bool = True
+    earnings_daily_call_limit: int = Field(default=12, ge=1, le=100)
+    enable_investment_research: bool = True
+    investment_research_daily_call_limit: int = Field(default=12, ge=1, le=100)
     # Research runs in a separate persistent worker, never inside API lifespan.
     enable_research_worker: bool = True
     # 启动后异步检查/预热外部数据源；不阻塞服务启动。

@@ -27,9 +27,8 @@ export function retentionInfo(value) {
 }
 
 export function fileRoleLabel(item) {
-  const roles = { rebuildable_cache: "可再生成缓存", protected_data: "长期保存", quarantine: "可恢复回收区", management: "目录管理" };
   const domains = { market: "行情", market_history: "行情历史", news: "新闻", company: "公司资料", research: "量化研究", knowledge: "知识库", accounts: "账户设置", uploads: "上传资料", economic_events: "经济事件", macro: "宏观数据", public_data: "公开资料", other: "本地数据", central_bank: "央行政策", fx: "汇率", commodities: "大宗商品", rates: "利率", financial: "金融数据" };
-  return [domains[item.data_domain] || "公开资料", roles[item.storage_role]].filter(Boolean).join(" · ");
+  return domains[item.data_domain] || "公开资料";
 }
 
 export function collectionStatus(item) {
@@ -50,13 +49,46 @@ export function collectionSubmissionNotice(result) {
   const queued = jobs.filter((job) => job.status === "queued" && !job.deduplicated).length;
   const active = jobs.filter((job) => job.deduplicated || job.status === "running").length;
   const cooldown = jobs.filter((job) => job.status === "cooldown").length;
-  return [queued ? `已提交 ${queued} 个采集任务` : "本次没有新增采集任务", active ? `${active} 个来源已有任务` : "", cooldown ? `${cooldown} 个来源正在冷却` : "", "请在任务列表查看进度。"].filter(Boolean).join("，");
+  return [queued ? `已提交 ${queued} 个采集任务` : "本次没有新增采集任务", active ? `${active} 个来源已有任务` : "", cooldown ? `${cooldown} 个来源正在冷却` : ""].filter(Boolean).join("，");
 }
 
 export function collectionServiceNotice(worker) {
-  if (worker?.enabled === false) return "采集服务未开启。手动任务会进入队列，启用采集服务后才会执行。";
-  if (worker?.enabled === true && worker.scheduler_enabled === false) return "服务器定时调度已关闭，仅处理手动提交的采集任务。";
+  if (worker?.enabled === false) return "手动任务会进入队列，启用采集服务后才会执行。";
+  if (worker?.enabled === true && worker.automatic_enabled === false) return "自动采集已关闭，仅处理手动提交的采集任务。";
+  if (worker?.enabled === true && worker.automatic_enabled == null && worker.scheduler_enabled === false) return "服务器定时调度已关闭，仅处理手动提交的采集任务。";
   return null;
+}
+
+export const COLLECTION_REASONS = {
+  memory_pressure: "API 内存达到软阈值，暂缓新任务，运行中任务继续。",
+  high_memory: "API 内存达到软阈值，暂缓新任务。",
+  low_disk_space: "磁盘空间不足，暂缓新任务。",
+  low_disk: "磁盘空间不足，暂缓新任务。",
+  daily_budget_exhausted: "今日公共采集额度已用完，明日恢复。",
+  disabled: "公共自动采集已关闭。",
+  service_disabled: "请在服务器启用采集服务。",
+  automatic_disabled: "自动采集已暂停。",
+  environment_disabled: "请在服务器启用采集服务。",
+  timeout: "任务超时，已采集数据保留。",
+};
+export function collectionRuntime(config, worker, failed = false) {
+  if (failed) return { label: "状态暂不可用", tone: "warning", description: "状态读取失败，显示上次记录。" };
+  if (!worker) return { label: "正在读取后台状态", tone: "default", description: "" };
+  const reason = worker.resources?.pressure ? "high_memory" : worker.reason;
+  if (worker.enabled === false) return { label: "服务环境已关闭", tone: "default", description: "" };
+  if (reason && COLLECTION_REASONS[reason] && !["disabled"].includes(reason)) return { label: "采集暂缓", tone: "warning", description: COLLECTION_REASONS[reason] };
+  if (config?.enabled === false || worker.automatic_enabled === false) return { label: "公共自动采集已暂停", tone: "default", description: "手动任务按资源与每日额度执行。" };
+  if (!worker.running) return { label: "等待采集服务", tone: "warning", description: "未检测到运行中的采集服务。" };
+  return { label: worker.active_jobs?.length ? "正在后台采集" : "等待下一计划", tone: "processing", description: "" };
+}
+export function sourceScheduleLabel(source, config, worker) {
+  if (source.enabled === false) return "此来源已暂停";
+  const schedule = source.schedule_mode === "daily" ? `每日 ${source.daily_at || "未设置"}（北京）` : `每 ${source.interval_minutes ?? "—"} 分钟`;
+  return config?.enabled === false || worker?.automatic_enabled === false || worker?.enabled === false ? `${schedule} · 当前未启用` : schedule;
+}
+export function collectionConfigValues(config = {}) {
+  return { max_concurrent_jobs: 1, max_memory_mb: 768, job_timeout_seconds: 240, overseas_enabled: true, overseas_poll_interval_sec: 120, ...config,
+    symbols: Array.isArray(config.symbols) ? config.symbols.join("\n") : String(config.symbols || ""), sources: Object.fromEntries(Object.entries(config.sources || {}).map(([id, value]) => [id, { ...value, schedule_mode: value.schedule_mode || "interval", daily_at: value.daily_at || "17:30" }])) };
 }
 
 export function fileQueryParams(filters = {}) {
@@ -113,13 +145,23 @@ export function collectionConfigPayload(values, sources) {
   if (!Number.isInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > 1000) throw new Error("每日采集任务上限需为 1–1000 的整数。");
   if (!Number.isInteger(maxSymbols) || maxSymbols < 1 || maxSymbols > 30) throw new Error("每轮股票数需为 1–30 的整数。");
   if (!Number.isInteger(minimumDisk) || minimumDisk < 128 || minimumDisk > 102400) throw new Error("磁盘剩余空间下限需为 128–102400 MiB。");
-  const payload = { enabled: values.enabled === true, rag_enabled: values.rag_enabled === true, use_watchlists: values.use_watchlists === true, daily_job_limit: dailyLimit, max_symbols_per_cycle: maxSymbols, min_free_disk_mb: minimumDisk, symbols, sources: {} };
+  const limits = {};
+  for (const [key, fallback, min, max, label] of [["max_concurrent_jobs", 1, 1, 3, "并发任务数"], ["max_memory_mb", 768, 128, 8192, "进程内存软阈值"], ["job_timeout_seconds", 240, 30, 600, "单任务超时"], ["overseas_poll_interval_sec", 120, 60, 3600, "海外采集间隔"]]) {
+    const value = Number(values[key] ?? fallback);
+    if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${label}需为 ${min}–${max} 的整数。`);
+    limits[key] = value;
+  }
+  const payload = { ...limits, overseas_enabled: values.overseas_enabled !== false, enabled: values.enabled === true, rag_enabled: values.rag_enabled === true, use_watchlists: values.use_watchlists === true, daily_job_limit: dailyLimit, max_symbols_per_cycle: maxSymbols, min_free_disk_mb: minimumDisk, symbols, sources: {} };
   for (const source of sources || []) {
     const item = values.sources?.[source.id];
     if (!item) continue;
     const interval = Number(item.interval_minutes);
     if (!Number.isInteger(interval) || interval < 60 || interval > 43200) throw new Error(`${source.name || source.id} 的采集间隔需为 60–43200 分钟。`);
-    payload.sources[source.id] = { enabled: item.enabled === true, interval_minutes: interval };
+    const mode = item.schedule_mode || "interval";
+    const dailyAt = item.daily_at || "17:30";
+    if (!["interval", "daily"].includes(mode)) throw new Error("请选择每日或按间隔采集。");
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dailyAt)) throw new Error("每日采集时间须为北京时间 HH:MM。");
+    payload.sources[source.id] = { enabled: item.enabled === true, interval_minutes: interval, schedule_mode: mode, daily_at: dailyAt };
   }
   return payload;
 }

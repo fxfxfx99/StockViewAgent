@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import math
+import time
+import weakref
+from datetime import datetime, timezone
 
 from app.services import (
     eastmoney_market,
@@ -23,6 +28,7 @@ from app.services.kline_pytdx import (
     is_pytdx_installed,
 )
 from app.storage.platform_store import kline_sdk_enabled
+from app.services.market_time import market_date
 
 
 _FALLBACK_SOURCE_LABELS = {
@@ -61,98 +67,181 @@ def _record_source_health(source_id: str, ok: bool, detail: str = "") -> None:
     )
 
 
-async def fetch_major_index_kline_with_fallbacks(index_key: str, range_param: str, interval: str) -> dict:
-    """大盘指数缓存优先；无缓存时 Baostock，随后多公开 HTTP 源兜底。"""
-    key = (index_key or "").strip().upper()
-    symbol = _MAJOR_INDEX_SYMBOLS.get(key)
-    provider_symbol = _MAJOR_INDEX_PROVIDER_SYMBOLS.get(key)
-    if not symbol:
-        allowed = ", ".join(sorted(_MAJOR_INDEX_SYMBOLS))
-        raise ValueError(f"未知指数代码，支持：{allowed}")
-    cache_key = f"INDEX_{key}"
-    cached = kline_bundle_cache.load_bundle(cache_key, range_param, interval)
-    if cached and (cached.get("payload") or {}).get("candles"):
-        out = dict(cached["payload"])
-        out["kline_source"] = "local_cache"
-        out["cache_saved_at"] = cached.get("saved_at")
-        return out
+INDEX_CACHE_TTL_SECONDS = 300
+_INDEX_FLIGHTS = weakref.WeakKeyDictionary()
 
-    label = eastmoney_market.MAJOR_INDEX_META[key][1]
-    if is_baostock_installed() and kline_sdk_enabled("baostock"):
-        try:
-            out = await asyncio.to_thread(fetch_kline_bundle_baostock_sync, symbol, range_param, interval)
-            out["index_key"] = key
-            out["symbol"] = label
-            out["kline_source"] = "baostock_index"
-            metrics = dict(out.get("metrics") or {})
-            metrics["name"] = label
-            out["metrics"] = metrics
-            kline_bundle_cache.save_bundle(cache_key, range_param, interval, out)
-            return out
-        except Exception as baostock_error:
-            pass
-    else:
-        baostock_error = RuntimeError("未启用")
 
+class _IndexFlight:
+    def __init__(self, task: asyncio.Task):
+        self.task = task
+        self.waiters = 0
+
+
+def _index_cache_fresh(entry: dict | None) -> bool:
     try:
-        out = await asyncio.wait_for(
-            eastmoney_market.fetch_major_index_kline_bundle(key, range_param, interval),
-            timeout=25.0,
-        )
-        out["kline_source"] = "eastmoney"
-    except Exception as primary_error:
+        saved = datetime.fromisoformat(str(entry["saved_at"]).replace("Z", "+00:00"))
+        age = time.time() - saved.replace(tzinfo=saved.tzinfo or timezone.utc).timestamp()
+        return 0 <= age < INDEX_CACHE_TTL_SECONDS
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def _validate_index_bundle(bundle: dict) -> None:
+    if not isinstance(bundle, dict):
+        raise ValueError("指数来源格式无效")
+    candles = bundle.get("candles")
+    if not isinstance(candles, list) or not candles:
+        raise ValueError("指数来源没有有效 K 线")
+    today = market_date(time.time())
+    previous = 0
+    for row in candles:
+        if not isinstance(row, dict) or any(isinstance(row.get(key), bool) for key in ("t", "o", "h", "l", "c", "v")):
+            raise ValueError("指数 K 线字段无效")
         try:
-            out = await asyncio.wait_for(
-                asyncio.to_thread(
-                    market_extra_http.fetch_kline_bundle_secondary_sync,
-                    symbol,
-                    range_param,
-                    interval,
-                    provider_symbol=provider_symbol,
-                ),
-                timeout=25.0,
-            )
-            out["kline_source"] = "tencent_index_fallback"
-        except Exception as tencent_error:
-            try:
-                out = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        market_extra_http.fetch_kline_bundle_sina_sync,
-                        symbol,
-                        range_param,
-                        interval,
-                        provider_symbol=provider_symbol,
-                    ),
-                    timeout=25.0,
-                )
-                out["kline_source"] = "sina_index_fallback"
-            except Exception as sina_error:
-                try:
-                    out = await asyncio.wait_for(
-                        yahoo_market.fetch_kline_bundle(symbol, range_param, interval), timeout=40.0
-                    )
-                    out["kline_source"] = "yahoo_stooq_fallback"
-                except Exception as fallback_error:
-                    def _reason(exc: Exception) -> str:
-                        text = str(exc).strip()
-                        return text or exc.__class__.__name__
+            stamp, o, h, low, close = [float(row[key]) for key in ("t", "o", "h", "l", "c")]
+            volume = float(row.get("v") or 0)
+        except (KeyError, ValueError, TypeError, OverflowError):
+            raise ValueError("指数 K 线字段无效") from None
+        if (not all(math.isfinite(value) for value in (stamp, o, h, low, close, volume))
+                or stamp <= previous
+                or min(o, h, low, close) <= 0 or volume < 0
+                or h < max(o, low, close) or low > min(o, close)):
+            raise ValueError("指数 K 线时间或 OHLC 数据无效")
+        try:
+            if market_date(stamp) > today:
+                raise ValueError("指数 K 线不能晚于上海当前日期")
+        except (OSError, OverflowError):
+            raise ValueError("指数 K 线时间无效") from None
+        previous = stamp
 
-                    raise RuntimeError(
-                        "大盘行情源不可用："
-                        f"Baostock {_reason(baostock_error)}；"
-                        f"东财 {_reason(primary_error)}；"
-                        f"腾讯 {_reason(tencent_error)}；"
-                        f"新浪 {_reason(sina_error)}；"
-                        f"Yahoo/Stooq {_reason(fallback_error)}"
-                    ) from fallback_error
-        out["index_key"] = key
-        out["symbol"] = label
-        metrics = dict(out.get("metrics") or {})
-        metrics["name"] = label
-        out["metrics"] = metrics
 
-    kline_bundle_cache.save_bundle(cache_key, range_param, interval, out)
+def _index_data_recent(bundle: dict, interval: str) -> bool:
+    # A-share holiday gaps can exceed a week; requests are current, not as-of.
+    days = {"1d": 14, "1wk": 21, "1mo": 45}.get(interval, 14)
+    return time.time() - float(bundle["candles"][-1]["t"]) <= days * 86400
+
+
+def _index_cached_response(cached: dict, *, stale: bool, error: str = "") -> dict:
+    if stale:
+        return kline_bundle_cache.merge_stale_response(cached, fetch_error=error)
+    out = dict(cached["payload"])
+    out.update(served_from_cache=True, cache_stale=False, cache_saved_at=cached.get("saved_at"),
+               data_as_of=kline_bundle_cache.last_bar_date_str(out.get("candles") or []))
     return out
+
+
+async def fetch_major_index_kline_with_fallbacks(
+    index_key: str, range_param: str, interval: str, *, force_refresh: bool = False, public_only: bool = False,
+) -> dict:
+    """Five public A-share indices with expiring cache and validated failover.
+
+    Per-event-loop single flight avoids duplicate UI/collector requests. A stale
+    cache is retained if every live source fails, with its original observation time.
+    """
+    key = (index_key or "").strip().upper()
+    if key not in _MAJOR_INDEX_SYMBOLS:
+        raise ValueError(f"未知指数代码，支持：{', '.join(sorted(_MAJOR_INDEX_SYMBOLS))}")
+    loop = asyncio.get_running_loop()
+    flights = _INDEX_FLIGHTS.setdefault(loop, {})
+    flight_key = (key, range_param, interval, public_only)
+    flight = flights.get(flight_key)
+    if flight is None:
+        cached = kline_bundle_cache.load_bundle(f"INDEX_{key}", range_param, interval)
+        if cached:
+            try:
+                _validate_index_bundle(cached.get("payload") or {})
+            except ValueError:
+                cached = None
+        if (not force_refresh and cached and _index_cache_fresh(cached)
+                and _index_data_recent(cached["payload"], interval)):
+            return _index_cached_response(cached, stale=False)
+        flight = _IndexFlight(asyncio.create_task(
+            _refresh_major_index(key, range_param, interval, public_only=public_only, cached=cached)))
+        flights[flight_key] = flight
+
+        def finished(task: asyncio.Task) -> None:
+            if flights.get(flight_key) is flight:
+                flights.pop(flight_key)
+            # The last waiter may have gone away before a provider failed.
+            if not task.cancelled():
+                task.exception()
+
+        flight.task.add_done_callback(finished)
+    flight.waiters += 1
+    try:
+        # A cancelled HTTP request must not cancel another caller's refresh.
+        return copy.deepcopy(await asyncio.shield(flight.task))
+    finally:
+        flight.waiters -= 1
+        if flight.waiters == 0 and not flight.task.done():
+            if flights.get(flight_key) is flight:
+                flights.pop(flight_key)
+            flight.task.cancel()
+            await asyncio.gather(flight.task, return_exceptions=True)
+
+
+async def _refresh_major_index(
+    key: str, range_param: str, interval: str, *, public_only: bool, cached: dict | None,
+) -> dict:
+    cache_key = f"INDEX_{key}"
+    symbol = _MAJOR_INDEX_SYMBOLS[key]
+    provider_symbol = _MAJOR_INDEX_PROVIDER_SYMBOLS[key]
+    label = eastmoney_market.MAJOR_INDEX_META[key][1]
+    providers = [
+        ("eastmoney", lambda: eastmoney_market.fetch_major_index_kline_bundle(key, range_param, interval), 12),
+        ("tencent_index_fallback", lambda: asyncio.to_thread(
+            market_extra_http.fetch_kline_bundle_secondary_sync, symbol, range_param, interval,
+            provider_symbol=provider_symbol), 15),
+        ("sina_index_fallback", lambda: asyncio.to_thread(
+            market_extra_http.fetch_kline_bundle_sina_sync, symbol, range_param, interval,
+            provider_symbol=provider_symbol), 15),
+    ]
+    if not public_only and is_baostock_installed() and kline_sdk_enabled("baostock"):
+        providers.append(("baostock_index", lambda: asyncio.to_thread(
+            fetch_kline_bundle_baostock_sync, symbol, range_param, interval), 20))
+    providers.append(("yahoo_stooq_fallback", lambda: yahoo_market.fetch_kline_bundle(symbol, range_param, interval), 20))
+    failures = []
+    outdated = None
+    for provider, fetch, timeout in providers:
+        try:
+            out = await asyncio.wait_for(fetch(), timeout=timeout)
+            _validate_index_bundle(out)
+            if out.get("cache_stale"):
+                raise ValueError("上游返回过期缓存")
+            if cached and float(out["candles"][-1]["t"]) < float(cached["payload"]["candles"][-1]["t"]):
+                raise ValueError("上游返回比已保存记录更旧的行情")
+            if not _index_data_recent(out, interval):
+                if not outdated or float(out["candles"][-1]["t"]) > float(outdated["candles"][-1]["t"]):
+                    outdated = {**out, "kline_source": provider}
+                raise ValueError("指数来源已长时间未更新")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            failures.append(f"{provider}: {type(exc).__name__}")
+            _record_source_health("index_" + provider, False)
+            continue
+        out = dict(out)
+        out.update(index_key=key, symbol=label, range=range_param, interval=interval,
+                   kline_source=provider, served_from_cache=False, cache_stale=False,
+                   data_as_of=kline_bundle_cache.last_bar_date_str(out["candles"]))
+        out["metrics"] = {**(out.get("metrics") if isinstance(out.get("metrics"), dict) else {}), "name": label}
+        if provider == "yahoo_stooq_fallback":
+            out["source_url"] = ("https://stooq.com/q/d/l/" if "stooq" in str(out["metrics"].get("data_source", "")).lower()
+                                 else "https://finance.yahoo.com/")
+        kline_bundle_cache.save_bundle(cache_key, range_param, interval, out)
+        entry = kline_bundle_cache.load_bundle(cache_key, range_param, interval)
+        out["cache_saved_at"] = (entry or {}).get("saved_at")
+        _record_source_health("index_" + provider, True)
+        return out
+    error = "大盘行情源暂不可用；" + "；".join(failures)
+    if cached:
+        return _index_cached_response(cached, stale=True, error=error)
+    if outdated:
+        return {**outdated, "index_key": key, "symbol": label, "range": range_param, "interval": interval,
+                "served_from_cache": False, "cache_stale": True,
+                "data_as_of": kline_bundle_cache.last_bar_date_str(outdated["candles"]),
+                "cache_warning": "来源返回的最新行情已较长时间未更新，仅供查看历史。"}
+    raise RuntimeError(error)
 
 
 def _attach_source(out: dict, source_id: str, _fallback_note: str) -> dict:

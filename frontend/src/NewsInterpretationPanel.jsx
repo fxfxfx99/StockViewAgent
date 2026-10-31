@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
@@ -14,14 +14,26 @@ import {
   App as AntApp,
 } from "antd";
 import * as api from "./api.js";
+import { newsSyncNotice } from "./newsQueueViewModel.js";
 import { qk } from "./hooks/queryKeys.js";
 import { useNewsActions } from "./hooks/useNewsTracking.js";
 import NewsImpactCard from "./components/NewsImpactCard.jsx";
+import { useAuth } from "./AuthContext.jsx";
 
 const { Text } = Typography;
 const PAGE_SIZE = 8;
+const EarningsReportsPanel = lazy(() => import("./EarningsReportsPanel.jsx"));
 
 export default function NewsInterpretationPanel({ symbol, displayName }) {
+  const { user } = useAuth();
+  const [section, setSection] = useState("news");
+  if (!symbol) return null;
+  return <div><Segmented aria-label="新闻与财报内容" value={section} onChange={setSection} options={[{ value: "news", label: "新闻" }, { value: "earnings", label: "财报季" }]} style={{ marginBottom: 16 }} />
+    {section === "news" ? <NewsContent key={`${user?.id}:${symbol}`} symbol={symbol} /> : <Card size="small" variant="borderless" className="ex-section-card sva-panel sva-news-panel"><Suspense fallback={<div style={{ padding: 32, textAlign: "center" }}><Spin aria-label="加载财报季" /></div>}><EarningsReportsPanel symbol={symbol} displayName={displayName} /></Suspense></Card>}
+  </div>;
+}
+
+function NewsContent({ symbol }) {
   const { message } = AntApp.useApp();
   const [scope, setScope] = useState("analysis");
   const [sort, setSort] = useState("importance");
@@ -57,11 +69,7 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
       } else if (kind === "analyze") {
         message.success(`已解读 ${result.analyzed} 条`);
       } else {
-        message.success(
-          result?.merged_unique
-            ? `已同步 ${result.merged_unique} 条新闻`
-            : "新闻已更新"
-        );
+        message.info(newsSyncNotice(result));
       }
     } catch (error) {
       message.error(api.getApiErrorMessage(error));
@@ -75,7 +83,6 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
       size="small"
       variant="borderless"
       className="ex-section-card sva-panel sva-news-panel"
-      title="相关新闻解读"
       extra={
         <Space wrap size={6}>
           <Button
@@ -83,8 +90,9 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
             disabled={busy}
             loading={analyze.isPending}
             onClick={() => void run("analyze")}
+            title="每批解读约需数分钟"
           >
-            补充分析（{api.NEWS_ANALYSIS_BATCH_SIZE}条/批）
+            解读（{api.NEWS_ANALYSIS_BATCH_SIZE} 条/批）
           </Button>
           <Button
             size="small"
@@ -94,11 +102,13 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
             loading={sync.isPending}
             onClick={() => void run("sync")}
           >
-            更新新闻
+            采集新闻
           </Button>
+          <Button size="small" loading={news.isFetching} onClick={() => news.refetch()}>读取归档</Button>
         </Space>
       }
     >
+      {sync.data ? <Alert type="info" showIcon message={newsSyncNotice(sync.data)} style={{ marginBottom: 12 }} /> : null}
       <div className="sva-news-toolbar">
         <div className="sva-news-toolbar__left">
           <Segmented
@@ -114,7 +124,6 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
             }}
           />
           <Text type="secondary">
-            {displayName ? `${displayName} · ` : ""}
             {scope === "pending" ? "近30天 · " : ""}
             {news.data?.total || 0} 条
           </Text>
@@ -129,17 +138,13 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
           options={[
             {
               value: "importance",
-              label: scope === "pending" ? "重点事项优先" : "相关 / 影响优先",
+              label: scope === "pending" ? "重点事项优先" : "相关性 / 影响优先",
             },
             { value: "latest", label: "发布时间优先" },
           ]}
           className="sva-news-sort"
         />
       </div>
-
-      <Text type="secondary" style={{ display: "block", marginBottom: 10 }}>
-        每批最多解读 {api.NEWS_ANALYSIS_BATCH_SIZE} 条新闻，可能需要数分钟；完成后可继续补充。
-      </Text>
 
       {news.error ? (
         <Alert
@@ -159,8 +164,8 @@ export default function NewsInterpretationPanel({ symbol, displayName }) {
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={
                 scope === "pending"
-                  ? "近30天暂无待解读新闻。可先点「更新新闻」。"
-                  : "暂无通过相关性筛选的解读。可切换「待解读」或先更新新闻。"
+                  ? "近 30 天暂无待解读新闻。"
+                  : "暂无解读，可查看「待解读」。"
               }
             />
           ) : null}

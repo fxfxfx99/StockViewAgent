@@ -199,27 +199,27 @@ def status(user_id):
              "quality": record["payload"].get("quality"), "symbols": record["payload"].get("symbols", []),
              "created_at": record["created_at"]} if record else None)
     if not enabled:
-        phase, action = "disabled", "开启本地研究 worker 和研究开关"
+        phase, action = "disabled", "开启本地研究服务与研究开关"
     elif watchlist["issue"]:
-        phase, action = "attention", "修复无法读取的自选列表；已有文件保持不变"
+        phase, action = "attention", "自选列表读取失败，请修复"
     elif not watchlist["research_symbols"]:
         phase, action = "waiting_watchlist", "添加 A 股自选标的后自动继续"
     elif config["paused"]:
-        phase, action = "paused", "研究已暂停；关注判断、数据采集和模拟账本维护继续"
+        phase, action = "paused", "研究已暂停，关注判断、采集与模拟维护继续"
     elif not configured:
-        phase, action = "waiting_llm", "保存大模型配置后自动开始研究；数据采集继续"
+        phase, action = "waiting_llm", "保存大模型配置后自动研究，采集继续"
     elif not healthy:
-        phase, action = "worker_offline", "等待本地 worker 启动或恢复"
+        phase, action = "worker_offline", "等待本地研究服务启动或恢复"
     elif any(job and job["retry_at"] for job in jobs.values()):
-        phase, action = "attention", "任务暂时失败；保留已有数据并在冷却结束后自动重试"
+        phase, action = "attention", "任务失败，冷却后自动重试"
     elif jobs["collect"] and jobs["collect"]["status"] in _ACTIVE:
-        phase, action = "collecting", "采集完成后自动运行研究和模拟维护"
+        phase, action = "collecting", "采集完成后自动研究与模拟维护"
     elif not data:
-        phase, action = "collecting", "等待完整股票池的数据快照；失败采集将按冷却重试"
+        phase, action = "collecting", "等待完整股票池的数据快照，采集失败后冷却重试"
     elif jobs["research"] and jobs["research"]["status"] in _ACTIVE:
-        phase, action = "researching", "在固定预算内生成、验证候选并记录失败证据"
+        phase, action = "researching", "在预算内生成并验证候选，记录失败结果"
     else:
-        phase, action = "observing", "持续积累行情与前向证据；达到门槛后才更新现行策略"
+        phase, action = "observing", "积累行情与前向记录，达标后更新策略"
     try:
         from app.services import source_autopilot
         source_health = source_autopilot.summary(user_id)

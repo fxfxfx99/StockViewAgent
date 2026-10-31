@@ -34,25 +34,27 @@ export function commentsPrerequisiteNotice(snapshot, isAdmin) {
   if (!needsCookie && !needsModel) return null;
   const sourceInstruction = needsLogin || needsVerification
     ? (isAdmin
-      ? "请在雪球官网完成登录或验证，再在配置台提供有效的登录 Cookie 作为回退，然后重新更新。"
-      : "请联系管理员完成雪球登录或验证，并提供有效的登录 Cookie 作为回退，然后重新更新。")
-    : (isAdmin ? "请在配置台配置或更新雪球登录 Cookie。" : "请联系管理员配置或更新雪球登录 Cookie。");
+      ? "登录或验证雪球后，在设置中更新 Cookie。"
+      : "请联系管理员登录或验证雪球，更新 Cookie。")
+    : (isAdmin ? "请在设置中更新雪球 Cookie。" : "请联系管理员更新雪球 Cookie。");
   return {
-    message: needsVerification ? "雪球需要人工验证" : needsLogin ? "雪球需要登录" : needsCookie ? "评论精选需要完成配置" : "请先配置 AI 模型",
-    description: [needsCookie ? sourceInstruction : "", needsModel ? "请在配置台设置你自己的 AI 模型 API Key。" : ""].filter(Boolean).join(" "),
+    message: needsVerification ? "雪球需要人工验证" : needsLogin ? "雪球需要登录" : needsCookie ? "请先连接雪球" : "请先配置模型接口",
+    description: [needsCookie ? sourceInstruction : "", needsModel ? "在设置中填写模型 API Key。" : ""].filter(Boolean).join(" "),
     showSetup: needsModel || isAdmin,
   };
 }
 
 export function commentsSessionText(snapshot) {
   const session = snapshot?.xueqiu_session;
-  if (session?.mode === "manual") return "当前使用管理员提供的雪球登录 Cookie；登录失效时需管理员更新。";
+  if (session?.mode === "manual") return "使用管理员提供的雪球 Cookie。";
   if (snapshot?.prerequisites?.xueqiu_auto_session !== true && session?.mode !== "automatic") return "";
-  const base = "雪球 Cookie 默认由服务自动获取并更新，无需手动填写。";
-  if (session?.status === "login_required") return `${base} 当前雪球要求登录，需管理员处理一次。`;
-  if (session?.status === "verification_required") return `${base} 当前雪球要求人工验证，自动获取已暂停。`;
-  if (session?.status === "unavailable") return `${base} 自动会话暂不可用${session.retry_at ? `，可于 ${commentsTime(session.retry_at)}（北京时间）后重试` : "，请稍后重试"}。`;
-  if (session?.status === "ready") return `${base} 当前自动会话可用。`;
+  const base = "雪球会话自动更新。";
+  if (session?.status === "login_required" || session?.status === "verification_required") {
+    if (commentsPrerequisiteNotice(snapshot, false)) return "";
+    return session.status === "login_required" ? "雪球需要登录，请联系管理员处理。" : "雪球需要人工验证，请联系管理员处理。";
+  }
+  if (session?.status === "unavailable") return `雪球自动会话暂不可用${session.retry_at ? `，${commentsTime(session.retry_at)}（北京时间）后重试` : "，请稍后重试"}。`;
+  if (session?.status === "ready") return "雪球自动会话可用。";
   return base;
 }
 
@@ -164,25 +166,25 @@ export function commentsTime(value) {
 }
 
 export function commentsEmptyText(snapshot) {
-  if (commentsJobActive(snapshot)) return "正在抓取并筛选评论，完成后会自动显示精选观点。";
+  if (commentsJobActive(snapshot)) return "正在抓取与筛选评论…";
   if (!snapshot || snapshot.status === "not_started") return snapshot?.prerequisites?.xueqiu_auto_session === true
-    ? "尚未抓取评论。服务会自动准备雪球会话并开始筛选，也可以手动更新。"
-    : "尚未抓取评论。配置完成后会自动开始，也可以手动更新。";
+    ? "尚未采集评论，配置完成后自动开始。"
+    : "配置完成后自动采集评论。";
   if (snapshot.status === "blocked" && ((!commentsSourceConfigured(snapshot) && snapshot.prerequisites?.xueqiu_configured === false) || snapshot.prerequisites?.llm_configured === false)) {
     return snapshot.prerequisites?.llm_configured === false
-      ? "请先配置个人 AI 模型，配置完成后即可抓取并筛选评论。"
-      : "配置尚未就绪，请查看上方配置说明。";
+      ? "请先配置模型接口。"
+      : "请先完成配置。";
   }
   if (snapshot.status === "error" || snapshot.status === "blocked") {
-    if (snapshot.xueqiu_session?.status === "login_required") return "雪球要求登录，管理员处理后即可重新更新评论。";
-    if (snapshot.xueqiu_session?.status === "verification_required") return "雪球要求人工验证，管理员处理后即可重新更新评论。";
+    if (snapshot.xueqiu_session?.status === "login_required") return "雪球需要登录，请联系管理员处理。";
+    if (snapshot.xueqiu_session?.status === "verification_required") return "雪球需要人工验证，请联系管理员处理。";
     const error = `${snapshot.error_kind || ""} ${snapshot.error?.code || ""} ${commentsErrorText(snapshot.error)}`;
-    if (/\b(?:llm|model|ai)\b|模型|筛选|分析/i.test(error)) return "AI 筛选未完成，暂时无法展示精选评论。请检查模型配置后重试。";
-    if (/xueqiu|cookie|雪球|接口|抓取|来源|source|fetch/i.test(error)) return "雪球评论接口暂不可用，请按会话状态提示稍后重试。";
-    if (snapshot.status === "blocked") return "评论任务暂不可用，请查看错误说明后重试。";
-    return "本次更新失败，暂时没有可展示的精选评论。请查看错误说明后重试。";
+    if (/\b(?:llm|model|ai)\b|模型|筛选|分析/i.test(error)) return "筛选失败，请检查模型配置后重试。";
+    if (/xueqiu|cookie|雪球|接口|抓取|来源|source|fetch/i.test(error)) return "雪球评论接口暂不可用，请稍后重试。";
+    if (snapshot.status === "blocked") return "评论任务不可用，请查看错误说明。";
+    return "更新失败，请查看错误说明。";
   }
-  if (snapshot.status === "partial") return "本轮只完成部分抓取或筛选，已完成部分暂无符合条件的评论。";
-  if (Number(snapshot.raw_count) === 0) return "本次范围内未抓取到评论，可以换一个范围或稍后更新。";
-  return "已完成筛选，本次没有符合相关性与研究价值要求的评论。";
+  if (snapshot.status === "partial") return "已筛选的评论中暂无入选。";
+  if (Number(snapshot.raw_count) === 0) return "未抓取到评论，可切换范围或稍后更新。";
+  return "暂无符合筛选条件的评论。";
 }

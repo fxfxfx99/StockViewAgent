@@ -57,6 +57,7 @@
 | 能力 | 服务 | 存储 |
 |------|------|------|
 | RSS + A 股快讯 + 36氪/虎嗅 | `news_feed_sync.py` | `news.db` |
+| Reuters / Bloomberg / Benzinga / WSJ / FT / CNBC 海外新闻流 | `overseas_news.py`，API 后台持续轮询 | `overseas_news.db`，同步至 `news.db` |
 | 东财个股公告/资讯 | `eastmoney_stock_news.py` | 并入 RSS 拉取与 `sync-archive-feeds` |
 | 共用 HTTP 重试 | `news_fetch_http.py` | RSS/快讯/东财 F10 |
 | 列表标的匹配 | `news_watchlist_matcher.py` | 写入 archive 时打标 |
@@ -65,9 +66,11 @@
 
 单页 UI 在 K 线与策略观点下方提供 **相关新闻解读**：`GET /api/news/archive`（`scope=analysis|pending`）、`POST /api/news/sync-archive-feeds`、`POST /api/news/analyze-symbol-archive`。
 
-新闻同步与补充分析是长请求，耗时取决于新闻源和模型；前端超时均为 600 秒，开发代理超时为 900 秒。UI 每次补充分析最多处理 3 条，完成后可再次点击继续；前端 API 包装的默认批次同为 3 条，也支持显式指定数量。
+新闻同步与补充解读是长请求，耗时取决于新闻源和模型；前端超时均为 600 秒，开发代理超时为 900 秒。UI 每次补充解读最多处理 3 条，完成后可再次点击继续；前端 API 包装的默认批次同为 3 条，也支持显式指定数量。
 
 路由前缀：`/api/news/*`。
+
+海外聚合在 `/news` 单独展示，使用公开订阅源、新闻索引与可选 Benzinga 授权 API。独立于模型和研究自动运行，只要 API 后端开启即按来源周期采集。公开流不保证终端级实时性；来源维护、代理与限流退避配置见 [海外新闻聚合](OVERSEAS_NEWS.md)。
 
 ### 新闻与财务修订留痕
 
@@ -87,18 +90,42 @@
 
 路由：`/api/kline-learning/*`，供脚本与后台调度使用。
 
-## 宏观 / 量化 / 信号（扩展 API）
+## 财报季使用的数据
 
-以下后端 API 供脚本与 Agent 调用，单页不提供对应面板：
+财报原文另由 **新闻与财报 → 财报季** 按需查找：巨潮资讯正式公告与 PDF 为首选，东方财富公告及附件为备用。股票身份、报告期、文档类型与原文地址经过校验；摘要、预告、快报和单独更正公告不能冒充正式财报。细节见 [财报季解读](EARNINGS_REPORTS.md)。
 
-- `/api/macro/*` — Tushare 宏观、申万行业（`macro_tushare_service.py`）
+## 观察与复盘使用的数据
+
+`/monitor` 按计划选择新闻、行情、技术指标、策略观点、公司公告、论坛讨论六类本地来源，默认新闻与行情。新闻包含本地内容版本、海外快讯、公共资料与经济日历；技术指标由本地日 K 计算，策略与论坛读取当前账户已保存记录，公告读取目录与缓存片段。论坛、策略观点不能冒充独立事实，公告目录不能冒充财报全文。股票列表按保存的成员逐股匹配并展示缺口，不因缺少某股资料而使用其他股票替代。报告展示实际来源、发布时间、本地采集时间及缺失／陈旧状态；未取到资料不能解释为没有变化，未来日程不能解释为已公布结果。分析时不临时访问外部数据源，更新速度取决于采集后台与上游覆盖。配置、使用及请求额度见 [观察与复盘](OBSERVATION_MONITORING.md)。
+
+## 个人研究档案与本地财务历史
+
+新 `/research` 使用 `/api/investment-research/*`，与量化 `/api/research/*` 分开。研究组合上述本地来源、账户私有笔记／文字／PDF和已完成监控任务的冻结证据；没有在线抓取或付费 embedding。上传材料与旧模型结论保留来源身份，不自动提升为独立事实。PDF提取保留物理页与覆盖情况，无OCR；模型只读实际列出的片段。手动单次模型请求、相同输入报告复用、明确采用和长期保留规则见 [研究工作台](INVESTMENT_WORKSPACE.md)。
+
+关注个股的财务图表使用 `GET /api/stocks/{symbol}/fundamentals/history`，只读 `company_fundamentals.db` 的本地导入历史，无网络请求；没有本地数据库时返回空列表，不补采。默认最近12条，最多100条，保留报告期、报表类型、原始字段、数值、来源文件名、行哈希和已有披露时间。字段单位仅取明确的字段单位或百分号，未知单位留空，不推断币种或金额倍率。按可比报告期和报表类型核对，不能将累计值视为单季值，也不能以报告期冒充披露时点。
+
+## 市场研判：宏观、行业与资金
+
+`/macro` 提供大盘指数、宏观与行业、资金概览、K 线解读四个页签，整合 ExStockNEWS 2.0 的对应功能。五个 A 股主要指数采用公开来源；黄金、离岸人民币、布伦特和申万行业保留 Tushare 权限要求。资金流沿用现有市场适配器与缓存，代理指标保留口径说明。模型解读、问答须主动触发。
+
+- `/api/macro/indices`、`/api/macro/index-kline` — 公开指数目录与日／周／月行情（`macro_workspace.py`、`kline_pipeline.py`）。
+- `/api/macro/catalog`、`/api/macro/kline`、`/api/macro/sw-daily/*` — 宏观目录、公开或授权序列、申万行业（`macro_tushare_service.py`）。
+- `/api/market/fund-flow/dashboard` 等 — 行业资金、机构代理、北向、两融、热榜与 ETF。
+- `/api/kline-learning/*` — 大盘／个股解读、问答与管理员共享资料。
+
+公开指数展示缓存 TTL 为 5 分钟，失败保留有效旧行情并标记陈旧；空响应、异常价格和比已有缓存更旧的数据不会覆盖缓存。中央 `public_market` 每小时自动归档五个指数，不依赖股票列表、模型或 Tushare。Tushare 宏观／行业 K 线 TTL 为 15 分钟、行业目录为 1 小时，凭据变化重新取数，过期回退有明确提示。具体范围与接口参数见 [市场研判](MARKET_WORKSPACE.md)。
+
+## 量化 / 信号（扩展 API）
+
+以下后端 API 也供脚本与 Agent 调用：
+
 - `/api/quant/*` — 回测与策略草案（`quant_backtest.py`）
 - `/api/decision-signals/*` — 基于 Transaction Agent 输出的信号沉淀
 - `/api/stock-picker-agents/*` — 自定义选股 Agent
 
 ## 研究实验室：持久行情与验证证据
 
-前端 `/research` 与 `/api/research/*` 使用独立研究 worker。`research_data.py` 复用行情管线和图表缓存，将原始 JSON、带来源与时点的 Parquet、校验 manifest 保存为不可变批次；`research_store.py` 以 SQLite WAL 保存账户隔离的策略、实验、快照、任务和预算。旧快照保留原引用，新修订只影响新快照。
+前端 **工具 → 量化研究实验室**（`/lab`）与原有 `/api/research/*` 使用独立量化研究 worker。`research_data.py` 复用行情管线和图表缓存，将原始 JSON、带来源与时点的 Parquet、校验 manifest 保存为不可变批次；`research_store.py` 以 SQLite WAL 保存账户隔离的策略、实验、快照、任务和预算。旧快照保留原引用，新修订只影响新快照。
 
 首次按 5 年日线采集；已有足够覆盖时转为近期增量，覆盖不足继续补采。离线缓存会标记陈旧，来源、复权口径或成交量单位变化会隔离分支。Baostock `adjustflag=3` 为不复权，成交量按股保存；不能与前复权数据无标记拼接。
 
