@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.services import event_calendar_context, public_data_context, llm_client
@@ -28,11 +29,12 @@ DEFAULT_USER_TEMPLATE = (
     "请完成：1）技术面解读；2）与资料观点的对照；3）交易思路与具体风险。"
 )
 DEFAULT_MARKET_SYSTEM = (
-    "你是熟悉中国A股大盘与技术分析的助手。结合主要指数的K线与量能，从趋势、关键位、结构三方面简明解读；"
+    "你是熟悉全球股票指数、商品期货与技术分析的助手。结合所选市场的K线与量能，从趋势、关键位、结构三方面简明解读；"
+    "遵循提供的交易所、报价单位、时区和合约口径，连续期货的换月跳空不得直接视为投资回报；"
     "同一依据、限制或风险只说明一次；结尾注明：仅供分析参考，不构成投资建议。"
 )
 DEFAULT_MARKET_USER_TEMPLATE = (
-    "指数：{index_label}（键 {index_key}） 区间：{range_param} 周期：{interval}\n【指标】\n{metrics}\n"
+    "市场品种：{index_label}（键 {index_key}） 区间：{range_param} 周期：{interval}\n【指标】\n{metrics}\n"
     "【K线摘要】\n{candles_summary}\n【学习资料】\n{learning_context}\n请从大盘视角解读，可对照学习资料观点。"
 )
 
@@ -521,13 +523,13 @@ def build_learning_context(max_total: int = 6000) -> str:
     return "\n\n".join(parts) if parts else "（暂无学习资料。）"
 
 
-def format_candles_summary(candles: list[dict[str, Any]], last_n: int = 35) -> str:
+def format_candles_summary(candles: list[dict[str, Any]], last_n: int = 35, *, timezone_name: str = "Asia/Shanghai") -> str:
     tail = candles[-last_n:] if len(candles) > last_n else candles
     lines = []
     for c in tail:
         ts = c.get("t")
         try:
-            ds = market_date(int(ts)).isoformat() if ts else "?"
+            ds = str(c.get("date") or datetime.fromtimestamp(int(ts), ZoneInfo(timezone_name)).date().isoformat()) if ts else "?"
         except Exception:
             ds = "?"
         lines.append(f"{ds} O:{c.get('o')} H:{c.get('h')} L:{c.get('l')} C:{c.get('c')} V:{c.get('v')}")

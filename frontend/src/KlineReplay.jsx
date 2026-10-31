@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, App as AntApp, AutoComplete, Button, DatePicker, Input, Layout, Segmented, Select, Slider, Spin, Switch, Tag, Tooltip } from "antd";
+import { Alert, App as AntApp, AutoComplete, Button, DatePicker, Grid, Input, Layout, Segmented, Select, Slider, Spin, Switch, Tag, Tooltip } from "antd";
 import PlayCircleOutlined from "@ant-design/icons/es/icons/PlayCircleOutlined";
 import PauseCircleOutlined from "@ant-design/icons/es/icons/PauseCircleOutlined";
 import StepBackwardOutlined from "@ant-design/icons/es/icons/StepBackwardOutlined";
@@ -18,11 +18,13 @@ import AppToolbar from "./AppToolbar.jsx";
 import { ConfigConsoleButton } from "./ConfigConsole.jsx";
 import { useAuth } from "./AuthContext.jsx";
 import { useThemeMode } from "./ThemeModeProvider.jsx";
-import { candlePaletteFromStyles, getKlineChartHeight } from "./klineChartOption.js";
+import { buildCandleVolumeChartOption, candlePaletteFromStyles, formatCandleDate, getIndicatorDataHints, getKlineChartHeight } from "./klineChartOption.js";
 import KlineIndicatorControls, { useKlineIndicatorSettings } from "./KlineIndicatorControls.jsx";
-import { buildReplayChartOption, candleDate, clampReplayCursor, exportReplayNotesCsv, findReplayCursor, getVisibleReplayNotes, initialReplayCursor, normalizeReplayCode } from "./replayViewModel.js";
+import useKlineViewport from "./useKlineViewport.js";
+import { candleDate, clampReplayCursor, exportReplayNotesCsv, findReplayCursor, getReplayVisibleCandles, getVisibleReplayNotes, initialReplayCursor, normalizeReplayCode } from "./replayViewModel.js";
 import * as api from "./api.js";
 import "./KlineReplay.css";
+import "./KlineViewportControls.css";
 
 const EMPTY = [];
 const PERIODS = [{ label: "日 K", value: "1d" }, { label: "周 K", value: "1wk" }, { label: "月 K", value: "1mo" }];
@@ -138,6 +140,8 @@ function PracticeNotebook({ userId, symbol, date, close, blind, onFocus }) {
 }
 function KlineReplayWorkspace({ user, authRequired, logout, initialSymbol }) {
   const { mode } = useThemeMode();
+  const screens = Grid.useBreakpoint();
+  const compact = !screens.md;
   const today = useMemo(() => dayjs(candleDate({ t: Date.now() / 1000 })), []);
   const [stockInput, setStockInput] = useState(initialSymbol || "600519");
   const [stockOptions, setStockOptions] = useState([]);
@@ -161,6 +165,14 @@ function KlineReplayWorkspace({ user, authRequired, logout, initialSymbol }) {
   const [palette, setPalette] = useState(() => candlePaletteFromStyles(getComputedStyle(document.documentElement)));
   const candles = data?.candles || EMPTY;
   const currentIndex = clampReplayCursor(cursor, candles.length);
+  const visibleCandles = useMemo(() => getReplayVisibleCandles(candles, currentIndex, period), [candles, currentIndex, period]);
+  const visibleBars = indicatorSettings.display.visibleBars;
+  const { applyViewport, onEvents, resetViewport, showAll, revision } = useKlineViewport({
+    contextKey: JSON.stringify([user?.id ?? "anonymous", request.symbol, request.start_date, request.end_date, request.replayStart, period]),
+    candles: visibleCandles,
+    visibleBars,
+  });
+  const indicatorHints = useMemo(() => getIndicatorDataHints(visibleCandles, indicatorSettings), [visibleCandles, indicatorSettings]);
   const current = candles[currentIndex];
   const currentDate = current ? candleDate(current) : "";
   const firstDate = candles.length ? candleDate(candles[0]) : "";
@@ -229,7 +241,17 @@ function KlineReplayWorkspace({ user, authRequired, logout, initialSymbol }) {
     const frame = requestAnimationFrame(() => setPalette(candlePaletteFromStyles(getComputedStyle(document.documentElement))));
     return () => cancelAnimationFrame(frame);
   }, [mode]);
-  const chartOption = useMemo(() => buildReplayChartOption(candles, currentIndex, period, { palette, indicatorSettings, defaultShowBars: 80, formatDate: candleDate, volumeAxisFormatter }), [candles, currentIndex, period, palette, indicatorSettings]);
+  const chartOption = useMemo(() => !visibleCandles.length ? null : applyViewport(buildCandleVolumeChartOption({
+    candles: visibleCandles,
+    aggregateFromDaily: false,
+    timeZone: "Asia/Shanghai",
+    compact,
+    palette,
+    indicatorSettings,
+    defaultShowBars: visibleBars,
+    formatDate: (candle) => candle.date || formatCandleDate(candle.t, "Asia/Shanghai"),
+    volumeAxisFormatter,
+  })), [visibleCandles, palette, indicatorSettings, visibleBars, compact, applyViewport, revision]);
   const submit = (event) => {
     event.preventDefault();
     const symbol = normalizeReplayCode(stockInput);
@@ -270,11 +292,12 @@ function KlineReplayWorkspace({ user, authRequired, logout, initialSymbol }) {
         <section className="replay-snapshot replay-panel" aria-label="当前回放日的数据快照"><div className="replay-snapshot-heading"><div className="replay-stock-heading"><h2>{stockTitle}</h2>{!blind && data?.name && data.name !== data.symbol ? <span>{data.symbol}</span> : null}<Tag>{blind ? "盲练中" : "历史复盘"}</Tag></div><div className="replay-current-quote"><strong className={signClass(current.change_pct)}>{fixed(current.c)}</strong><span className={signClass(current.change_pct)}>{percentage(current.change_pct, true)}</span></div></div>
           <div className="replay-snapshot-date"><span>回放日期</span><strong><time dateTime={currentDate}>{currentDate}</time><span>当日收盘</span></strong></div><MetricTable candle={current} data={data} />
         </section>
-        <section className="replay-chart-panel replay-panel" aria-label="逐根 K 线图与回放控制"><div className="replay-chart-toolbar"><Segmented options={PERIODS} value={period} onChange={setPeriod} aria-label="K 线周期" /></div><KlineIndicatorControls settings={indicatorSettings} onChange={(next) => { paused(); return setIndicatorSettings(next); }} compact />
+        <section className="replay-chart-panel replay-panel" aria-label="逐根 K 线图与回放控制"><div className="replay-chart-toolbar stock-replay-chart-toolbar"><Segmented options={PERIODS} value={period} onChange={setPeriod} aria-label="K 线周期" /><div className="stock-replay-viewport-actions" role="group" aria-label="回放 K 线显示范围"><Button size="small" onClick={resetViewport} disabled={!canReplay}>最近 {visibleBars} 根</Button><Button size="small" onClick={showAll} disabled={!canReplay}>全部</Button></div></div><KlineIndicatorControls settings={indicatorSettings} onChange={(next) => { paused(); return setIndicatorSettings(next); }} compact={compact} />
           <div className="replay-chart-context"><span><i aria-hidden="true" />截至 {currentDate}</span><span>{periodNote}</span></div>
             <div className="replay-transport replay-transport-top"><div className="replay-play-buttons"><Tooltip title="回到本次起练日期"><Button icon={<UndoOutlined />} aria-label="重置到起练日期" onClick={reset} disabled={currentIndex === origin} /></Tooltip><Tooltip title="回退 1 个交易日（←）"><Button icon={<StepBackwardOutlined />} aria-label="回退 1 个交易日" onClick={() => step(-1)} disabled={currentIndex === 0} /></Tooltip><Button type="primary" className="replay-play-button" icon={playing ? <PauseCircleOutlined /> : <PlayCircleOutlined />} onClick={() => setPlaying((value) => !value)} disabled={atEnd} aria-label={playing ? "暂停自动回放" : "开始自动回放"}>{playing ? "暂停" : "播放"}</Button><Tooltip title="推进 1 个交易日（→）"><Button icon={<StepForwardOutlined />} aria-label="推进 1 个交易日" onClick={() => step(1)} disabled={atEnd} /></Tooltip><Select value={speed} onChange={setSpeed} options={[0.5, 1, 2, 4].map((value) => ({ label: `${value}×`, value }))} aria-label="回放速度" popupMatchSelectWidth={false} /></div>
               <div className="replay-jump"><DatePicker value={jumpDate} onChange={setJumpDate} allowClear={false} inputReadOnly aria-label="跳转至历史日期" disabledDate={(date) => date.format("YYYY-MM-DD") < firstDate || date.format("YYYY-MM-DD") > lastDate} /><Button onClick={jump} disabled={!jumpDate}>跳转</Button></div></div>
-          {chartOption ? <ReactECharts option={chartOption} notMerge lazyUpdate style={{ height: getKlineChartHeight(400, indicatorSettings), width: "100%" }} opts={{ renderer: "canvas" }} aria-label={`截至 ${currentDate} 的历史 K 线图`} /> : null}
+          {chartOption ? <ReactECharts option={chartOption} onEvents={onEvents} notMerge lazyUpdate style={{ height: getKlineChartHeight(400, indicatorSettings), width: "100%" }} opts={{ renderer: "canvas" }} aria-label={`截至 ${currentDate} 的历史 K 线图`} /> : null}
+          {indicatorHints.length ? <div className="stock-replay-indicator-hints" role="status">{indicatorHints.map((hint) => <p key={hint}>{hint}</p>)}</div> : null}
           <div className="replay-player"><div className="replay-player-top"><div className="replay-player-date"><span>当前交易日</span><strong>{currentDate}</strong></div><span className={`replay-play-state${playing ? " is-playing" : ""}`} role="status">{atEnd ? "本段复盘完成" : playing ? "自动推进中" : "已暂停"}</span></div>
             <Slider min={0} max={Math.max(1, candles.length - 1)} value={currentIndex} onChange={seek} disabled={candles.length < 2} tooltip={{ formatter: (index) => candles[index] ? candleDate(candles[index]) : "" }} aria-label="逐日回放进度" ariaValueTextFormatterForHandle={(index) => candles[index] ? candleDate(candles[index]) : ""} />
             <div className="replay-progress-labels"><span>{firstDate}</span><span>{currentIndex + 1} / {candles.length} 个交易日 · {progress}%</span><span>{lastDate}</span></div>

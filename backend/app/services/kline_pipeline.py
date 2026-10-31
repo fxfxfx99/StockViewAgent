@@ -50,6 +50,7 @@ _MAJOR_INDEX_SYMBOLS = {
     "CYB": "399006.SZ",
     "HS300": "000300.SS",
     "SSE50": "000016.SS",
+    "STAR50": "000688.SS",
 }
 
 _MAJOR_INDEX_PROVIDER_SYMBOLS = {
@@ -58,6 +59,7 @@ _MAJOR_INDEX_PROVIDER_SYMBOLS = {
     "CYB": "sz399006",
     "HS300": "sh000300",
     "SSE50": "sh000016",
+    "STAR50": "sh000688",
 }
 
 
@@ -133,7 +135,7 @@ def _index_cached_response(cached: dict, *, stale: bool, error: str = "") -> dic
 async def fetch_major_index_kline_with_fallbacks(
     index_key: str, range_param: str, interval: str, *, force_refresh: bool = False, public_only: bool = False,
 ) -> dict:
-    """Five public A-share indices with expiring cache and validated failover.
+    """Six public A-share indices with expiring cache and validated failover.
 
     Per-event-loop single flight avoids duplicate UI/collector requests. A stale
     cache is retained if every live source fails, with its original observation time.

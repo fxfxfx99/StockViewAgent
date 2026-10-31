@@ -1,0 +1,14 @@
+.stock-replay-chart-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.stock-replay-viewport-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.stock-replay-viewport-actions .ant-btn { flex-shrink: 0; }
+.stock-replay-indicator-hints { margin: 8px 0 12px; padding: 0 6px; color: var(--sva-text-tertiary); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.stock-replay-indicator-hints p { margin: 2px 0; }
+@media (max-width: 480px) {
+  .replay-chart-panel .stock-replay-chart-toolbar { align-items: flex-start; gap: 10px 6px; }
+  .replay-chart-panel .stock-replay-viewport-actions { margin-left: auto; }
+  .replay-chart-panel .replay-play-buttons { flex-wrap: wrap; justify-content: flex-start; row-gap: 8px; }
+  .replay-chart-panel .replay-jump { min-width: 0; }
+  .replay-chart-panel .replay-jump .ant-picker { min-width: 0; }
+  .replay-chart-panel .replay-player-top { align-items: flex-start; flex-wrap: wrap; }
+  .replay-chart-panel .replay-progress-labels { flex-wrap: wrap; }
+}

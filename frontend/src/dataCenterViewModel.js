@@ -86,6 +86,10 @@ export function sourceScheduleLabel(source, config, worker) {
   const schedule = source.schedule_mode === "daily" ? `每日 ${source.daily_at || "未设置"}（北京）` : `每 ${source.interval_minutes ?? "—"} 分钟`;
   return config?.enabled === false || worker?.automatic_enabled === false || worker?.enabled === false ? `${schedule} · 当前未启用` : schedule;
 }
+export function sourceMinimumInterval(source) {
+  const value = Number(source?.min_interval_minutes);
+  return Number.isInteger(value) && value >= 1 && value <= 43200 ? value : 60;
+}
 export function collectionConfigValues(config = {}) {
   return { max_concurrent_jobs: 1, max_memory_mb: 768, job_timeout_seconds: 240, overseas_enabled: true, overseas_poll_interval_sec: 120, ...config,
     symbols: Array.isArray(config.symbols) ? config.symbols.join("\n") : String(config.symbols || ""), sources: Object.fromEntries(Object.entries(config.sources || {}).map(([id, value]) => [id, { ...value, schedule_mode: value.schedule_mode || "interval", daily_at: value.daily_at || "17:30" }])) };
@@ -156,7 +160,8 @@ export function collectionConfigPayload(values, sources) {
     const item = values.sources?.[source.id];
     if (!item) continue;
     const interval = Number(item.interval_minutes);
-    if (!Number.isInteger(interval) || interval < 60 || interval > 43200) throw new Error(`${source.name || source.id} 的采集间隔需为 60–43200 分钟。`);
+    const minimumInterval = sourceMinimumInterval(source);
+    if (!Number.isInteger(interval) || interval < minimumInterval || interval > 43200) throw new Error(`${source.name || source.id} 的采集间隔需为 ${minimumInterval}–43200 分钟。`);
     const mode = item.schedule_mode || "interval";
     const dailyAt = item.daily_at || "17:30";
     if (!["interval", "daily"].includes(mode)) throw new Error("请选择每日或按间隔采集。");

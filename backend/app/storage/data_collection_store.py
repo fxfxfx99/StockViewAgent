@@ -420,6 +420,9 @@ def finish_job(identifier, result, *, now=None):
         status = result.get("status", "success")
         if status not in {"success", "partial", "failed", "skipped"}:
             raise ValueError("无效采集结果")
+        retry_after = result.get("retry_after_seconds")
+        if retry_after is not None and (type(retry_after) is not int or not 30 <= retry_after <= 21600):
+            raise ValueError("重试间隔须为30–21600秒")
         received, added = result.get("records_received", 0), result.get("records_added", 0)
         if any(type(value) is not int or not 0 <= value <= 1000000000 for value in (received, added)) or added > received:
             raise ValueError("无效采集计数")
@@ -441,7 +444,11 @@ def finish_job(identifier, result, *, now=None):
             state["failures"] = state.get("failures", 0) + 1
             if status == "partial" and received:
                 state["last_success_at"] = iso(stamp)
-        state["retry_at"] = iso(stamp + retry_delay(state.get("failures", 0), code)) if status in {"failed", "partial"} else None
+        # Composite sources can checkpoint individual instruments and back off
+        # those failures independently. A bounded source retry keeps healthy
+        # instruments fresh even when one provider remains unavailable.
+        delay = retry_after if retry_after is not None else retry_delay(state.get("failures", 0), code)
+        state["retry_at"] = iso(stamp + delay) if status in {"failed", "partial"} else None
         if status == "skipped" and code in {"source_busy", "memory_pressure"}:
             state["retry_at"] = iso(stamp + 60)
         payload = json.loads(job["payload"])

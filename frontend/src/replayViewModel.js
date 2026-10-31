@@ -74,8 +74,10 @@ function finiteNumber(value) {
 
 function sumKnown(candles, key) {
   const values = candles.map((candle) => finiteNumber(candle[key]));
-  // A missing daily volume/amount makes the whole period unknown, not zero.
-  return values.some((value) => value == null) ? null : values.reduce((sum, value) => sum + value, 0);
+  // Missing or invalid daily volume/amount cannot cancel into a valid total.
+  if (values.some((value) => value == null || value < 0)) return null;
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return Number.isFinite(total) ? total : null;
 }
 
 function periodKey(candle, period) {

@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     enable_scheduler: bool = True
     # Persistent public-data queue; no model calls or paid source selection.
     enable_data_collection: bool = True
+    # Initial global-market cadence; a saved Data Center source setting wins.
+    data_collection_market_interval_minutes: int = Field(default=60, ge=5, le=43200)
+    data_collection_poll_interval_sec: float = Field(default=5.0, ge=1.0, le=60.0)
+    data_collection_startup_delay_sec: float = Field(default=10.0, ge=0.0, le=120.0)
     # Shared weekly public history and account-scoped Merrill Clock interpretation.
     enable_merrill_clock: bool = True
     # Opt-in per-account observation plans; no model requests without verification.

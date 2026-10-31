@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   cacheOperationNotice, cachePolicyPayload, collectionConfigPayload, collectionConfigValues, collectionRuntime, sourceScheduleLabel, collectionServiceNotice, collectionStatus, collectionSubmissionNotice, dataCenterQueryKey,
-  dataTime, fileQueryParams, quarantineSummary,
+  dataTime, fileQueryParams, quarantineSummary, sourceMinimumInterval,
 } from "../src/dataCenterViewModel.js";
 
 const config = {
@@ -38,6 +38,16 @@ test("collection config prevents unsupported stocks and out-of-bound jobs or sou
   for (const max_symbols_per_cycle of [0, 31]) assert.throws(() => collectionConfigPayload({ ...config, max_symbols_per_cycle }, sources), /每轮/);
   assert.throws(() => collectionConfigPayload({ ...config, min_free_disk_mb: 127 }, sources), /磁盘/);
   assert.throws(() => collectionConfigPayload({ ...config, sources: { news: { enabled: true, interval_minutes: 59 } } }, sources), /采集间隔/);
+});
+test("market schedules accept the server minimum without relaxing other collection limits", () => {
+  const market = { id: "public_market", name: "全球行情", min_interval_minutes: 5 };
+  const values = { ...config, sources: { ...config.sources, public_market: { enabled: true, interval_minutes: 5 } } };
+  assert.equal(collectionConfigPayload(values, [...sources, market]).sources.public_market.interval_minutes, 5);
+  assert.equal(sourceMinimumInterval(market), 5);
+  assert.equal(sourceMinimumInterval({ id: "news" }), 60);
+  for (const min_interval_minutes of [null, -1, "bad", 43201]) assert.equal(sourceMinimumInterval({ min_interval_minutes }), 60);
+  assert.throws(() => collectionConfigPayload({ ...values, sources: { public_market: { enabled: true, interval_minutes: 4 } } }, [market]), /5–43200/);
+  assert.throws(() => collectionConfigPayload({ ...values, sources: { news: { enabled: true, interval_minutes: 5 } } }, sources), /60–43200/);
 });
 
 test("queued requests, errors, partial jobs and stale success have distinct visible states", () => {

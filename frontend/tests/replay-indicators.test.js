@@ -86,3 +86,20 @@ test("replay weekly/monthly aggregation preserves missing prices and never label
   }
   assert.equal(getReplayVisibleCandles(candles, 3, "1d")[3].turnover_rate, 2.5);
 });
+
+test("replay aggregates reject negative or overflowing volume and amount without cancelling valid observations", () => {
+  const candles = history(4).map((bar) => ({ ...bar, amount: 100 }));
+  for (const period of ["1wk", "1mo"]) {
+    const complete = getReplayVisibleCandles(candles, 3, period)[0];
+    assert.equal(complete.v, 4006);
+    assert.equal(complete.amount, 400);
+    for (const field of ["v", "amount"]) {
+      for (const invalid of [-1, "-1", Infinity, null]) {
+        const changed = candles.map((bar, i) => i === 1 ? { ...bar, [field]: invalid } : bar);
+        assert.equal(getReplayVisibleCandles(changed, 3, period)[0][field], null, `${period} ${field} ${invalid}`);
+      }
+      assert.equal(getReplayVisibleCandles(candles.map((bar) => ({ ...bar, [field]: 0 })), 3, period)[0][field], 0);
+      assert.equal(getReplayVisibleCandles(candles.map((bar) => ({ ...bar, [field]: Number.MAX_VALUE })), 3, period)[0][field], null);
+    }
+  }
+});

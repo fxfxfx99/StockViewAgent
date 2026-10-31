@@ -9,6 +9,8 @@ services:
     environment:
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
       STOCKVIEW_DATA_DIR: /app/data # 容器内唯一数据根；API 与 worker 必须挂载同一卷。
+      # 此开关仅控制旧式每进程调度；公共行情由 ENABLE_DATA_COLLECTION
+      # 独立控制（backend/.env，默认开启），同一卷上的采集 worker 通过文件锁互斥。
       ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-false}
     volumes:
       - stockviewagent_data:/app/data

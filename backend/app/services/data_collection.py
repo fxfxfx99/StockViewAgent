@@ -24,8 +24,8 @@ _MAX_JOBS_PER_CYCLE = 8
 _STOCK_SOURCES = {"public_kline", "public_company", "public_capital_flow"}
 _current_job = ContextVar("public_collection_job", default=None)
 _BUILTINS = (
-    {"id": "public_market", "name": "大盘指数与市场基线", "category": "market", "url": "https://web.ifzq.gtimg.cn/", "interval_minutes": 60,
-     "description": "5 个 A 股宽基指数公开日线，归档并预热宏观工作台行情。"},
+    {"id": "public_market", "name": "全球大盘指数与主要期货", "category": "market", "url": "https://web.ifzq.gtimg.cn/", "interval_minutes": 60,
+     "description": "A 股宽基与科创板、美股主要市场和指数、黄金及原油等期货公开日线；无需自选股，后台增量归档与预热行情。"},
     {"id": "public_kline", "name": "A股日线行情", "category": "market", "url": "https://web.ifzq.gtimg.cn/", "interval_minutes": 360,
      "description": "腾讯公开前复权日线。"},
     {"id": "public_news", "name": "财经新闻与公司资讯", "category": "news", "url": "https://kuaixun.eastmoney.com/", "interval_minutes": 120,
@@ -41,7 +41,10 @@ _BUILTINS = (
 
 def catalog():
     from app.services.public_data_sources import SOURCE_CATALOG
-    return [*map(dict, _BUILTINS), *[{**row, "interval_minutes": max(60, int(row.get("update_interval_seconds", 86400) / 60))} for row in SOURCE_CATALOG]]
+    rows = [*map(dict, _BUILTINS), *[{**row, "interval_minutes": max(60, int(row.get("update_interval_seconds", 86400) / 60))} for row in SOURCE_CATALOG]]
+    return [{**row, "min_interval_minutes": 5 if row["id"] == "public_market" else 60,
+             "interval_minutes": settings.data_collection_market_interval_minutes if row["id"] == "public_market" else row["interval_minutes"]}
+            for row in rows]
 
 
 def default_config():
@@ -101,8 +104,9 @@ def update_config(patch):
                     raise ValueError("无效来源设置")
                 if "enabled" in source and type(source["enabled"]) is not bool:
                     raise ValueError("来源开关必须为布尔值")
-                if "interval_minutes" in source and (type(source["interval_minutes"]) is not int or not 60 <= source["interval_minutes"] <= 43200):
-                    raise ValueError("来源间隔须为60–43200分钟")
+                minimum = 5 if sid == "public_market" else 60
+                if "interval_minutes" in source and (type(source["interval_minutes"]) is not int or not minimum <= source["interval_minutes"] <= 43200):
+                    raise ValueError(f"来源间隔须为{minimum}–43200分钟")
                 if "schedule_mode" in source and (not isinstance(source["schedule_mode"], str) or source["schedule_mode"] not in {"interval", "daily"}):
                     raise ValueError("来源调度须为interval或daily")
                 if "daily_at" in source and (not isinstance(source["daily_at"], str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", source["daily_at"])):
@@ -467,6 +471,12 @@ async def run_cycle(*, owner=None):
                         latest_config = await durable_call(get_config)
                         if not settings.enable_data_collection or lane_index >= latest_config["max_concurrent_jobs"]:
                             return
+                        # A long history download can consume disk after cycle
+                        # admission. Preserve queued work and quota until space
+                        # recovers, using the latest operator-selected reserve.
+                        if shutil.disk_usage(settings.data_dir).free < latest_config["min_free_disk_mb"] * 1024 * 1024:
+                            final_state.update(running=False, reason="low_disk_space")
+                            return
                         from app.services import collector_resources
                         resources = await durable_call(collector_resources.snapshot, latest_config["max_memory_mb"])
                         await durable_call(_update_worker, owner, resources=resources)
@@ -550,7 +560,7 @@ async def run_cycle(*, owner=None):
 
 async def worker_loop():
     owner = uuid.uuid4().hex
-    await asyncio.sleep(10)
+    await asyncio.sleep(settings.data_collection_startup_delay_sec)
     try:
         while True:
             try:
@@ -559,6 +569,6 @@ async def worker_loop():
                 raise
             except Exception:
                 logger.exception("数据中心后台轮询失败")
-            await asyncio.sleep(5)
+            await asyncio.sleep(settings.data_collection_poll_interval_sec)
     finally:
         await durable_call(_update_worker, owner, running=False, phase="idle", reason="stopped")

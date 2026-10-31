@@ -73,3 +73,8 @@ export function indicatorDraftToSettings(draft) {
     },
   };
 }
+
+/** Restore only editable periods; keep the pending chart selections and display draft. */
+export function resetIndicatorDraftParameters(draft) {
+  return { ...draft, params: indicatorSettingsToDraft().params };
+}

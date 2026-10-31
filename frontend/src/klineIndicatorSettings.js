@@ -6,6 +6,7 @@ export const DEFAULT_INDICATOR_SETTINGS = Object.freeze({
   version: 1,
   main: Object.freeze({ ma: true, boll: false }),
   subIndicators: Object.freeze(["vol"]),
+  display: Object.freeze({ visibleBars: 80, showGrid: true, showLastPrice: true }),
   params: Object.freeze({
     ma: Object.freeze({ periods: Object.freeze([20, 60, 250]) }),
     boll: Object.freeze({ period: 20, multiplier: 2 }),
@@ -14,6 +15,13 @@ export const DEFAULT_INDICATOR_SETTINGS = Object.freeze({
     rsi: Object.freeze({ periods: Object.freeze([6, 12, 24]) }),
   }),
 });
+
+export const KLINE_VISIBLE_BARS = Object.freeze([40, 80, 120, 240]);
+export const KLINE_INDICATOR_PRESETS = Object.freeze([
+  Object.freeze({ id: "simple", label: "简洁", main: Object.freeze({ ma: false, boll: false }), subIndicators: Object.freeze(["vol"]) }),
+  Object.freeze({ id: "trend", label: "趋势", main: Object.freeze({ ma: true, boll: false }), subIndicators: Object.freeze(["vol"]) }),
+  Object.freeze({ id: "momentum", label: "动量", main: Object.freeze({ ma: true, boll: false }), subIndicators: Object.freeze(["vol", "macd"]) }),
+]);
 
 const SUB_IDS = new Set(SUB_INDICATORS.map(({ id }) => id));
 const object = (value) => value != null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -35,6 +43,7 @@ export function normalizeIndicatorSettings(input) {
   // Unknown schemas must not accidentally reinterpret values from a newer app.
   if (owns(source, "version") && source.version !== 1) return normalizeIndicatorSettings(null);
   const main = object(source.main);
+  const display = object(source.display);
   const params = object(source.params);
   const ma = object(params.ma);
   const bands = object(params.boll);
@@ -53,6 +62,11 @@ export function normalizeIndicatorSettings(input) {
     subIndicators: Array.isArray(source.subIndicators)
       ? [...new Set(source.subIndicators.filter((id) => typeof id === "string" && SUB_IDS.has(id)))].slice(0, 3)
       : ["vol"],
+    display: {
+      visibleBars: KLINE_VISIBLE_BARS.includes(display.visibleBars) ? display.visibleBars : 80,
+      showGrid: typeof display.showGrid === "boolean" ? display.showGrid : true,
+      showLastPrice: typeof display.showLastPrice === "boolean" ? display.showLastPrice : true,
+    },
     params: {
       ma: { periods: periodsOrDefault(ma.periods, [20, 60, 250]) },
       boll: { period: bounded(bands.period, 20, 2, 250), multiplier: bounded(bands.multiplier, 2, 0.1, 10, false) },
@@ -69,6 +83,12 @@ export function validateIndicatorSettings(input) {
   if (!isObject(input)) return ["指标设置必须是对象"];
   if (owns(input, "version") && input.version !== 1) errors.push("指标设置版本不受支持");
   if (owns(input, "main") && !isObject(input.main)) errors.push("主图设置格式不正确");
+  if (owns(input, "display") && !isObject(input.display)) errors.push("显示设置格式不正确");
+  const display = object(input.display);
+  if (owns(display, "visibleBars") && !KLINE_VISIBLE_BARS.includes(display.visibleBars)) errors.push("初始显示根数请选择 40、80、120 或 240");
+  for (const [key, label] of [["showGrid", "网格"], ["showLastPrice", "最新价线"]]) {
+    if (owns(display, key) && typeof display[key] !== "boolean") errors.push(`${label}显示选项必须是开关值`);
+  }
   const main = object(input.main);
   for (const [key, label] of [["ma", "MA"], ["boll", "BOLL"]]) {
     if (owns(main, key) && typeof main[key] !== "boolean") errors.push(`${label} 显示选项必须是开关值`);
@@ -112,6 +132,20 @@ export function validateIndicatorSettings(input) {
   const slow = owns(convergence, "slow") ? convergence.slow : 26;
   if (inRange(fast, 2, 250) && inRange(slow, 2, 250) && fast >= slow) errors.push("MACD 快线周期必须小于慢线周期");
   return errors;
+}
+
+/** Presets change chart selections only; custom periods and display choices survive. */
+export function applyIndicatorPreset(settings, id) {
+  const normalized = normalizeIndicatorSettings(settings);
+  const preset = KLINE_INDICATOR_PRESETS.find((item) => item.id === id);
+  return preset ? { ...normalized, main: { ...preset.main }, subIndicators: [...preset.subIndicators] } : normalized;
+}
+
+export function getIndicatorPreset(settings) {
+  const normalized = normalizeIndicatorSettings(settings);
+  return KLINE_INDICATOR_PRESETS.find((preset) => preset.main.ma === normalized.main.ma && preset.main.boll === normalized.main.boll
+    && preset.subIndicators.length === normalized.subIndicators.length
+    && preset.subIndicators.every((id, index) => normalized.subIndicators[index] === id))?.id || "custom";
 }
 
 /** Account + chart scope isolation; anonymous sessions do not persist choices. */

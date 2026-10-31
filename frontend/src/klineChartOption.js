@@ -21,19 +21,22 @@ export function getKlineChartHeight(baseHeight = 520, settings) {
   return base + Math.max(0, count - 1) * 160;
 }
 
-/** 周一 00:00 本地时间戳（秒）用于分桶 */
-function mondayStartTs(tsSec) {
-  const d = new Date(tsSec * 1000);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const m = new Date(d.getFullYear(), d.getMonth(), diff);
-  m.setHours(0, 0, 0, 0);
-  return Math.floor(m.getTime() / 1000);
+const dateFormatters = new Map();
+
+/** A trading date uses the instrument's exchange timezone, never the browser's. */
+export function formatCandleDate(tsSec, timeZone = "Asia/Shanghai") {
+  if (!dateFormatters.has(timeZone)) dateFormatters.set(timeZone, new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }));
+  const parts = dateFormatters.get(timeZone).formatToParts(new Date(tsSec * 1000));
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
-function monthKey(tsSec) {
-  const d = new Date(tsSec * 1000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+function periodKey(tsSec, mode, timeZone) {
+  const day = formatCandleDate(tsSec, timeZone);
+  if (mode === "1mo") return day.slice(0, 7);
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
+  return date.toISOString().slice(0, 10);
 }
 
 /**
@@ -41,32 +44,29 @@ function monthKey(tsSec) {
  * @param {Array<{t:number,o:number,h:number,l:number,c:number,v?:number,amount?:number}>} daily
  * @param {'1d'|'1wk'|'1mo'} mode
  */
-export function aggregateCandlesFromDaily(daily, mode) {
+export function aggregateCandlesFromDaily(daily, mode, timeZone = "Asia/Shanghai") {
   const sorted = [...daily].sort((a, b) => a.t - b.t);
   if (mode === "1d" || !sorted.length) return sorted;
 
   /** @type {Map<string|number, typeof sorted>} */
   const buckets = new Map();
   for (const c of sorted) {
-    let key;
-    if (mode === "1wk") key = mondayStartTs(c.t);
-    else key = monthKey(c.t);
+    const key = periodKey(c.t, mode, timeZone);
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(c);
   }
 
-  const keys =
-    mode === "1wk"
-      ? [...buckets.keys()].sort((a, b) => a - b)
-      : [...buckets.keys()].sort();
+  const keys = [...buckets.keys()].sort();
 
   return keys.map((key) => {
     const bars = buckets.get(key).slice().sort((a, b) => a.t - b.t);
     const first = bars[0];
     const last = bars[bars.length - 1];
     const validPrices = bars.every((bar) => [bar.o, bar.h, bar.l, bar.c].every((value) => finite(value) != null));
-    const sumKnown = (field) => bars.every((bar) => finite(bar[field]) != null)
-      ? bars.reduce((total, bar) => total + finite(bar[field]), 0) : null;
+    const sumKnown = (field) => {
+      if (!bars.every((bar) => finite(bar[field]) != null && finite(bar[field]) >= 0)) return null;
+      return finite(bars.reduce((total, bar) => total + finite(bar[field]), 0));
+    };
     return {
       ...last,
       t: last.t,
@@ -89,7 +89,7 @@ export function aggregateCandlesFromDaily(daily, mode) {
  */
 export function dataZoomPercentLastN(total, showBars) {
   if (!total || total <= showBars) return { start: 0, end: 100 };
-  const start = ((total - showBars) / total) * 100;
+  const start = ((total - showBars) / (total - 1)) * 100;
   return { start: Math.max(0, start), end: 100 };
 }
 
@@ -126,6 +126,8 @@ export function buildCandleVolumeChartOption({
   indicatorSettings,
   volumeInLegend = true,
   layout = "main",
+  compact = false,
+  timeZone = "Asia/Shanghai",
   legendExtra = [],
   formatDate,
   tooltipDateLine,
@@ -134,14 +136,14 @@ export function buildCandleVolumeChartOption({
   palette,
 }) {
   const colors = { ...DEFAULT_CHART_PALETTE, ...palette };
-  const candles = aggregateFromDaily ? aggregateCandlesFromDaily(rawCandles || [], viewMode) : rawCandles || [];
+  const candles = aggregateFromDaily ? aggregateCandlesFromDaily(rawCandles || [], viewMode, timeZone) : rawCandles || [];
   if (!candles.length) return null;
   const preferences = normalizeIndicatorSettings(indicatorSettings ?? {
     subIndicators: showVolume ? [subIndicator || "vol"] : [],
   });
-  const { main, params: settings } = preferences;
+  const { main, params: settings, display } = preferences;
   const mini = layout === "mini";
-  const defaultFmt = (c) => new Date(c.t * 1000).toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+  const defaultFmt = (c) => formatCandleDate(c.t, timeZone);
   const dates = candles.map((c) => (formatDate ? formatDate(c) : defaultFmt(c)));
   const closes = candles.map((c) => finite(c.c));
   const overlays = [];
@@ -166,16 +168,18 @@ export function buildCandleVolumeChartOption({
   const legendItems = ["K线", ...overlays.map((line) => line.name),
     ...(volumeInLegend ? subplots.flatMap((sub) => sub.legend) : []), ...legendExtra];
   const referenceHeight = getKlineChartHeight(mini ? 330 : 520, preferences);
-  const top = mini ? 32 : 44;
+  const top = mini ? 32 : 38;
   const bottom = mini ? 32 : 62;
   const gap = mini ? 24 : 32;
   const contentHeight = referenceHeight - top - bottom - count * gap;
   const priceHeight = count ? contentHeight * [1, 0.68, 0.56, 0.48][count] : contentHeight;
   const subHeight = count ? (contentHeight - priceHeight) / count : 0;
   const percent = (value) => `${(value / referenceHeight) * 100}%`;
-  const grid = [{ left: mini ? 2 : 60, right: mini ? 2 : 18, top: percent(top), height: percent(priceHeight) }];
+  const margins = { left: mini ? 2 : 8, right: mini ? 2 : compact ? 58 : 76 };
+  const grid = [{ ...margins, top: percent(top), height: percent(priceHeight) }];
   const titles = [];
   const paneLabel = (sub) => {
+    if (sub.id === "vol") return "成交量 · MA5 / MA10";
     if (sub.id === "macd") return `MACD (${settings.macd.fast}, ${settings.macd.slow}, ${settings.macd.signal}) · DIF / DEA`;
     if (sub.id === "kdj") return `KDJ (${settings.kdj.period}, ${settings.kdj.k}, ${settings.kdj.d}) · K / D / J`;
     if (sub.id === "rsi") return `RSI (${settings.rsi.periods.join(", ")})`;
@@ -183,30 +187,32 @@ export function buildCandleVolumeChartOption({
   };
   subplots.forEach((sub, index) => {
     const paneTop = top + priceHeight + gap + index * (subHeight + gap);
-    grid.push({ left: mini ? 2 : 60, right: mini ? 2 : 18, top: percent(paneTop), height: percent(subHeight) });
-    titles.push({ text: paneLabel(sub), left: mini ? 2 : 60, top: percent(paneTop - 23), padding: 0,
+    grid.push({ ...margins, top: percent(paneTop), height: percent(subHeight) });
+    titles.push({ text: paneLabel(sub), left: margins.left, top: percent(paneTop - 23), padding: 0,
       textStyle: { color: colors.muted, fontSize: mini ? 10 : 11, fontWeight: "normal" } });
   });
   const xAxis = indices.map((index) => ({ type: "category", gridIndex: index, data: dates, boundaryGap: true,
     axisLine: mini ? { show: false } : { lineStyle: { color: colors.line } },
-    axisTick: { show: false }, axisLabel: { show: !mini && index === count, color: colors.muted, fontSize: 11, margin: 8 },
+    axisTick: { show: false }, axisLabel: { show: !mini && index === count, hideOverlap: true, color: colors.muted, fontSize: 11, margin: 8 },
   }));
   const yAxis = indices.map((index) => ({
     scale: !index || !subplots[index - 1].series.some((item) => item.type === "bar"),
-    gridIndex: index, ...(index ? { splitNumber: 2 } : {}),
+    gridIndex: index, position: "right", ...(index ? { splitNumber: 2 } : {}),
     ...(index && subplots[index - 1].id === "rsi" ? { min: 0, max: 100 } : {}),
     ...(index && subplots[index - 1].id === "kdj" ? {
       min: (extent) => Math.min(0, extent.min), max: (extent) => Math.max(100, extent.max),
     } : {}),
-    splitLine: { lineStyle: { color: mini ? "transparent" : colors.grid } },
-    axisLabel: { show: !mini, color: colors.muted, fontSize: 11, margin: 8,
+    splitLine: { show: !mini && display.showGrid, lineStyle: { color: colors.grid, type: "dashed" } },
+    axisLabel: { show: !mini, hideOverlap: true, color: colors.muted, fontSize: compact ? 10 : 11, margin: 8,
+      formatter: (value) => Math.abs(value) >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : Math.abs(value) >= 10000 ? `${(value / 10000).toFixed(2)}万` : Number(value.toFixed(2)).toLocaleString("en-US"),
       ...(index && subplots[index - 1].yAxisFormatter ? { formatter: subplots[index - 1].yAxisFormatter } : {}),
     },
   }));
-  const { start, end } = dataZoomPercentLastN(candles.length, defaultShowBars);
+  const { start, end } = dataZoomPercentLastN(candles.length, indicatorSettings ? display.visibleBars : defaultShowBars);
   const dataZoom = [{ type: "inside", xAxisIndex: indices, start, end }];
   if (candles.length > 1) dataZoom.push({ type: "slider", xAxisIndex: indices, start, end,
-    height: mini ? 20 : 24, bottom: mini ? 0 : 8,
+    height: mini ? 20 : 24, bottom: mini ? 0 : 8, left: margins.left, right: margins.right,
+    showDetail: !compact, brushSelect: false,
     borderColor: colors.line, fillerColor: colors.selection,
     handleStyle: { color: colors.accent }, moveHandleStyle: { color: colors.accent },
     dataBackground: { lineStyle: { color: colors.muted }, areaStyle: { color: colors.grid } },
@@ -218,6 +224,12 @@ export function buildCandleVolumeChartOption({
       ? [c.o, c.c, c.l, c.h].map(finite) : ["-", "-", "-", "-"]),
     itemStyle: { color: colors.up, color0: colors.down, borderColor: colors.up, borderColor0: colors.down },
   }, ...overlays];
+  const latestClose = finite(candles.at(-1)?.c);
+  if (!mini && display.showLastPrice && latestClose != null) series[0].markLine = {
+    silent: true, symbol: "none", animation: false,
+    lineStyle: { color: latestClose >= finite(candles.at(-1)?.o) ? colors.up : colors.down, type: "dashed", width: 1, opacity: 0.75 },
+    label: { show: false }, data: [{ yAxis: latestClose }],
+  };
   subplots.forEach((sub, panelIndex) => {
     let colorIndex = 0;
     series.push(...sub.series.map((item) => {
@@ -273,4 +285,25 @@ export function buildCandleVolumeChartOption({
     axisPointer: { link: [{ xAxisIndex: indices }] },
     grid, xAxis, yAxis, dataZoom, series,
   };
+}
+
+/** Surface missing fields and warm-up gaps without inventing zeroes or changing preferences. */
+export function getIndicatorDataHints(candles, indicatorSettings) {
+  if (!candles?.length) return [];
+  const settings = normalizeIndicatorSettings(indicatorSettings);
+  const hints = [];
+  if (settings.main.ma && settings.params.ma.periods.some((period) => period > candles.length)) {
+    hints.push(`部分均线需要更多历史数据（当前 ${candles.length} 根）`);
+  }
+  const fields = { vol: ["v", "成交量"], amount: ["amount", "成交额"], turnover: ["turnover_rate", "换手率"], obv: ["v", "OBV"], vr: ["v", "VR"] };
+  for (const id of settings.subIndicators) {
+    const sub = buildSubIndicatorSeries(candles, id, { params: settings.params });
+    const hasValue = sub.series.some((series) => series.data.some((point) => finite(typeof point === "object" && point ? point.value : point) != null));
+    if (!hasValue) {
+      const field = fields[id];
+      const missing = field && !candles.some((candle) => finite(candle[field[0]]) != null);
+      hints.push(`${field?.[1] || id.toUpperCase()}：${missing ? "数据源未提供所需字段" : "有效样本不足"}`);
+    }
+  }
+  return hints;
 }

@@ -142,7 +142,7 @@ def test_market_model_and_chat_receive_calendar_rag(calendar, monkeypatch, chat)
     async def kline(*args):
         return {"index_key": "SH_COMP", "symbol": "上证指数", "candles": [], "metrics": {}}
 
-    monkeypatch.setattr(router.kline_pipeline, "fetch_major_index_kline_with_fallbacks", kline)
+    monkeypatch.setattr(router.global_market, "fetch_market_kline", kline)
     messages = []
 
     def interpret(system, user):

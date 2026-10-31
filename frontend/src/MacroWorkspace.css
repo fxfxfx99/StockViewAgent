@@ -11,6 +11,7 @@
 .macro-control label, .macro-selection label { font-size: var(--sva-font-xs); color: var(--sva-text-secondary); }
 .macro-control .ant-select, .macro-control .ant-input-number { width: 100%; }
 .macro-index-control { width: 230px; }
+.macro-group-control { width: 210px; }
 .macro-card { border: 1px solid var(--sva-separator); border-radius: var(--sva-radius); padding: var(--sva-space-6); background: var(--sva-surface); min-width: 0; }
 .macro-card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
 .macro-card-heading h2, .macro-section-heading h2 { font-size: var(--sva-font-lg); font-weight: 600; margin: 0; }
@@ -32,6 +33,17 @@
 .macro-empty { min-height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--sva-text-secondary); font-size: var(--sva-font-sm); }
 .macro-alert { margin-bottom: 16px; }
 .macro-panel-stack { display: flex; flex-direction: column; gap: 24px; }
+.macro-instrument-meta { padding-block: 8px; }
+.macro-contract-note { padding: 10px 12px; background: var(--sva-fill); border-radius: var(--sva-radius-sm); color: var(--sva-text-secondary); }
+.macro-collection { padding: 18px 24px; border: 1px solid var(--sva-separator); border-radius: var(--sva-radius); background: var(--sva-surface); }
+.macro-collection-heading, .macro-collection-summary, .macro-collection-current { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.macro-collection-heading { margin-bottom: 12px; }
+.macro-collection-heading h2 { font-size: var(--sva-font-sm); margin: 0; font-weight: 600; }
+.macro-collection-heading .ant-btn { margin-left: auto; }
+.macro-collection-heading .ant-tag, .macro-collection-current .ant-tag { margin: 0; }
+.macro-collection-summary, .macro-collection-current { color: var(--sva-text-secondary); font-size: var(--sva-font-xs); }
+.macro-collection-summary strong { color: var(--sva-text); font-variant-numeric: tabular-nums; }
+.macro-collection-current { margin-top: 12px; }
 .macro-selection { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .macro-selection .ant-select { width: min(100%, 340px); }
 .macro-selection label { flex-shrink: 0; }
@@ -50,6 +62,9 @@
 .macro-analysis-grid p, .macro-analysis-grid ul { margin: 0; color: var(--sva-text-secondary); line-height: 1.8; overflow-wrap: anywhere; font-size: var(--sva-font-sm); }
 .macro-analysis-grid ul { padding-left: 18px; }
 .macro-analysis-placeholder { color: var(--sva-text-tertiary); font-size: var(--sva-font-sm); background: var(--sva-fill); border-radius: var(--sva-radius-sm); padding: 20px; }
+.macro-analysis-evidence { margin-top: 14px; padding: 12px; background: var(--sva-fill); border-radius: var(--sva-radius-sm); }
+.macro-analysis-evidence .macro-chart-meta { margin-bottom: 0; }
+.macro-analysis-evidence .macro-alert { margin: 10px 0 0; }
 .macro-selected-index { margin: 0; align-self: center; padding-right: 12px; }
 .macro-analysis-controls { margin: 16px 0; }
 .macro-chat { border-top: 1px solid var(--sva-separator); margin-top: 24px; padding-top: 8px; }
@@ -70,7 +85,8 @@
   .macro-tabs .ant-tabs-tab + .ant-tabs-tab { margin-left: 22px; }
   .macro-controls { gap: 10px; }
   .macro-control { flex: 1; min-width: 120px; width: auto; }
-  .macro-index-control { flex: 1 0 100%; }
+  .macro-index-control, .macro-group-control { flex: 1 0 100%; }
+  .macro-collection { padding: 16px; }
   .macro-card { padding: 16px; }
   .macro-card-heading { flex-wrap: wrap; gap: 12px; }
   .macro-quotes { grid-template-columns: 1fr 1fr; gap: 16px 12px; }
@@ -83,4 +99,79 @@
   .macro-selection { flex-wrap: wrap; align-items: flex-start; gap: 6px; }
   .macro-selection label { width: 100%; }
   .macro-selection .ant-select { width: 100%; }
+}
+
+/* Keep selection, quote context and chart controls in a single visual rhythm. */
+.macro-tabs > .ant-tabs-nav { margin-bottom: 16px; }
+.macro-controls { gap: 16px; padding: 14px 18px; margin-bottom: 16px; border: 1px solid var(--sva-separator); border-radius: 12px; background: var(--sva-surface); }
+.macro-group-control { width: auto; margin-right: auto; }
+.macro-period-control { width: auto; }
+.macro-control .ant-segmented { white-space: nowrap; }
+.macro-chart-card { border-radius: 12px; padding: 22px 24px 16px; }
+.macro-card-heading { margin-bottom: 18px; align-items: center; }
+.macro-card-heading p { font-size: 12px; }
+.macro-chart-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.macro-quotes { align-items: center; gap: 24px; padding-bottom: 18px; margin-bottom: 0; }
+.macro-quotes strong { font-size: 22px; letter-spacing: -.4px; }
+.macro-quotes .macro-primary-quote strong { font-size: 32px; line-height: 1.25; }
+.macro-quotes .macro-date-stat { font-size: 17px; }
+.macro-chart-tools { padding: 14px 0 4px; }
+.macro-chart-tools .kline-indicator-controls { margin: 0; }
+.macro-viewport-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--sva-text-tertiary); font-size: 11px; margin: 2px 0 4px; }
+.macro-viewport-actions .ant-btn { font-size: 12px; color: var(--sva-text-secondary); }
+.macro-chart-canvas { height: calc(480px + var(--macro-indicator-extra-height, 0px)); }
+.macro-indicator-hint { font-size: 12px; line-height: 1.6; color: var(--sva-text-tertiary); margin: 6px 0; }
+.macro-chart-footer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--sva-text-secondary); font-size: 12px; padding: 10px 0 12px; }
+.macro-chart-footer .ant-tag { margin: 0; font-size: 11px; }
+.macro-zoom-help { margin-left: auto; color: var(--sva-text-tertiary); }
+.macro-chart-details { border-top: 1px solid var(--sva-separator); color: var(--sva-text-secondary); font-size: 12px; padding-top: 12px; }
+.macro-chart-details summary, .macro-collection-disclosure summary { cursor: pointer; width: fit-content; }
+.macro-chart-details .macro-chart-meta { margin: 8px 0 0; }
+.macro-chart-details .macro-footnote { margin-top: 8px; }
+.macro-panel-stack { gap: 16px; }
+.macro-collection-disclosure { border: 1px solid var(--sva-separator); border-radius: 12px; background: var(--sva-surface); padding: 16px 22px; }
+.macro-collection-disclosure > summary { color: var(--sva-text); font-size: 13px; }
+.macro-collection-disclosure > summary > span { color: var(--sva-text-tertiary); margin-left: 16px; font-size: 12px; }
+.macro-collection-disclosure .macro-collection { border: 0; padding: 20px 0 0; background: transparent; }
+.macro-chart-card.is-expanded { position: fixed; inset: 12px; z-index: 900; overflow: auto; box-shadow: 0 0 0 20px var(--sva-bg); }
+.macro-chart-card.is-expanded .macro-chart-canvas { height: calc(max(460px, 100vh - 410px) + var(--macro-indicator-extra-height, 0px)); }
+@media (max-width: 960px) {
+  .macro-controls { gap: 12px; }
+  .macro-group-control { flex: 1 0 100%; }
+  .macro-index-control { flex: 1; }
+}
+@media (max-width: 600px) {
+  .macro-heading { gap: 8px; margin-bottom: 8px; }
+  .macro-heading-links { font-size: 12px; }
+  .macro-controls { padding: 12px; gap: 10px; }
+  .macro-group-control { flex: 1 0 100%; }
+  .macro-group-control .ant-segmented-group { display: flex; }
+  .macro-group-control .ant-segmented-item { flex: 1; }
+  .macro-group-control .ant-segmented-item-label { padding-inline: 8px; }
+  .macro-index-control { flex: 1 0 calc(62% - 10px); min-width: 0; }
+  .macro-control:not(.macro-group-control):not(.macro-index-control):not(.macro-period-control) { flex: 1 0 calc(38% - 10px); min-width: 0; }
+  .macro-period-control { flex: 1 0 100%; flex-direction: row; align-items: center; gap: 12px; }
+  .macro-period-control .ant-segmented { flex: 1; }
+  .macro-period-control .ant-segmented-group { display: flex; }
+  .macro-period-control .ant-segmented-item { flex: 1; }
+  .macro-chart-card { padding: 16px 12px 12px; }
+  .macro-card-heading { align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+  .macro-card-heading > div:first-child { flex: 1; min-width: 90px; }
+  .macro-chart-actions { gap: 4px; }
+  .macro-chart-actions .ant-btn { font-size: 11px; padding-inline: 6px; }
+  .macro-card-heading h2 { font-size: 17px; }
+  .macro-card-heading p { font-size: 11px; }
+  .macro-quotes { gap: 12px; padding-bottom: 12px; }
+  .macro-quotes span { font-size: 11px; }
+  .macro-quotes strong { font-size: 19px; }
+  .macro-quotes .macro-primary-quote strong { font-size: 28px; }
+  .macro-quotes .macro-date-stat { font-size: 16px; }
+  .macro-chart-tools { padding-top: 10px; }
+  .macro-viewport-actions { margin-top: 6px; }
+  .macro-chart-canvas { height: calc(390px + var(--macro-indicator-extra-height, 0px)); margin-inline: -4px; }
+  .macro-chart-footer { gap: 6px; font-size: 11px; }
+  .macro-zoom-help { margin-left: 0; }
+  .macro-collection-disclosure { padding: 14px 12px; }
+  .macro-collection-disclosure > summary > span { margin-left: 8px; font-size: 11px; }
+  .macro-chart-card.is-expanded { inset: 0; border-radius: 0; }
 }

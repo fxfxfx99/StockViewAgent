@@ -635,6 +635,10 @@ export async function getMacroIndices({ signal } = {}) {
   const { data } = await client.get("/macro/indices", { signal, timeout: 15_000 });
   return data;
 }
+export async function getMacroCollectionStatus({ signal } = {}) {
+  const { data } = await client.get("/macro/collection-status", { signal, timeout: 15_000 });
+  return data;
+}
 export async function getMacroIndexKline(params, { signal } = {}) {
   const { data } = await client.get("/macro/index-kline", { params, signal, timeout: 120_000 });
   return data;

@@ -22,3 +22,10 @@ test("AI calls only use explicit POST payloads; material identifiers are escaped
   await api.chatKlineMarket({ ...body, question: "当前趋势？" }); assert.equal(captured.url, "/kline-learning/market-chat");
   await api.deleteKlineLearningMaterial("a/b"); assert.equal(captured.url, "/kline-learning/materials/a%2Fb");
 });
+test("market collection status is a cancellable read, not a collection trigger", async () => {
+  const signal = new AbortController().signal;
+  await api.getMacroCollectionStatus({ signal });
+  assert.equal(captured.url, "/macro/collection-status");
+  assert.equal(captured.method, "get");
+  assert.equal(captured.signal, signal);
+});

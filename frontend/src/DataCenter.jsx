@@ -20,7 +20,7 @@ import * as api from "./api.js";
 import {
   cacheOperationNotice, cachePolicyPayload, categoryOptions, collectionConfigPayload, collectionConfigValues, collectionRuntime, sourceScheduleLabel, collectionServiceNotice, collectionStatus, collectionSubmissionNotice, DATA_LIFECYCLE_OPTIONS,
   dataCenterQueryKey, dataTime, fileQueryParams, fileRoleLabel, formatDataFiles, formatDataSize,
-  quarantineSummary, retentionInfo, sourceOptions,
+  quarantineSummary, retentionInfo, sourceOptions, sourceMinimumInterval,
 } from "./dataCenterViewModel.js";
 import "./DataCenter.css";
 
@@ -48,7 +48,7 @@ function SourceSchedule({ source, form }) {
     <div className="data-source-config-name"><SourceName source={source} /><Text type="secondary">{source.description || source.category}</Text></div>
     <Form.Item name={["sources", source.id, "enabled"]} valuePropName="checked" className="data-source-switch"><Switch aria-label={`启用${source.name || source.id}`} size="small" /></Form.Item>
     <div className="data-source-schedule-fields"><Form.Item name={["sources", source.id, "schedule_mode"]}><Select aria-label={`${source.name || source.id}计划方式`} options={[{ value: "daily", label: "每日定时" }, { value: "interval", label: "按间隔" }]} /></Form.Item>
-      <Form.Item hidden={mode !== "daily"} name={["sources", source.id, "daily_at"]} rules={[{ required: true, message: "请选择北京时间" }]}><Input type="time" aria-label={`${source.name || source.id}每日时间（北京）`} /></Form.Item><Form.Item hidden={mode === "daily"} name={["sources", source.id, "interval_minutes"]} rules={[{ required: true, message: "请输入间隔" }]}><InputNumber aria-label={`${source.name || source.id}采集间隔（分钟）`} min={60} max={43200} precision={0} /></Form.Item>
+      <Form.Item hidden={mode !== "daily"} name={["sources", source.id, "daily_at"]} rules={[{ required: true, message: "请选择北京时间" }]}><Input type="time" aria-label={`${source.name || source.id}每日时间（北京）`} /></Form.Item><Form.Item hidden={mode === "daily"} name={["sources", source.id, "interval_minutes"]} rules={[{ required: true, message: "请输入间隔" }]}><InputNumber aria-label={`${source.name || source.id}采集间隔（分钟）`} min={sourceMinimumInterval(source)} max={43200} precision={0} /></Form.Item>
     </div>
   </div>;
 }

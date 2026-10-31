@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dossierPayload, dossierValues, filteredDossiers, investmentConflict, investmentKey, monitoringDraft, observationUrl, sameResearchTarget, stockContextUrl } from "../src/investmentViewModel.js";
 import { candleFocus, financialSeries, focusCandleOption } from "../src/stockContextViewModel.js";
+import { buildCandleVolumeChartOption } from "../src/klineChartOption.js";
 import { planPayload, planValues } from "../src/monitoringViewModel.js";
 
 test("question research targets canonicalize without leaking stale list members", () => {
@@ -55,6 +56,31 @@ test("trigger date selects an actual candle and a visible zoom window, with prev
   assert.equal(option.series[1].markLine, undefined);
   assert.equal(candleFocus(candles, "2026-05-01").exact, false);
   assert.equal(candleFocus(candles, "2025-01-01"), null);
+});
+
+test("date focus preserves the latest-price setting and each reference line's appearance", () => {
+  const candles = Array.from({ length: 100 }, (_, i) => ({ t: Date.UTC(2026, 0, 1 + i) / 1000, o: 10, h: 12, l: 9, c: 11, v: 100 }));
+  for (const showLastPrice of [true, false]) {
+    const base = buildCandleVolumeChartOption({ candles, indicatorSettings: { display: { showLastPrice } } });
+    const previous = base.series[0].markLine;
+    const focused = focusCandleOption(base, candles, "2026-02-02").series[0].markLine;
+    assert.equal(focused.data.length, showLastPrice ? 2 : 1);
+    assert.equal(focused.data.at(-1).xAxis, 32);
+    assert.equal(focused.data.at(-1).label.show, true);
+    assert.equal(focused.data.at(-1).label.formatter, "定位 2026-02-02");
+    assert.equal(focused.data.at(-1).lineStyle.color, "#d68b25");
+    if (showLastPrice) {
+      assert.deepEqual(focused.data[0], previous.data[0]);
+      assert.deepEqual(focused.lineStyle, previous.lineStyle);
+      assert.deepEqual(focused.label, previous.label);
+      assert.equal(previous.data.length, 1, "focus must not mutate the base chart");
+    } else {
+      assert.equal(previous, undefined);
+    }
+  }
+  const custom = { type: "candlestick", markLine: { data: [{ yAxis: 10, label: { show: true, formatter: "custom" }, lineStyle: { color: "blue", width: 3 } }] } };
+  const focused = focusCandleOption({ series: [custom] }, candles, "2026-02-02");
+  assert.deepEqual(focused.series[0].markLine.data[0], custom.markLine.data[0]);
 });
 
 test("financial trend never combines different cumulative periods, entity scopes or units", () => {

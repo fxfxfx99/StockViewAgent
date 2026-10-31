@@ -1,14 +1,23 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
-import { App as AntApp, Button, Card, Spin, Alert } from "antd";
+import { App as AntApp, Button, Card, Spin, Alert, Grid } from "antd";
 import { DownOutlined, LineChartOutlined } from "@ant-design/icons";
 import { useThemeMode } from "./ThemeModeProvider.jsx";
+import { useAuth } from "./AuthContext.jsx";
 import * as api from "./api";
-import { buildCandleVolumeChartOption, candlePaletteFromStyles, getKlineChartHeight } from "./klineChartOption.js";
+import { buildCandleVolumeChartOption, candlePaletteFromStyles, formatCandleDate, getIndicatorDataHints, getKlineChartHeight } from "./klineChartOption.js";
 import KlineIndicatorControls, { useKlineIndicatorSettings } from "./KlineIndicatorControls.jsx";
+import useKlineViewport from "./useKlineViewport.js";
 import { candleFocus, focusCandleOption } from "./stockContextViewModel.js";
 import { qk } from "./hooks/queryKeys.js";
+import "./KlineViewportControls.css";
+
+const EMPTY_CANDLES = [];
+const MARKET_TIME_ZONE = "Asia/Shanghai";
+const intradayTime = new Intl.DateTimeFormat("zh-CN", { timeZone: MARKET_TIME_ZONE, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+const isDailyInterval = (interval) => ["1d", "1wk", "1mo"].includes(interval);
+const candleLabel = (candle, interval) => `${formatCandleDate(candle.t, MARKET_TIME_ZONE)}${isDailyInterval(interval) ? "" : ` ${intradayTime.format(new Date(candle.t * 1000))}`}`;
 
 /** 导出当前 bundle 中 K 线为 CSV（逐根 OHLCV） */
 export function downloadKlineCsv(bundle, symbol, range, interval) {
@@ -19,14 +28,10 @@ export function downloadKlineCsv(bundle, symbol, range, interval) {
     if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
-  const header = ["日期时间(本地)", "开盘", "最高", "最低", "收盘", "成交量(股)", "成交额", "换手率%"];
+  const header = ["日期时间(Asia/Shanghai)", "开盘", "最高", "最低", "收盘", "成交量(股)", "成交额", "换手率%"];
   const lines = [header.join(",")];
   for (const c of candles) {
-    const d = new Date((c.t || 0) * 1000);
-    const ds =
-      interval === "1d" || interval === "1wk" || interval === "1mo"
-        ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-        : d.toLocaleString("zh-CN", { hour12: false });
+    const ds = candleLabel(c, interval);
     lines.push(
       [
         esc(ds),
@@ -103,6 +108,9 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
   const { message } = AntApp.useApp();
   const qc = useQueryClient();
   const { mode } = useThemeMode();
+  const { user } = useAuth();
+  const screens = Grid.useBreakpoint();
+  const compact = !screens.md;
   const panelRef = useRef(null);
   const [palette, setPalette] = useState(undefined);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -128,6 +136,14 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
   });
 
   const bundle = klineQuery.data ?? null;
+  const candles = bundle?.candles || EMPTY_CANDLES;
+  const visibleBars = indicatorSettings.display.visibleBars;
+  const { applyViewport, onEvents, resetViewport, showAll, revision } = useKlineViewport({
+    contextKey: JSON.stringify([user?.id ?? "anonymous", klineSymbol, range, interval, highlightDate]),
+    candles,
+    visibleBars,
+  });
+  const indicatorHints = useMemo(() => getIndicatorDataHints(candles, indicatorSettings), [candles, indicatorSettings]);
   const loading = klineQuery.isFetching;
   const err = klineQuery.isError ? api.getApiErrorMessage(klineQuery.error) : "";
 
@@ -160,24 +176,20 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
   );
 
   const chartOption = useMemo(() => {
-    const candles = bundle?.candles || [];
     if (!candles.length) return null;
     const option = buildCandleVolumeChartOption({
       candles,
       palette,
       aggregateFromDaily: false,
       viewMode: "1d",
-      defaultShowBars: 50,
+      defaultShowBars: visibleBars,
+      compact,
+      timeZone: MARKET_TIME_ZONE,
       showVolume: true,
       indicatorSettings,
       volumeInLegend: false,
       layout: "main",
-      formatDate: (c) => {
-        const d = new Date(c.t * 1000);
-        return interval === "1d" || interval === "1wk" || interval === "1mo"
-          ? d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })
-          : d.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
-      },
+      formatDate: (c) => candleLabel(c, interval),
       tooltipExtraLines: (c) => {
         const tr = c.turnover_rate != null ? `${c.turnover_rate}%` : "—";
         const amt = c.amount != null ? fmtAmt(c.amount) : "—";
@@ -185,9 +197,9 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
       },
       volumeAxisFormatter: volAxisLabel,
     });
-    return focusCandleOption(option, candles, highlightDate);
-  }, [bundle, interval, indicatorSettings, palette, highlightDate]);
-  const focus = candleFocus(bundle?.candles, highlightDate);
+    return applyViewport(focusCandleOption(option, candles, highlightDate));
+  }, [candles, interval, indicatorSettings, palette, highlightDate, compact, visibleBars, applyViewport, revision]);
+  const focus = candleFocus(candles, highlightDate);
 
   const m = bundle?.metrics || {};
 
@@ -286,20 +298,25 @@ const StockKlinePanel = forwardRef(function StockKlinePanel(
           <dl>{detailMetrics.map(renderMetric)}</dl>
         </div>
 
-        <div className="market-chart-caption">
+        <div className="market-chart-caption stock-replay-chart-toolbar">
           <span>{interval === "1wk" ? "周线走势" : interval === "1mo" ? "月线走势" : "日线走势"}</span>
+          <div className="stock-replay-viewport-actions" role="group" aria-label="股票 K 线显示范围">
+            <Button size="small" onClick={resetViewport} disabled={!candles.length}>最近 {visibleBars} 根</Button>
+            <Button size="small" onClick={showAll} disabled={!candles.length}>全部</Button>
+          </div>
         </div>
-        <KlineIndicatorControls settings={indicatorSettings} onChange={setIndicatorSettings} />
+        <KlineIndicatorControls settings={indicatorSettings} onChange={setIndicatorSettings} compact={compact} />
         {highlightDate ? <p className="market-data-asof">日期定位 {highlightDate}：{focus ? `${focus.exact ? "对应行情" : "最近可用行情"} ${focus.date}${interval !== "1d" ? "（当前为聚合周期）" : ""}` : "已加载行情未覆盖该日期"}。</p> : null}
         {chartOption ? (
           <div className="market-canvas" aria-label={`${displayName || klineSymbol} K 线及技术指标`}>
-            <ReactECharts option={chartOption} style={{ height: resolvedChartHeight, width: "100%" }} notMerge lazyUpdate autoResize />
+            <ReactECharts option={chartOption} onEvents={onEvents} style={{ height: resolvedChartHeight, width: "100%" }} notMerge lazyUpdate autoResize />
           </div>
         ) : <div className="market-chart-empty" style={{ minHeight: chartHeight }} role="status">
           <LineChartOutlined aria-hidden="true" />
           <strong>{loading ? "正在读取行情" : err ? "行情暂不可用" : "暂无行情数据"}</strong>
           {!loading ? <span>{err ? "刷新重试" : "刷新或选择其他股票"}</span> : null}
         </div>}
+        {candles.length && indicatorHints.length ? <div className="stock-replay-indicator-hints" role="status">{indicatorHints.map((hint) => <p key={hint}>{hint}</p>)}</div> : null}
       </Spin>
 
       {err ? <Alert type="error" showIcon className="market-data-alert" message={err} /> : null}

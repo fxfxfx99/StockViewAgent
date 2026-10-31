@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
 from app.deps.auth import get_current_user, require_admin
-from app.services import eastmoney_market, event_calendar_context, public_data_context, kline_pipeline, kline_learning_service as kls
+from app.services import eastmoney_market, event_calendar_context, public_data_context, global_market, market_catalog, kline_learning_service as kls
 from app.storage import kline_insight_store
 from app.storage.users_store import UserRecord
 
@@ -26,9 +26,9 @@ class PromptBody(BaseModel):
 class AnalyzeMarketBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    index_key: str = "SH_COMP"
-    range_param: str = Field(default="1y", alias="range")
-    interval: str = "1d"
+    index_key: str = Field(default="SH_COMP", min_length=1, max_length=32)
+    range_param: str = Field(default="1y", alias="range", pattern="^(3mo|6mo|1y|2y|5y)$")
+    interval: str = Field(default="1d", pattern="^(1d|1wk|1mo)$")
     candle_rows: int = Field(default=35, ge=10, le=120)
 
 
@@ -91,30 +91,39 @@ def prompt_put(body: PromptBody, _: Annotated[UserRecord, Depends(require_admin)
 
 @router.get("/major-indices")
 def major_indices_list():
-    from app.services.eastmoney_market import MAJOR_INDEX_META
+    return {"items": market_catalog.list_market_catalog()}
 
-    return {
-        "items": [{"key": k, "label": v[1]} for k, v in sorted(MAJOR_INDEX_META.items())],
-    }
+
+def _market_data_context(bundle):
+    instrument = bundle.get("instrument") or {}
+    return (
+        f"【行情口径】市场={instrument.get('region', '')}；交易所={instrument.get('exchange', '')}；"
+        f"类别={instrument.get('asset_class', '')}；单位={instrument.get('unit', '')}；"
+        f"时区={instrument.get('timezone', 'Asia/Shanghai')}；来源={bundle.get('kline_source', '')}；"
+        f"行情日期={bundle.get('data_as_of', '未知')}；历史回退={'是' if bundle.get('cache_stale') else '否'}。\n"
+        f"{instrument.get('description', '')}\n"
+        "以实际市场口径解读。历史回退不可描述为实时行情；缺失成交量不推断为零成交；"
+        "连续期货存在换月和价差，区间价格变化不是可交易合约收益。"
+    )
 
 
 @router.post("/analyze-market")
 async def analyze_market(body: AnalyzeMarketBody, _: Annotated[UserRecord, Depends(get_current_user)]):
     try:
-        bundle = await kline_pipeline.fetch_major_index_kline_with_fallbacks(
+        bundle = await global_market.fetch_market_kline(
             body.index_key, body.range_param, body.interval
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except Exception as e:
-        raise HTTPException(502, str(e)) from e
+        raise HTTPException(502, "市场行情来源暂不可用，请稍后重试") from e
 
     candles = bundle.get("candles") or []
     metrics = bundle.get("metrics") or {}
     pr = kls.get_prompt()
     learning = kls.build_learning_context(max_total=4000)
     index_key = str(bundle.get("index_key") or body.index_key.strip().upper())
-    index_label = str(bundle.get("symbol") or index_key)
+    index_label = str((bundle.get("instrument") or {}).get("label") or bundle.get("symbol") or index_key)
     try:
         user_msg = pr["market_user_template"].format(
             index_label=index_label,
@@ -123,13 +132,14 @@ async def analyze_market(body: AnalyzeMarketBody, _: Annotated[UserRecord, Depen
             interval=body.interval,
             metrics=kls.escape_braces_for_str_format(kls.format_metrics(metrics)),
             candles_summary=kls.escape_braces_for_str_format(
-                kls.format_candles_summary(candles, body.candle_rows)
+                kls.format_candles_summary(candles, body.candle_rows, timezone_name=bundle.get("timezone", "Asia/Shanghai"))
             ),
             learning_context=kls.escape_braces_for_str_format(learning),
         )
     except KeyError as e:
         raise HTTPException(400, f"提示词模板占位符与参数不匹配: {e!s}") from e
 
+    user_msg = _market_data_context(bundle) + "\n" + user_msg
     calendar = event_calendar_context.retrieve("kline", f"{index_label} 全球经济金融 利率 通胀 货币政策 风险")
     user_msg += event_calendar_context.prompt_evidence(calendar)
     public_data = public_data_context.retrieve(f"{index_label} 通胀 经济 汇率")
@@ -141,6 +151,12 @@ async def analyze_market(body: AnalyzeMarketBody, _: Annotated[UserRecord, Depen
     return {
         "index_key": index_key,
         "index_label": index_label,
+        "instrument": bundle.get("instrument"),
+        "data_as_of": bundle.get("data_as_of"),
+        "cache_stale": bool(bundle.get("cache_stale")),
+        "kline_source": bundle.get("kline_source"),
+        "source_url": bundle.get("source_url"),
+        "cache_warning": bundle.get("cache_warning"),
         "range": body.range_param,
         "interval": body.interval,
         "interpretation": text,
@@ -155,29 +171,29 @@ async def analyze_market(body: AnalyzeMarketBody, _: Annotated[UserRecord, Depen
 async def market_chat(body: MarketChatBody, _: Annotated[UserRecord, Depends(get_current_user)]):
     """基于所选指数的最新 K 线与指标回答简易行情问题。"""
     try:
-        bundle = await kline_pipeline.fetch_major_index_kline_with_fallbacks(
+        bundle = await global_market.fetch_market_kline(
             body.index_key, body.range_param, body.interval
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except Exception as e:
-        raise HTTPException(502, str(e)) from e
+        raise HTTPException(502, "市场行情来源暂不可用，请稍后重试") from e
 
     candles = bundle.get("candles") or []
     metrics = bundle.get("metrics") or {}
     index_key = str(bundle.get("index_key") or body.index_key.strip().upper())
-    index_label = str(bundle.get("symbol") or index_key)
+    index_label = str((bundle.get("instrument") or {}).get("label") or bundle.get("symbol") or index_key)
     context = (
-        f"指数：{index_label}（{index_key}）\n"
+        f"市场品种：{index_label}（{index_key}）\n"
         f"区间/周期：{body.range_param} / {body.interval}\n"
         f"指标：\n{kls.format_metrics(metrics)}\n"
-        f"最近K线：\n{kls.format_candles_summary(candles, body.candle_rows)}"
+        f"最近K线：\n{kls.format_candles_summary(candles, body.candle_rows, timezone_name=bundle.get('timezone', 'Asia/Shanghai'))}"
     )
     system = (
         "你是谨慎的中文市场行情解读助手。只基于提供的数据回答；先给结论，再列依据和风险。"
         "不要编造实时价格或新闻，不承诺收益，不给出确定性买卖指令。若数据不足要明确说明。"
     )
-    user_msg = f"{context}\n\n用户问题：{body.question.strip()}"
+    user_msg = f"{_market_data_context(bundle)}\n{context}\n\n用户问题：{body.question.strip()}"
     calendar = event_calendar_context.retrieve("kline", f"{index_label} {body.question.strip()}")
     user_msg += event_calendar_context.prompt_evidence(calendar)
     public_data = public_data_context.retrieve(body.question.strip())
@@ -192,6 +208,12 @@ async def market_chat(body: MarketChatBody, _: Annotated[UserRecord, Depends(get
         "question": body.question.strip(),
         "index_key": index_key,
         "index_label": index_label,
+        "instrument": bundle.get("instrument"),
+        "data_as_of": bundle.get("data_as_of"),
+        "cache_stale": bool(bundle.get("cache_stale")),
+        "kline_source": bundle.get("kline_source"),
+        "source_url": bundle.get("source_url"),
+        "cache_warning": bundle.get("cache_warning"),
         "model": settings.kline_llm_model,
     }
 

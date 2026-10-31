@@ -1,4 +1,4 @@
-"""市场研判 · 宏观与行业：Tushare 指数/外汇/黄金/国际原油等。"""
+"""市场研判：全球公开指数/商品期货及授权宏观行业行情。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,6 +19,11 @@ def get_indices():
     return {"items": macro_workspace.indices()}
 
 
+@router.get("/collection-status")
+def get_collection_status():
+    return macro_workspace.collection_status()
+
+
 @router.get("/index-kline")
 async def get_index_kline(
     index_key: str = Query("SH_COMP", max_length=32),
@@ -31,7 +36,7 @@ async def get_index_kline(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(502, "公开指数来源暂不可用，请稍后重试") from exc
+        raise HTTPException(502, "公开市场行情来源暂不可用，请稍后重试") from exc
 
 
 @router.get("/kline")

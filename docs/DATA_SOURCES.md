@@ -106,14 +106,15 @@
 
 ## 市场研判：宏观、行业与资金
 
-`/macro` 提供大盘指数、宏观与行业、资金概览、K 线解读四个页签，整合 ExStockNEWS 2.0 的对应功能。五个 A 股主要指数采用公开来源；黄金、离岸人民币、布伦特和申万行业保留 Tushare 权限要求。资金流沿用现有市场适配器与缓存，代理指标保留口径说明。模型解读、问答须主动触发。
+`/macro` 提供大盘指数、宏观与行业、资金概览、K 线解读四个页签，整合 ExStockNEWS 2.0 的对应功能。6 个 A 股指数、7 个美股指数及黄金/白银/原油/天然气/铜 6 个连续期货采用公开来源；原宏观页签的上海金、离岸人民币、布伦特和申万行业保留 Tushare 权限要求。资金流沿用现有市场适配器与缓存，代理指标保留口径说明。模型解读、问答须主动触发。
 
-- `/api/macro/indices`、`/api/macro/index-kline` — 公开指数目录与日／周／月行情（`macro_workspace.py`、`kline_pipeline.py`）。
+- `/api/macro/indices`、`/api/macro/index-kline` — 公开指数目录与日／周／月行情（`market_catalog.py`、`global_market.py`、`macro_workspace.py`、`kline_pipeline.py`）。
+- `/api/macro/collection-status` — 逐品种采集状态、来源、上次成功与下次重试。
 - `/api/macro/catalog`、`/api/macro/kline`、`/api/macro/sw-daily/*` — 宏观目录、公开或授权序列、申万行业（`macro_tushare_service.py`）。
 - `/api/market/fund-flow/dashboard` 等 — 行业资金、机构代理、北向、两融、热榜与 ETF。
 - `/api/kline-learning/*` — 大盘／个股解读、问答与管理员共享资料。
 
-公开指数展示缓存 TTL 为 5 分钟，失败保留有效旧行情并标记陈旧；空响应、异常价格和比已有缓存更旧的数据不会覆盖缓存。中央 `public_market` 每小时自动归档五个指数，不依赖股票列表、模型或 Tushare。Tushare 宏观／行业 K 线 TTL 为 15 分钟、行业目录为 1 小时，凭据变化重新取数，过期回退有明确提示。具体范围与接口参数见 [市场研判](MARKET_WORKSPACE.md)。
+公开指数展示缓存 TTL 为 5 分钟，失败保留有效旧行情并标记陈旧；空响应、异常价格和比已有缓存更旧的数据不会覆盖缓存。中央 `public_market` 默认每小时自动归档 19 个市场品种，支持逐品种进度与失败退避，不依赖股票列表、模型或 Tushare。Tushare 宏观／行业 K 线 TTL 为 15 分钟、行业目录为 1 小时，凭据变化重新取数，过期回退有明确提示。具体范围与接口参数见 [市场研判](MARKET_WORKSPACE.md)。
 
 ## 量化 / 信号（扩展 API）
 

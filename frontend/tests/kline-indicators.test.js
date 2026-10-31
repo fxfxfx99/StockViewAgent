@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sma, macd, boll, kdj, rsi, buildSubIndicatorSeries, SUB_INDICATORS } from "../src/klineIndicators.js";
+import { sma, macd, boll, kdj, rsi, obv, vr, roc, bias, trix, buildSubIndicatorSeries, SUB_INDICATORS } from "../src/klineIndicators.js";
 import { DEFAULT_INDICATOR_SETTINGS, normalizeIndicatorSettings, validateIndicatorSettings, indicatorSettingsKey } from "../src/klineIndicatorSettings.js";
 
 const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 1e-10, `${message || "value"}: ${actual} != ${expected}`);
@@ -133,6 +133,89 @@ test("missing volume and amount are chart gaps, not manufactured zero trades", (
   assert.equal(volume.series[0].data[1], null);
   assert.deepEqual(volume.tooltipLines(1), ["成交量 —"]);
   assert.deepEqual(buildSubIndicatorSeries(candles, "amount").series[0].data, [null, null]);
+});
+
+test("OBV preserves signed cumulative volume and leaves later totals unknown after a gap", () => {
+  assert.deepEqual(obv([10, 11, 11, 9, 10], [100, 200, 300, 400, 0]), [0, 200, 200, -200, -200]);
+  assert.deepEqual(obv(["10", "11", "9"], ["100", "200", "300"]), [0, 200, -100]);
+  assert.deepEqual(obv([10, 11, 12], [100, null, 300]), [0, null, null]);
+  assert.deepEqual(obv([10, 11, 12, 13, 12], [100, null, 300, 400, 500]), [0, null, null, null, null]);
+  assert.deepEqual(obv([10, null, 12, 11], [100, 200, 300, 400]), [0, null, null, null]);
+  assert.deepEqual(obv([10, 11, 12], [null, 200, 300]), [null, null, null]);
+  assert.deepEqual(obv([null, 11, 12], [100, 200, 300]), [null, null, null]);
+  assert.deepEqual(obv([10, 11, 12], [null, null, null]), [null, null, null]);
+  assert.deepEqual(obv([10, 11, 12], [0, 0, 0]), [0, 0, 0]);
+  for (const missing of [undefined, NaN, Infinity, "", false, -1]) {
+    assert.deepEqual(obv([10, 11, 12, 13], [100, missing, 300, 400]), [0, null, null, null]);
+  }
+});
+
+test("OBV chart leaves missing volume and later unknowable totals blank", () => {
+  const candles = candlesFor([10, 11, 12, 13]);
+  candles[1].v = null;
+  const result = buildSubIndicatorSeries(candles, "obv");
+  assert.deepEqual(result.series[0].data, [0, null, null, null]);
+  assert.deepEqual(result.tooltipLines(0), ["OBV 0"]);
+  assert.deepEqual(result.tooltipLines(1), []);
+  assert.deepEqual(result.tooltipLines(2), []);
+  assert.deepEqual(result.tooltipLines(3), []);
+  const unavailable = buildSubIndicatorSeries(candles.map((c) => ({ ...c, v: null })), "obv");
+  assert.deepEqual(unavailable.series[0].data, Array(4).fill(null));
+  assert.deepEqual(unavailable.tooltipLines(3), []);
+});
+
+test("VR uses complete rolling volume and price comparisons without substituting missing trades", () => {
+  // Up=200, down=400, unchanged=300 => (200+150)/(400+150)*100.
+  assertSeries(vr([10, 11, 11, 9], [100, 200, 300, 400], 3), [null, null, null, 700 / 11]);
+  assertSeries(vr(["10", "11", "11", "9"], ["100", "200", "300", "400"], 3), [null, null, null, 700 / 11]);
+  assertSeries(vr([10, 11, 10, 11, 10], [100, null, 300, 400, 500], 2), [null, null, null, 400 / 3, 80]);
+  assert.deepEqual(vr([10, null, 10, 11, 10], [100, 200, 300, 400, 500], 2), [null, null, null, null, 80]);
+  assert.deepEqual(vr([10, 11, 10], [null, null, null], 2), [null, null, null]);
+  assert.deepEqual(vr([10, 11, 10], [0, 0, 0], 2), [null, null, null]);
+  assert.deepEqual(vr([10, 11, 10], [100, 0, 300], 2), [null, null, 0]);
+  for (const missing of [undefined, NaN, Infinity, "", false, -1]) {
+    assert.deepEqual(vr([10, 11, 10], [100, missing, 300], 2), [null, null, null]);
+  }
+  for (const period of [0, -1, 1.5, NaN, Infinity, null]) {
+    assert.deepEqual(vr([10, 11, 10], [100, 200, 300], period), [null, null, null]);
+  }
+});
+
+test("ROC BIAS and TRIX hide nonpositive reference percentages while preserving negative futures prices", () => {
+  const futures = [-40, -20, 0, 20, -10, 10, 20];
+  assertSeries(roc(futures, 1), [null, null, null, null, -150, null, 100]);
+  assertSeries(bias(futures, 2), [null, null, null, 100, -300, null, 100 / 3]);
+  assertSeries(trix(futures, 1).trix, [null, null, null, null, -150, null, 100]);
+  assert.deepEqual(trix(Array(50).fill(-10)).trix, Array(50).fill(null));
+  assert.deepEqual(trix(Array(50).fill(-10)).matrix, Array(50).fill(null));
+  assert.deepEqual(bias(Array(10).fill(-10), 2), Array(10).fill(null));
+  assert.deepEqual(roc(Array(10).fill(-10), 2), Array(10).fill(null));
+  assertSeries(sma(futures, 2), [null, -30, -10, 10, 5, 0, 15]);
+});
+
+test("positive-reference percentages retain their formulas and reject missing or infinite results", () => {
+  assertSeries(roc([10, 12, 9], 1), [null, 20, -25]);
+  assertSeries(bias([10, 12, 8], 2), [null, 100 / 11, -20]);
+  assertSeries(trix([1, 2, 3, 4, 5, 6], 2).trix, [null, null, null, null, 40, 200 / 7]);
+  assertSeries(roc(["10", "12", "9"], 1), [null, 20, -25]);
+  for (const missing of [null, undefined, NaN, Infinity, "", false]) {
+    assert.deepEqual(roc([10, missing, 12], 1), [null, null, null]);
+  }
+  assert.deepEqual(roc([Number.MAX_VALUE, -Number.MAX_VALUE], 1), [null, null]);
+  for (const period of [0, -1, 1.5, NaN, Infinity, null]) {
+    assert.deepEqual(roc([10, 12, 9], period), [null, null, null]);
+  }
+});
+
+test("new gap and futures policies remain causal for every chart replay prefix", () => {
+  const closes = [10, 11, 9, 10, 0, -5, -2, 10, 12, null, 8, 9, 7, 6, 8];
+  const volumes = [100, 200, 300, null, 400, 200, 0, 300, 500, 300, 400, 200, 100, 200, 300];
+  const calculate = (c, v) => ({ obv: obv(c, v), vr: vr(c, v, 3), roc: roc(c, 2), bias: bias(c, 3), ...trix(c, 2) });
+  const full = calculate(closes, volumes);
+  for (let size = 0; size <= closes.length; size++) {
+    const partial = calculate(closes.slice(0, size), volumes.slice(0, size));
+    for (const key of Object.keys(full)) assert.deepEqual(partial[key], full[key].slice(0, size), `${key} prefix ${size}`);
+  }
 });
 
 test("default settings are frozen and normalization makes independent valid trees", () => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregateCandlesFromDaily, buildCandleVolumeChartOption as build, getKlineChartHeight } from '../src/klineChartOption.js';
+import { aggregateCandlesFromDaily, buildCandleVolumeChartOption as build, getKlineChartHeight, formatCandleDate, getIndicatorDataHints } from '../src/klineChartOption.js';
 import { macd, kdj } from '../src/klineIndicators.js';
 import { normalizeIndicatorSettings } from '../src/klineIndicatorSettings.js';
 
@@ -102,4 +102,52 @@ test('multi-pane heights grow and compact charts keep valid axes', () => {
   const option = build({ candles, layout: 'mini', showVolume: false });
   assert.equal(option.grid.length, 1);
   assert(option.series.every((row) => !row.yAxisIndex));
+});
+
+test('exchange timezone controls weekly/monthly boundaries irrespective of browser timezone', () => {
+  const t = (s) => Date.parse(s)/1000;
+  const input = [
+    {t:t('2026-03-01T23:30:00Z'),o:1,h:3,l:1,c:2,v:5},
+    {t:t('2026-03-02T05:30:00Z'),o:2,h:4,l:2,c:3,v:6},
+  ];
+  assert.equal(aggregateCandlesFromDaily(input,'1wk','Asia/Shanghai').length,1);
+  assert.equal(aggregateCandlesFromDaily(input,'1wk','America/New_York').length,2);
+  const boundary=[{...input[0],t:t('2026-02-28T23:30:00Z')},{...input[1],t:t('2026-03-01T05:30:00Z')}];
+  assert.equal(aggregateCandlesFromDaily(boundary,'1mo','Asia/Shanghai').length,1);
+  assert.equal(aggregateCandlesFromDaily(boundary,'1mo','America/New_York').length,2);
+});
+
+test('display preferences control visible bars, every grid, and negative latest price line', () => {
+  const input=Array.from({length:120},(_,i)=>({...candles[0],t:candles[0].t+i*86400,c:-i-1,o:-i}));
+  const preference=settings({display:{visibleBars:40,showGrid:false,showLastPrice:true},subIndicators:['vol','macd','rsi']});
+  const option=build({candles:input,indicatorSettings:preference,compact:true});
+  assert.equal(Math.round(option.dataZoom[0].start/100*119),80);
+  assert(option.yAxis.every(axis=>axis.splitLine.show===false&&axis.position==='right'));
+  assert.equal(option.series[0].markLine.data[0].yAxis,-120);
+  assert.equal(option.dataZoom[1].showDetail,false);
+  const off=build({candles:input,indicatorSettings:settings({display:{showLastPrice:false}})});
+  assert.equal(off.series[0].markLine,undefined);
+  const missing=build({candles:[{...input[0],c:null}],indicatorSettings:preference});
+  assert.equal(missing.series[0].markLine,undefined);
+});
+
+
+test('date labels use the trading day and unavailable fields stay visible as a reason', () => {
+  const t=Date.parse('2026-11-01T00:30:00Z')/1000;
+  assert.equal(formatCandleDate(t,'Asia/Shanghai'),'2026-11-01');
+  assert.equal(formatCandleDate(t,'America/New_York'),'2026-10-31');
+  const missing=candles.slice(0,10).map(({v,...row})=>row);
+  const hints=getIndicatorDataHints(missing,settings({subIndicators:['vol','amount','macd']}));
+  assert(hints.some(hint=>hint.includes('成交量：数据源未提供')));
+  assert(hints.some(hint=>hint.includes('成交额：数据源未提供')));
+  assert(hints.some(hint=>hint.includes('MACD：有效样本不足')));
+  assert(hints.some(hint=>hint.includes('均线需要更多历史数据')));
+  assert.deepEqual(getIndicatorDataHints([],settings({})),[]);
+});
+
+test('negative source volume cannot be cancelled out into a valid weekly sum',()=>{
+  const [week]=aggregateCandlesFromDaily([{...candles[0],v:-1},candles[1]],'1wk');
+  assert.equal(week.v,null);
+  const [overflow]=aggregateCandlesFromDaily([{...candles[0],amount:1e308},{...candles[1],amount:1e308}], '1wk');
+  assert.equal(overflow.amount,null);
 });

@@ -19,6 +19,14 @@ function validPeriod(period) {
   return Number.isInteger(period) && period > 0;
 }
 
+// Percentage changes need a positive reference price. A negative current price
+// is still meaningful (for example, a futures contract crossing below zero).
+function percentageChange(value, base) {
+  if (value == null || base == null || base <= 0) return null;
+  const result = ((value - base) / base) * 100;
+  return Number.isFinite(result) ? result : null;
+}
+
 /** A trailing mean requires `period` consecutive valid observations. */
 export function sma(arr, period) {
   const out = fills(arr.length);
@@ -198,17 +206,26 @@ export function cci(highs, lows, closes, period = 14) {
 
 export function bias(closes, period = 6) {
   const ma = sma(closes, period);
-  return closes.map((c, i) => (ma[i] == null || ma[i] === 0 ? null : ((c - ma[i]) / ma[i]) * 100));
+  return closes.map((c, i) => percentageChange(num(c, null), ma[i]));
 }
 
+/** OBV starts at zero; an unknown close or volume makes its later total unknown. */
 export function obv(closes, volumes) {
   const n = closes.length;
-  const out = fills(n, 0);
-  for (let i = 1; i < n; i++) {
-    const prev = out[i - 1] ?? 0;
-    if (closes[i] > closes[i - 1]) out[i] = prev + volumes[i];
-    else if (closes[i] < closes[i - 1]) out[i] = prev - volumes[i];
-    else out[i] = prev;
+  const out = fills(n);
+  let previousClose = null;
+  let cumulative = 0;
+  for (let i = 0; i < n; i++) {
+    const close = num(closes[i], null);
+    const volume = num(volumes[i], null);
+    if (close == null || volume == null || volume < 0) break;
+    if (previousClose != null) {
+      if (close > previousClose) cumulative += volume;
+      else if (close < previousClose) cumulative -= volume;
+    }
+    if (!Number.isFinite(cumulative)) break;
+    out[i] = cumulative;
+    previousClose = close;
   }
   return out;
 }
@@ -239,9 +256,9 @@ export function psy(closes, period = 12) {
 export function roc(closes, period = 12) {
   const n = closes.length;
   const out = fills(n);
+  if (!validPeriod(period)) return out;
   for (let i = period; i < n; i++) {
-    const base = closes[i - period];
-    out[i] = !base ? null : ((closes[i] - base) / base) * 100;
+    out[i] = percentageChange(num(closes[i], null), num(closes[i - period], null));
   }
   return out;
 }
@@ -270,8 +287,7 @@ export function trix(closes, period = 12) {
   const n = closes.length;
   const trx = fills(n);
   for (let i = 1; i < n; i++) {
-    if (ee3[i] == null || ee3[i - 1] == null || ee3[i - 1] === 0) trx[i] = null;
-    else trx[i] = ((ee3[i] - ee3[i - 1]) / ee3[i - 1]) * 100;
+    trx[i] = percentageChange(ee3[i], ee3[i - 1]);
   }
   return { trix: trx, matrix: emaClean(trx, 9) };
 }
@@ -279,15 +295,26 @@ export function trix(closes, period = 12) {
 export function vr(closes, volumes, period = 26) {
   const n = closes.length;
   const out = fills(n);
+  if (!validPeriod(period)) return out;
   for (let i = period; i < n; i++) {
     let avs = 0, bvs = 0, cvs = 0;
+    let complete = true;
     for (let j = i - period + 1; j <= i; j++) {
-      if (closes[j] > closes[j - 1]) avs += volumes[j];
-      else if (closes[j] < closes[j - 1]) bvs += volumes[j];
-      else cvs += volumes[j];
+      const close = num(closes[j], null);
+      const previousClose = num(closes[j - 1], null);
+      const volume = num(volumes[j], null);
+      if (close == null || previousClose == null || volume == null || volume < 0) { complete = false; break; }
+      if (close > previousClose) avs += volume;
+      else if (close < previousClose) bvs += volume;
+      else cvs += volume;
     }
+    if (!complete) continue;
     const den = bvs + cvs / 2;
-    out[i] = den === 0 ? null : ((avs + cvs / 2) / den) * 100;
+    const numerator = avs + cvs / 2;
+    if (den > 0 && Number.isFinite(den) && Number.isFinite(numerator)) {
+      const value = (numerator / den) * 100;
+      out[i] = Number.isFinite(value) ? value : null;
+    }
   }
   return out;
 }
@@ -416,7 +443,8 @@ export function buildSubIndicatorSeries(candles, indicatorId, { volumeAxisFormat
   }
   if (id === "obv") {
     const o = obv(closes, volumes);
-    return { legend: ["OBV"], yAxisName: "OBV", series: [{ ...line("OBV", o, "#38bdf8"), areaStyle: { opacity: 0.06 } }], tooltipLines: (i) => [`OBV ${Math.round(o[i] || 0)}`] };
+    return { legend: ["OBV"], yAxisName: "OBV", series: [{ ...line("OBV", o, "#38bdf8"), areaStyle: { opacity: 0.06 } }],
+      tooltipLines: (i) => o[i] == null ? [] : [`OBV ${Math.round(o[i])}`] };
   }
   if (id === "atr") {
     const a = atr(highs, lows, closes, 14);

@@ -16,7 +16,23 @@ export function focusCandleOption(option, candles, day) {
   const denominator = Math.max(candles.length - 1, 1);
   const start = Math.max(0, Math.min(focus.index - 20, candles.length - 50));
   const end = Math.min(candles.length - 1, start + 49);
-  return { ...option, dataZoom: (option.dataZoom || []).map((zoom) => ({ ...zoom, start: start / denominator * 100, end: end / denominator * 100 })), series: option.series.map((series) => series.type === "candlestick" ? { ...series, markLine: { silent: true, symbol: "none", label: { formatter: `定位 ${focus.date}`, position: "insideEndTop" }, lineStyle: { type: "dashed", color: "#d68b25", width: 2 }, data: [{ xAxis: focus.index }] } } : series) };
+  return {
+    ...option,
+    dataZoom: (option.dataZoom || []).map((zoom) => ({ ...zoom, start: start / denominator * 100, end: end / denominator * 100 })),
+    series: option.series.map((series) => series.type === "candlestick" ? {
+      ...series,
+      markLine: {
+        silent: true,
+        symbol: "none",
+        ...series.markLine,
+        data: [...(series.markLine?.data || []), {
+          xAxis: focus.index,
+          label: { show: true, formatter: `定位 ${focus.date}`, position: "insideEndTop" },
+          lineStyle: { type: "dashed", color: "#d68b25", width: 2 },
+        }],
+      },
+    } : series),
+  };
 }
 export function financialSeries(items = []) {
   const groups = new Map();
