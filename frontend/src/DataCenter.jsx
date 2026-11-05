@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert, App as AntApp, Badge, Button, Card, Drawer, Empty, Form, Input, InputNumber,
@@ -13,6 +14,7 @@ import UndoOutlined from "@ant-design/icons/es/icons/UndoOutlined";
 import LinkOutlined from "@ant-design/icons/es/icons/LinkOutlined";
 import DisplayRefreshControl, { useDisplayPolling } from "./DisplayRefreshControl.jsx";
 import AppToolbar from "./AppToolbar.jsx";
+import KnowledgeCachePanel from "./KnowledgeCachePanel.jsx";
 import { ConfigConsoleButton } from "./ConfigConsole.jsx";
 import { useAuth } from "./AuthContext.jsx";
 import { safeUrl } from "./components/format.js";
@@ -211,7 +213,9 @@ function DataCenterContent() {
   const { message } = AntApp.useApp();
   const queryClient = useQueryClient();
   const [configOpen, setConfigOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("collection");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = ["collection", "files", "records", "cache", "knowledge"].includes(searchParams.get("tab")) ? searchParams.get("tab") : "collection";
+  const setActiveTab = (tab) => setSearchParams((current) => { const next = new URLSearchParams(current); next.set("tab", tab); return next; }, { replace: true });
   const polling = useDisplayPolling(user?.id, "data-center", "30");
   const key = (section) => dataCenterQueryKey(user?.id, section);
   const status = useQuery({ queryKey: key("collection-status"), queryFn: ({ signal }) => api.getCollectionStatus({ signal }), enabled: isAdmin, staleTime: 15_000, refetchInterval: activeTab === "collection" ? polling.interval : false, refetchIntervalInBackground: false, refetchOnWindowFocus: false });
@@ -229,7 +233,7 @@ function DataCenterContent() {
   const categories = overview.data?.categories || EMPTY;
   const dataset = status.data?.datasets;
   const healthy = sourceItems.filter((source) => collectionStatus(source).color === "success").length;
-  function refreshDisplay() { void status.refetch(); if (activeTab === "files") { void overview.refetch(); void queryClient.invalidateQueries({ queryKey: key("files") }); } if (activeTab === "records") void queryClient.invalidateQueries({ queryKey: key("records") }); }
+  function refreshDisplay() { void status.refetch(); if (activeTab === "files") { void overview.refetch(); void queryClient.invalidateQueries({ queryKey: key("files") }); } if (activeTab === "records") void queryClient.invalidateQueries({ queryKey: key("records") }); if (activeTab === "knowledge") void queryClient.invalidateQueries({ queryKey: key("knowledge") }); }
   return <Layout className="sva-layout data-center-layout">
     <AppToolbar active="data" user={user} authRequired={authRequired} onLogout={logout} settingsAction={<ConfigConsoleButton />} />
     <Layout.Content className="data-center-content">
@@ -245,6 +249,7 @@ function DataCenterContent() {
           { key: "files", label: "文件与分类", children: <><QueryError query={overview} title="数据目录读取失败" /><div className="data-section-intro"><div><Title level={4}>本地文件索引</Title><Paragraph className="data-caption">{formatDataSize(overview.data?.directory_totals?.size_bytes)} · {formatDataFiles(overview.data?.directory_totals?.files)} · 索引更新 {dataTime(overview.data?.index?.updated_at)}</Paragraph></div><Button icon={<ReloadOutlined aria-hidden="true" />} loading={refreshIndex.isPending} onClick={() => refreshIndex.mutate()}>重建本地索引</Button></div><Card className="data-directory-card" size="small"><DatabaseOutlined /><div><Text className="data-directory-path" copyable={overview.data?.data_root ? { text: overview.data.data_root } : false}>{overview.data?.data_root || "读取目录信息…"}</Text></div></Card>{categories.length ? <div className="data-category-strip">{categories.map((category) => <div className="data-category" key={category.id}><span>{category.label}</span><strong>{formatDataSize(category.size_bytes)}</strong><small>{formatDataFiles(category.files)}</small></div>)}</div> : null}<FileInventory userId={user?.id} categories={categories} sources={sourceItems} /></> },
           { key: "records", label: "已采集数据", children: <CollectedRecords userId={user?.id} sources={sourceItems} /> },
           { key: "cache", label: "磁盘缓存与回收", children: <CacheManager userId={user?.id} onChanged={invalidate} /> },
+          { key: "knowledge", label: "知识与提示词", children: <KnowledgeCachePanel userId={user?.id} /> },
         ]} /></Card>
       </>}
     </Layout.Content>

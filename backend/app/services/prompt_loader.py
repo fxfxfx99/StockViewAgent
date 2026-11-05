@@ -1,40 +1,39 @@
-"""Read analysis prompts; optional local overrides in data/prompt_overrides.json."""
+"""Compatibility reader for the locally versioned analysis prompt registry."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from contextvars import ContextVar
 
 from app.config import settings
+from app.services import prompt_registry
+from app.services.prompt_registry import MAX_PROMPT_LENGTH, PROMPTS_DIR, PROMPT_TITLES
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
-PROMPT_TITLES = {
-    "system_prompt": "系统指令",
-    "news_relevance": "相关性判断",
-    "stock_impact_analysis": "潜在影响分析",
-}
+_pinned: ContextVar[dict | None] = ContextVar("analysis_prompt_snapshot", default=None)
 _ALLOWED = set(PROMPT_TITLES)
-MAX_PROMPT_LENGTH = 20000
 
 
-def _overrides_path() -> Path:
+def _overrides_path():
     return settings.data_dir / "prompt_overrides.json"
 
 
 def load_prompt(name: str) -> str:
-    """Used by the analyzer on every request; overrides apply without a restart."""
-    if name not in _ALLOWED:
-        raise ValueError("Unknown analysis prompt")
-    text = ""
+    prompt_registry.validate_prompt(name, "check")
+    pinned = _pinned.get()
+    if pinned is not None:
+        return pinned["prompts"][name]
+    return prompt_registry.get_prompt(name)["content"]
+
+
+def snapshot_prompts() -> dict:
+    """Pin all model stages to one immutable set, preserving the public loader."""
+    snapshot = prompt_registry.snapshot_prompts()
+    token = _pinned.set(snapshot)
     try:
-        value = json.loads(_overrides_path().read_text(encoding="utf-8"))
-        prompts = value.get("prompts", {}) if isinstance(value, dict) else {}
-        candidate = prompts.get(name) if isinstance(prompts, dict) else None
-        if isinstance(candidate, str) and candidate.strip() and len(candidate) <= MAX_PROMPT_LENGTH:
-            text = candidate
-    except (OSError, ValueError):
-        pass
-    if not text.strip():
-        text = (PROMPTS_DIR / f"{name}.md").read_text(encoding="utf-8")
-    if not text.strip():
-        raise ValueError("Analysis prompt is empty")
-    return text.strip()
+        for name in PROMPT_TITLES:
+            text = load_prompt(name)
+            if text != snapshot["prompts"][name]:
+                snapshot["prompts"][name] = text
+                snapshot["versions"][name] = {"revision_id": None, "content_hash": prompt_registry.text_hash(text),
+                                              "text_hash": prompt_registry.text_hash(text)}
+        return snapshot
+    finally:
+        _pinned.reset(token)

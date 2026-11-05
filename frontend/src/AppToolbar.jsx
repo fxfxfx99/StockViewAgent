@@ -7,6 +7,7 @@ import FundOutlined from "@ant-design/icons/es/icons/FundOutlined";
 import EyeOutlined from "@ant-design/icons/es/icons/EyeOutlined";
 import PlaySquareOutlined from "@ant-design/icons/es/icons/PlaySquareOutlined";
 import DashboardOutlined from "@ant-design/icons/es/icons/DashboardOutlined";
+import BookOutlined from "@ant-design/icons/es/icons/BookOutlined";
 import { Link, useLocation } from "react-router-dom";
 import ThemeModeToggle from "./ThemeModeToggle.jsx";
 
@@ -26,6 +27,7 @@ export default function AppToolbar({ active = "market", settingsAction, user, au
         </Link>
       </div>
       <nav className="sva-app-nav" aria-label="主要导航">
+        <Link to="/learn" className={active === "learn" ? "is-active" : undefined} aria-current={active === "learn" ? "page" : undefined}><BookOutlined aria-hidden="true" /><span>学习入门</span></Link>
         <Link to="/" className={active === "market" ? "is-active" : undefined} aria-current={active === "market" ? "page" : undefined}><LineChartOutlined aria-hidden="true" /><span>关注个股</span></Link>
         <Link to="/research" className={active === "research" ? "is-active" : undefined} aria-current={active === "research" ? "page" : undefined}><ExperimentOutlined aria-hidden="true" /><span>研究</span></Link>
         <Link to="/monitor" className={active === "monitor" ? "is-active" : undefined} aria-current={active === "monitor" ? "page" : undefined}><EyeOutlined aria-hidden="true" /><span>监控</span></Link>

@@ -251,6 +251,8 @@ def register_existing_asset(
 def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
     name = path.name
     stem = path.stem
+    if rel.startswith("knowledge_cache/"):
+        return {"kind": "versioned_knowledge", "key": rel, "source": "knowledge_cache_store"}
     if rel.startswith("research/"):
         return {"kind": "research_immutable_data", "key": rel, "source": "research_archive"}
     if rel.startswith("datasets/"):
@@ -302,6 +304,7 @@ def _infer_asset_meta(rel: str, path: Path) -> dict[str, Any]:
         "economic_events.sqlite3": ("sqlite_db", "economic_events", "event_calendar_store"),
         "data_center.sqlite3": ("sqlite_db", "data_center", "data_collection_store"),
         "merrill.sqlite3": ("sqlite_db", "merrill_clock", "merrill_store"),
+        "stock_features.sqlite3": ("sqlite_db", "stock_features", "stock_feature_store"),
     }
     if name in mapping:
         kind, key, source = mapping[name]
@@ -330,6 +333,8 @@ _CATEGORIES = {
 
 def _category(rel: str) -> str:
     first = rel.split("/", 1)[0]
+    if first == "knowledge_cache":
+        return "knowledge"  # Versions and active prompts must never be treated as TTL caches.
     if rel.startswith("_managed/quarantine/"):
         return "quarantine"
     if rel.startswith(("_managed/backups/", "_managed/legacy/")):
@@ -342,7 +347,7 @@ def _category(rel: str) -> str:
         return "runtime"
     if first in {"research", "research.sqlite3", "investment_research", "investment_research.sqlite3", "tracking.sqlite3", "monitoring.sqlite3", "research_agent.db", "quant.db", "decision_signals.db", "stock_picker_agents.db"}:
         return "research"
-    if first in {"issuer_uploads", "kline_learning", "imports", "strategy_knowledge.db", "kline_insights", "economic_events.sqlite3", "data_center.sqlite3", "merrill.sqlite3", "datasets", "earnings.sqlite3", "earnings"}:
+    if first in {"issuer_uploads", "kline_learning", "imports", "strategy_knowledge.db", "kline_insights", "economic_events.sqlite3", "stock_features.sqlite3", "data_center.sqlite3", "merrill.sqlite3", "datasets", "earnings.sqlite3", "earnings"}:
         return "knowledge"
     if first in {"news.db", "overseas_news.db", "company_fundamentals.db", "company_updates", "company_basic_universe.json", "issuer_basic_info_universe.json", "xueqiu_comments.db"}:
         return "news"

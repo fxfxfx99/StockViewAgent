@@ -23,6 +23,7 @@ const MacroWorkspace = lazy(() => import("./MacroWorkspace.jsx"));
 const MonitoringWorkspace = lazy(() => import("./MonitoringWorkspace.jsx"));
 const KlineReplay = lazy(() => import("./KlineReplay.jsx"));
 const MerrillClock = lazy(() => import("./MerrillClock.jsx"));
+const LearningCenter = lazy(() => import("./LearningCenter.jsx"));
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -33,6 +34,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <ErrorBoundary>
               <AuthGate>
                 <Routes>
+                  <Route path="/learn" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载学习入门" /></div>}><LearningCenter /></Suspense>} />
                   <Route path="/today" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载今日变化" /></div>}><TodayPage /></Suspense>} />
                   <Route path="/research" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载研究工作区" /></div>}><ResearchWorkspace /></Suspense>} />
                   <Route path="/lab" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载量化研究实验室" /></div>}><ResearchLab /></Suspense>} />

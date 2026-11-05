@@ -13,6 +13,7 @@ os.environ["ENABLE_MERRILL_CLOCK"] = "false"
 os.environ["ENABLE_MONITORING"] = "false"
 os.environ["ENABLE_EARNINGS"] = "false"
 os.environ["ENABLE_INVESTMENT_RESEARCH"] = "false"
+os.environ["ENABLE_KNOWLEDGE_CACHE"] = "false"
 os.environ["OVERSEAS_NEWS_ENABLED"] = "false"
 os.environ["COMPANY_AUTO_REFRESH_ENABLED"] = "false"
 for _name in (

@@ -336,6 +336,7 @@ export default function App() {
 
   const panels = [
     { key: "current-research", label: "当前研究", children: <PanelSuspense><LazyPanels.StockResearchContextLazy key={`${user?.id}:${focusSymbol}`} symbol={focusSymbol} /></PanelSuspense> },
+    { key: "features", label: "个股特征库", children: <PanelSuspense><LazyPanels.StockFeaturesPanelLazy key={`${user?.id}:${focusSymbol}`} symbol={focusSymbol} /></PanelSuspense> },
     { key: "financial", label: "财务图表", children: <PanelSuspense><LazyPanels.StockFinancialPanelLazy key={`${user?.id}:${focusSymbol}`} symbol={focusSymbol} /></PanelSuspense> },
     {
       key: "decision",

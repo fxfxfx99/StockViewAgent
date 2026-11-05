@@ -23,6 +23,21 @@ class EvidenceReference(BaseModel):
     quote: str = Field(default="", max_length=500)
 
 
+class FeatureImpact(BaseModel):
+    """A concrete, validated event channel through this stock's saved facts."""
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+    factor_id: str = Field(min_length=1, max_length=120)
+    feature_ids: list[Annotated[str, StringConstraints(min_length=1, max_length=120)]] = Field(min_length=1, max_length=12)
+    feature_version: str = Field(min_length=1, max_length=160)
+    exposure: AnalysisText
+    operating_impact: AnalysisText
+    valuation_impact: AnalysisText
+    conditions: list[AnalysisText] = Field(min_length=1, max_length=6)
+    offsets: list[AnalysisText] = Field(min_length=1, max_length=6)
+    watch_points: list[AnalysisText] = Field(min_length=1, max_length=6)
+    evidence_source_ids: list[Annotated[str, StringConstraints(min_length=1, max_length=40)]] = Field(min_length=1, max_length=8)
+
+
 class ImpactResult(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
     stock_code: str = Field(min_length=1, max_length=24)
@@ -42,6 +57,7 @@ class ImpactResult(BaseModel):
     watch_points: list[AnalysisText] = Field(min_length=1, max_length=6)
     invalidation_conditions: list[AnalysisText] = Field(min_length=1, max_length=6)
     evidence: list[EvidenceReference] = Field(min_length=1, max_length=8)
+    feature_impacts: list[FeatureImpact] = Field(default_factory=list, max_length=6)
     key_factors: list[AnalysisText] = Field(min_length=1, max_length=12)
     risk_points: list[AnalysisText] = Field(min_length=1, max_length=12)
     facts: list[AnalysisText] = Field(min_length=1, max_length=12)

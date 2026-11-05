@@ -77,7 +77,7 @@ def _qualified(analysis: dict, evidence: list) -> bool:
     Explicit company/product keywords or publisher stock links are admission paths,
     but cannot override a model verdict of weak/unrelated or no information value.
     """
-    return (analysis.get("status") == "analyzed" and analysis.get("information_value") is not False
+    return (analysis.get("status") == "analyzed" and not analysis.get("feature_context_changed") and not analysis.get("analysis_logic_changed") and analysis.get("information_value") is not False
             and analysis.get("relevance_type") != "weak" and _score(analysis) > 0
             and (_score(analysis) >= _threshold() or bool(evidence)))
 
@@ -88,11 +88,13 @@ def _pending_eligible(analysis: dict, evidence: list) -> bool:
     A weak relationship or a lack of information value remains a rejection even
     after adding keywords. Completed impacts stay stable and are not repeated.
     """
-    if analysis.get("status") == "analyzed":
+    if analysis.get("status") == "analyzed" and not analysis.get("feature_context_changed") and not analysis.get("analysis_logic_changed"):
         return False
     supported = (analysis.get("information_value") is True and analysis.get("relevance_type") != "weak"
                  and _score(analysis) > 0 and (_score(analysis) >= _threshold() or bool(evidence)))
     if analysis.get("status") == "irrelevant":
+        if analysis.get("analysis_logic_changed"):
+            return bool(evidence) or _score(analysis) > 0
         return supported
     return bool(evidence) or supported
 
@@ -506,6 +508,26 @@ def save_analysis(article_id: str, analysis: dict[str, Any]) -> None:
             symbol = str(row["stock_code"]).upper()
             if aid != article_id and conn.execute("SELECT 1 FROM article_stock_analysis WHERE article_id=? AND stock_code=? AND status='analyzed'", [aid, symbol]).fetchone():
                 continue
+            previous = conn.execute("SELECT * FROM article_stock_analysis WHERE article_id=? AND stock_code=?", [aid, symbol]).fetchone()
+            if previous and status in {"error", "unavailable"}:
+                old_result = _json(previous["analysis_json"], {})
+                # A failed recheck must retain its admission path. Some news is
+                # related only by an earlier model assessment; clearing that
+                # score would hide the failure from the stock archive and make
+                # it permanently ineligible for a later retry.
+                if _score(old_result) > 0 and row.get("relevance_score") is None:
+                    row = dict(row)
+                    for field in ("relevance_score", "relevance_type", "information_value"):
+                        row[field] = old_result.get(field)
+                    row["relevance_from_previous_analysis"] = True
+            old_result = _json(previous["analysis_json"], {}) if previous else {}
+            feature_changed = old_result.get("stock_feature_signature") != row.get("stock_feature_signature")
+            logic_changed = old_result.get("analysis_logic_signature") != row.get("analysis_logic_signature")
+            if previous and (feature_changed or logic_changed):
+                conn.execute("""INSERT INTO article_stock_analysis_history
+                  (article_id,stock_code,status,relevance_score,impact_strength,sentiment,analysis_json,analyzed_at,reason)
+                  VALUES(?,?,?,?,?,?,?,?,?)""", [*[previous[k] for k in ("article_id", "stock_code", "status", "relevance_score",
+                      "impact_strength", "sentiment", "analysis_json", "analyzed_at")], "analysis_logic_changed" if logic_changed else "feature_context_changed"])
             conn.execute("""INSERT INTO article_stock_analysis(article_id,stock_code,status,relevance_score,
               impact_strength,sentiment,analysis_json,analyzed_at) VALUES(?,?,?,?,?,?,?,?)
               ON CONFLICT(article_id,stock_code) DO UPDATE SET status=excluded.status,relevance_score=excluded.relevance_score,
@@ -536,11 +558,16 @@ def _as_news(row: Any, analyses: list[dict] | None = None, symbol: str | None = 
     for entry in analyses or []:
         previous_hash = entry.get("input_content_hash")
         entry["content_changed"] = previous_hash != current_hash if previous_hash else None
+        _mark_feature_change(item, entry)
     item["related_stocks"] = analyses or []
     qualified = [a for a in analyses or [] if _qualified(a, evidence.get(a.get("stock_code"), []))]
     preferred = sorted(qualified, key=lambda a: _score(a) * (a.get("impact_strength") or 0), reverse=True)
     item["analysis"] = (preferred or analyses or [None])[0]
     item["analysis_status"] = item["analysis"].get("status", "pending") if item["analysis"] else "pending"
+    if item["analysis"] and (item["analysis"].get("feature_context_changed") or item["analysis"].get("analysis_logic_changed")):
+        item["analysis_status"] = "pending"
+        item["feature_recheck_required"] = True
+        item["logic_recheck_required"] = bool(item["analysis"].get("analysis_logic_changed"))
     item["content_changed"] = item["analysis"].get("content_changed") if item["analysis"] else None
     # Attention is a review-order hint, independent of the model's actual impact
     # verdict. Compute it on read so already archived announcements benefit too.
@@ -552,6 +579,15 @@ def _as_news(row: Any, analyses: list[dict] | None = None, symbol: str | None = 
     return item
 
 
+def _mark_feature_change(item: dict, analysis: dict) -> None:
+    if analysis.get("status") not in {"analyzed", "irrelevant"}:
+        return
+    from app.services.analysis_context import analysis_features_current
+    from app.services.news_relevance_knowledge import analysis_logic_current
+    analysis["feature_context_changed"] = analysis.get("status") == "analyzed" and not analysis_features_current(item, analysis)
+    analysis["analysis_logic_changed"] = not analysis_logic_current(item, analysis)
+
+
 def _iter_stock_items(conn: sqlite3.Connection, symbol: str, *, since_ts: float | None = None) -> Iterator[dict]:
     rows = conn.execute(_ARTICLE_WITH_REVISION + """WHERE a.duplicate_of IS NULL AND
       (EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(a.match_evidence) THEN a.match_evidence ELSE '{}' END) e WHERE e.key=?)
@@ -561,12 +597,12 @@ def _iter_stock_items(conn: sqlite3.Connection, symbol: str, *, since_ts: float 
         if since_ts is not None and (row["published_ts"] is None or row["published_ts"] < since_ts):
             continue
         analyses = _analysis_rows(conn, row["id"], symbol)
+        item = _as_news(row, analyses, symbol)
         evidence = _json(row["match_evidence"], {}).get(symbol, [])
         result = analyses[0] if analyses else {}
         qualified = _qualified(result, evidence)
         candidate = _pending_eligible(result, evidence)
         if qualified or candidate:
-            item = _as_news(row, analyses, symbol)
             item["interpretation_qualified"] = qualified
             if candidate and result.get("status") == "irrelevant":
                 # Preserve the previous verdict for review without labelling it
@@ -725,6 +761,7 @@ def list_pending(symbols: list[str], limit: int = 10, *, max_age_days: int | Non
             eligible = []
             for symbol in symbols:
                 result = previous.get(symbol, {})
+                _mark_feature_change(_row_data(row), result)
                 if result.get("status") == "error" and now - result.get("analyzed_at", 0) < 1800:
                     continue
                 if _pending_eligible(result, evidence.get(symbol, [])):

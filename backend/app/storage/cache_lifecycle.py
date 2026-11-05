@@ -198,7 +198,7 @@ def describe_asset(relative, info, *, policy=None, now=None):
         domain = parts[1] if len(parts) > 2 else "public_data"
     if first in {"watchlist.json", "watchlist_profiles.json", "llm_runtime.json", "integrations.json", "platform.json", "cn_headline_sources_override.json"}:
         domain = "accounts"
-    if first in {"strategy_knowledge.db", "kline_insights"}:
+    if first in {"strategy_knowledge.db", "kline_insights", "knowledge_cache", "stock_features.sqlite3"}:
         domain = "knowledge"
     rule = _RULES.get(first)
     eligible = (rule is not None and len(parts) >= 2 and name.endswith(".json")

@@ -8,3 +8,4 @@ export const XueqiuCommentsPanelLazy = lazy(() => import("./XueqiuCommentsPanel.
 
 export const StockResearchContextLazy = lazy(() => import("./StockResearchContext.jsx"));
 export const StockFinancialPanelLazy = lazy(() => import("./StockFinancialPanel.jsx"));
+export const StockFeaturesPanelLazy = lazy(() => import("./StockFeaturesPanel.jsx"));

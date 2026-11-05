@@ -102,6 +102,8 @@ API 文档：<http://127.0.0.1:8001/docs>
 | `KLINESHARE_API_KEY` | 行情（也可只在配置台填写） |
 | `TUSHARE_TOKEN` | 行情 / 宏观兜底 |
 | `ENABLE_SCHEDULER` | 本地默认可开；多副本部署只让一个实例为 `true` |
+| `ENABLE_STOCK_FEATURES` | 默认 `true`，每周六北京时间 09:00 检查本地个股证据；自动执行另依赖 `ENABLE_SCHEDULER` |
+| `ENABLE_KNOWLEDGE_CACHE` | 默认 `true`，执行知识同步队列；每日自动核对另依赖 `ENABLE_SCHEDULER`，见 [知识库与提示词管理](KNOWLEDGE_CACHE.md) |
 | `ENABLE_DATA_COLLECTION` | 默认 `true`，在 API 内运行中央公共数据采集队列；独立于 `ENABLE_SCHEDULER`，自动排队由数据中心页面开关控制 |
 | `ENABLE_RESEARCH_WORKER` | 默认 `true`，控制独立研究 worker 的调度和执行；与 `ENABLE_SCHEDULER` 分开 |
 | `ENABLE_INVESTMENT_RESEARCH` | 默认 `true`，在API内处理手动提交的私人研究及PDF解析，不自动开启监控或量化候选研究 |

@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     data_collection_startup_delay_sec: float = Field(default=10.0, ge=0.0, le=120.0)
     # Shared weekly public history and account-scoped Merrill Clock interpretation.
     enable_merrill_clock: bool = True
+    # Public issuer features: local evidence only, weekly Saturday 09:00 CST.
+    enable_stock_features: bool = True
+    # Local knowledge mirrors, relevance knowledge and versioned prompt maintenance.
+    enable_knowledge_cache: bool = True
     # Opt-in per-account observation plans; no model requests without verification.
     enable_monitoring: bool = True
     # Explicit filing lookup/download/interpretation jobs; no automatic model calls.

@@ -103,6 +103,31 @@ def one_result(item=None):
     return impact_analyzer.analyze_batch([item or news()], [SYMBOL])[0]["related_stocks"][0]
 
 
+def test_model_stages_pin_prompt_and_knowledge_versions_while_edits_arrive(analysis, monkeypatch):
+    from app.services import news_relevance_knowledge, prompt_registry
+    from app.storage import integrations_store
+
+    initial = prompt_registry.update_prompt("stock_impact_analysis", "本次固定版本的潜在影响提示词")
+    calls = []
+
+    def completion(messages, **kwargs):
+        calls.append(copy.deepcopy(messages))
+        if len(calls) == 1:
+            prompt_registry.update_prompt("stock_impact_analysis", "下一次分析才应使用的新提示词")
+            integrations_store.merge_integrations({"news": {"match_keywords": {SYMBOL: ["新增产品线索"]}}})
+            return [relevance()], None
+        return [impact()], None
+
+    monkeypatch.setattr(llm_client, "chat_completion_json_array", completion)
+    result = one_result()
+    assert result["status"] == "analyzed"
+    assert "本次固定版本" in calls[1][0]["content"] and "下一次分析才" not in calls[1][0]["content"]
+    assert result["prompt_versions"]["stock_impact_analysis"]["revision_id"] == initial["revision_id"]
+    assert json.loads(calls[0][1]["content"])["context"] == json.loads(calls[1][1]["content"])["context"]
+    assert not result["analysis_context"]["news_relevance_knowledge"][SYMBOL]["configured_keywords"]
+    assert result["analysis_logic_signature"] != news_relevance_knowledge.current_analysis_signature(SYMBOL)
+
+
 def test_company_event_reuses_one_context_and_appends_schema_to_custom_prompt(analysis, monkeypatch):
     legacy = "我的自定义分析风格，旧字段示例只有 stock_code 和 reasoning。"
     monkeypatch.setattr(impact_analyzer.prompt_loader, "load_prompt", lambda name: legacy)
@@ -184,7 +209,9 @@ def test_invalid_evidence_retries_once_then_remains_retryable_error(analysis, mo
     assert result["impact_direction"] is None and result["confidence"] is None
     assert error_type in result["reason"]
     assert error_type in calls[2]["messages"][0]["content"]
-    assert result["analysis_context"] == {**analysis.context, "matching_evidence": {}}
+    knowledge = result["analysis_context"]["news_relevance_knowledge"]
+    assert result["analysis_context"] == {**analysis.context, "matching_evidence": {}, "news_relevance_knowledge": knowledge}
+    assert knowledge[SYMBOL]["revision_id"] == result["news_relevance_version"]
     assert result["relevance_score"] == 95 and result["relevance_reason"]
 
 

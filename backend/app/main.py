@@ -27,6 +27,7 @@ from app.routers import (
     events,
     kline_learning,
     kline_replay,
+    knowledge_cache,
     macro,
     merrill_clock,
     market,
@@ -41,6 +42,7 @@ from app.routers import (
     settings_integrations,
     settings_llm,
     stock_picker_agents,
+    stock_features,
     stocks,
     transaction_agent,
     tracking,
@@ -68,6 +70,8 @@ async def lifespan(app: FastAPI):
     from app.services import earnings as earnings_service
     from app.services import investment_research as investment_research_service
     from app.services import merrill_clock as merrill_clock_service
+    from app.services import stock_features as stock_features_service
+    from app.services import knowledge_cache_manager
     from app.storage import data_asset_manager
 
     scheduler_task: asyncio.Task | None = None
@@ -87,6 +91,8 @@ async def lifespan(app: FastAPI):
     earnings_task = asyncio.create_task(earnings_service.worker_loop(), name="earnings-reports") if settings.enable_earnings else None
     investment_research_task = asyncio.create_task(investment_research_service.worker_loop(), name="investment-research") if settings.enable_investment_research else None
     merrill_clock_task = asyncio.create_task(merrill_clock_service.worker_loop(), name="merrill-clock") if settings.enable_merrill_clock else None
+    stock_features_task = asyncio.create_task(stock_features_service.worker_loop(), name="stock-features") if settings.enable_stock_features and settings.enable_scheduler else None
+    knowledge_cache_task = asyncio.create_task(knowledge_cache_manager.worker_loop(), name="knowledge-cache") if settings.enable_knowledge_cache else None
     if settings.enable_research_worker:
         from app.services import local_autopilot
         local_autopilot.reconcile_all(startup=True)
@@ -120,6 +126,8 @@ async def lifespan(app: FastAPI):
             (earnings_task, None, None),
             (investment_research_task, None, None),
             (merrill_clock_task, None, None),
+            (stock_features_task, None, None),
+            (knowledge_cache_task, None, None),
         )
         for task, _, _ in tasks:
             if task is not None:
@@ -203,11 +211,13 @@ app.include_router(macro.router)
 app.include_router(merrill_clock.router)
 app.include_router(events.router)
 app.include_router(data_center.router)
+app.include_router(knowledge_cache.router)
 app.include_router(kline_learning.router)
 app.include_router(kline_replay.router)
 app.include_router(settings_llm.router)
 app.include_router(settings_integrations.router)
 app.include_router(stocks.router)
+app.include_router(stock_features.router)
 app.include_router(transaction_agent.router)
 app.include_router(tracking.router)
 app.include_router(monitoring.router)

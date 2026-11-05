@@ -14,7 +14,7 @@ from app.services import a_share_stocks
 from app.services.stock_code_utils import normalize_symbol
 from app.storage import integrations_store, profile_store, watchlist_store
 
-_hints_cache: tuple[float, tuple[list[str], dict[str, list[str]]]] | None = None
+_hints_cache: tuple[float, tuple, tuple[list[str], dict[str, list[str]]]] | None = None
 _HINTS_TTL_SEC = 45.0
 _GENERIC_NAMES = {"公司", "集团", "股份", "有限公司", "股份有限公司", "有限责任公司"}
 
@@ -65,24 +65,29 @@ def load_match_keywords() -> dict[str, list[str]]:
 
 
 def _company_hints(symbol: str) -> list[str]:
-    merged = profile_store.merge_display(profile_store.get_entry(symbol))
-    names = [merged.get("name"), merged.get("org_name")]
-    if not merged.get("name"):
-        names.append((a_share_stocks.lookup_by_yahoo_symbol(symbol) or {}).get("name"))
-    return list(dict.fromkeys(name for value in names
-                if len(name := _text(value).strip()) >= 2 and name not in _GENERIC_NAMES))
+    from app.services import news_relevance_knowledge
+    document = news_relevance_knowledge.ensure_stock_knowledge(symbol)
+    return list(dict.fromkeys(row["term"] for row in document["content"]["aliases"]))
 
 
 def load_watchlist_match_hints() -> tuple[list[str], dict[str, list[str]]]:
     """Return watchlist symbols and complete company aliases; never truncate names."""
     global _hints_cache
     now = time.time()
-    if _hints_cache and now - _hints_cache[0] < _HINTS_TTL_SEC:
-        return _hints_cache[1]
+    source_stamp = []
+    for path in (profile_store._path(), a_share_stocks._path()):
+        try:
+            info = path.stat()
+            source_stamp.append((str(path), info.st_mtime_ns, info.st_ctime_ns, info.st_size))
+        except FileNotFoundError:
+            source_stamp.append((str(path),))
+    source_stamp = tuple(source_stamp)
+    if _hints_cache and now - _hints_cache[0] < _HINTS_TTL_SEC and _hints_cache[1] == source_stamp:
+        return _hints_cache[2]
     wl = list(dict.fromkeys(symbol for raw in watchlist_store.load_all_symbols_union()
                             if (symbol := normalize_symbol(raw))))
     payload = wl, {symbol: _company_hints(symbol) for symbol in wl}
-    _hints_cache = now, payload
+    _hints_cache = now, source_stamp, payload
     return payload
 
 
@@ -120,16 +125,16 @@ def _contains_term(blob: str, term: str) -> bool:
 
 
 def article_match_evidence(item: dict[str, Any], wl: list[str],
-                           hints: dict[str, list[str]] | None = None) -> dict[str, list[dict[str, str]]]:
+                           hints: dict[str, list[str]] | None = None, *,
+                           knowledge_snapshot: dict | None = None) -> dict[str, list[dict[str, str]]]:
     """Return only supported stock associations and their inspectable evidence."""
     symbols = list(dict.fromkeys(symbol for raw in wl if (symbol := normalize_symbol(raw))))
+    from app.services import news_relevance_knowledge
+    knowledge = knowledge_snapshot if knowledge_snapshot is not None else news_relevance_knowledge.snapshot_knowledge(symbols)
     if hints is None:
-        _, current_hints = load_watchlist_match_hints()
-        # Historical callers may request removed stocks explicitly.
-        hints = {symbol: current_hints[symbol] if symbol in current_hints else _company_hints(symbol)
-                 for symbol in symbols}
+        hints = {symbol: [row["term"] for row in knowledge[symbol]["content"]["aliases"]] for symbol in symbols}
     allowed = set(symbols)
-    keywords = load_match_keywords()
+    keywords = {symbol: [row["term"] for row in knowledge[symbol]["content"]["configured_keywords"]] for symbol in symbols}
     output: dict[str, list[dict[str, str]]] = {}
 
     def record(symbol: str, kind: str, value: str, source: Any = None) -> None:

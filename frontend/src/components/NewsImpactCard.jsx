@@ -57,6 +57,30 @@ const statuses = {
   error: "解读失败，可重试",
   stale: "已超出分析时效",
 };
+
+function analysisReviewNotice(item, status) {
+  const analysis = item.analysis;
+  const logicChanged = analysis?.analysis_logic_changed === true || item.logic_recheck_required === true;
+  // The archive's legacy feature_recheck_required flag also covers logic changes.
+  const featuresChanged = analysis?.feature_context_changed === true
+    || (item.feature_recheck_required === true && !logicChanged && analysis?.feature_context_changed !== false);
+  const contentChanged = item.content_changed === true || analysis?.content_changed === true;
+  const reasons = [
+    logicChanged ? "新闻相关性知识库或提示词" : "",
+    featuresChanged ? "个股特征库" : "",
+    contentChanged ? "新闻原文" : "",
+  ].filter(Boolean);
+  if (!reasons.length) return null;
+  const reviewing = status === "analyzing" || status === "processing";
+  const retained = analysis?.status === "irrelevant"
+    ? "此前判定为“相关性不足，已跳过”；旧版关联依据仍可展开查看。"
+    : "下方保留旧版解读及证据，相关性与影响方向尚未按最新依据复核。";
+  return {
+    message: `${reasons.join("、")}已更新，旧结论待复核。`,
+    description: `${retained}${reviewing ? "正在重新解读，完成后将显示新结论。" : ""}`,
+  };
+}
+
 function strings(items) {
   return Array.isArray(items)
     ? items.filter((item) => typeof item === "string" && item.trim())
@@ -130,7 +154,7 @@ function AnalysisEvidence({ sources, references }) {
         const quotes = [...new Set(strings(refs.map((ref) => ref.quote)))];
         const kind = source.source_id === "N0"
           ? "本条新闻"
-          : source.source_id?.startsWith("P") ? "公司资料" : "历史背景";
+          : source.source_id?.startsWith("P") ? "公司资料" : source.source_id?.startsWith("F") ? "个股特征库" : "历史背景";
         return (
           <section className="analysis-source" key={source.source_id}>
             <div className="analysis-source-heading">
@@ -144,7 +168,7 @@ function AnalysisEvidence({ sources, references }) {
             <div className="analysis-source-meta">
               <span>{kind}{refs.length ? " · 本次引用" : " · 背景资料"}</span>
               <span>{source.source || "来源未提供"}</span>
-              <span>{sourceTime(source.published_at)}</span>
+              <span>{sourceTime(source.published_at || source.observed_at)}</span>
               {source.stock_code ? <span>{source.stock_code}</span> : null}
             </div>
             {quotes.map((quote, index) => (
@@ -223,11 +247,46 @@ function CombinedSources({ articles }) {
   );
 }
 
+function StockFeatureImpacts({ impacts, version, sources, context }) {
+  const factors = new Map((context?.matched_factors || []).map((factor) => [factor.factor_id || factor.id, factor]));
+  const features = new Map((context?.features || []).map((feature) => [feature.feature_id || feature.id, feature]));
+  return <div className="analysis-source-list"><Paragraph type="secondary">依据个股特征库{version ? `版本 ${version}` : ""}。以下经营与估值传导属于待验证推断。</Paragraph>{impacts.map((impact, index) => <section className="analysis-source" key={`${impact.factor_id || "factor"}:${index}`}>
+    <Space wrap><Text strong>{factors.get(impact.factor_id)?.label || factors.get(impact.factor_id)?.name || "个股传导路径"}</Text><Tag color="orange">待验证推断</Tag></Space>
+    <Paragraph><Text strong>本公司暴露：</Text>{impact.exposure || "尚未说明对应特征。"}</Paragraph>
+    <Paragraph><Text strong>经营影响：</Text>{impact.operating_impact || "影响尚待核实。"}</Paragraph>
+    <Paragraph><Text strong>估值与预期：</Text>{impact.valuation_impact || "股价方向尚待验证。"}</Paragraph>
+    <div className="evidence-grid"><TextItems label="成立条件" items={strings(impact.conditions)} /><TextItems label="反向因素" items={strings(impact.offsets)} /><TextItems label="核对指标" items={strings(impact.watch_points)} /></div>
+    {strings(impact.feature_ids).length ? <Paragraph type="secondary">关联特征：{impact.feature_ids.map((id) => features.get(id)?.label || features.get(id)?.name || "已归档特征").join("、")}</Paragraph> : null}
+    {strings(impact.evidence_source_ids).length ? <details><summary>查看个股依据 · {impact.evidence_source_ids.join("、")}</summary><AnalysisEvidence sources={sources.filter((source) => impact.evidence_source_ids.includes(source.source_id))} references={impact.evidence_source_ids.map((source_id) => ({ source_id }))} /></details> : <Paragraph type="secondary">尚无可追溯的个股证据引用。</Paragraph>}
+  </section>)}</div>;
+}
+
+function AnalysisKnowledgeVersions({ analysis }) {
+  const text = (value) => typeof value === "string" ? value.trim() : "";
+  const promptNames = { system_prompt: "系统指令", news_relevance: "相关性判断", stock_impact_analysis: "潜在影响分析" };
+  const prompts = analysis?.prompt_versions;
+  const rows = prompts && typeof prompts === "object" && !Array.isArray(prompts)
+    ? Object.entries(prompts).map(([name, version]) => ({
+      key: `prompt:${name}`, label: `提示词 · ${promptNames[name] || name}`,
+      fields: [["版本 ID", text(typeof version === "string" ? version : version?.revision_id)], ["内容哈希", text(version?.content_hash)]],
+    })) : [];
+  rows.push({ key: "relevance", label: "新闻相关性知识库", fields: [["版本 ID", text(analysis?.news_relevance_version)], ["内容哈希", text(analysis?.news_relevance_hash)]] });
+  rows.push({ key: "signature", label: "分析逻辑", fields: [["签名", text(analysis?.analysis_logic_signature)]] });
+  const recorded = rows.map((row) => ({ ...row, fields: row.fields.filter(([, value]) => value) })).filter((row) => row.fields.length);
+  if (!recorded.length) return null;
+  return <details className="analysis-list analysis-knowledge-versions">
+    <summary>分析使用的知识版本</summary>
+    <Paragraph type="secondary">记录本次结论实际使用的版本，便于核对历史依据。</Paragraph>
+    <ul>{recorded.map((row) => <li key={row.key}><Text strong>{row.label}</Text>{row.fields.map(([label, value]) => <div key={label}>{label}：<Text code copyable={{ text: value }}>{value}</Text></div>)}</li>)}</ul>
+  </details>;
+}
+
 export default function NewsImpactCard({ item, symbol }) {
   const [composerOpen, setComposerOpen] = useState(false);
   const analysis = item.analysis;
   const status = item.analysis_status || analysis?.status;
   const analyzed = isAnalyzed(analysis) && !["error", "unavailable", "irrelevant", "stale"].includes(status);
+  const reviewNotice = analysisReviewNotice(item, status);
   const href = safeUrl(item.url || item.link);
   const sourceLinkLabel = href && new URL(href).hostname === "so.eastmoney.com" ? "站内检索" : "阅读原文";
   const attentionReason = typeof item.attention?.reason === "string" ? item.attention.reason.trim() : "";
@@ -271,6 +330,8 @@ export default function NewsImpactCard({ item, symbol }) {
   const references = Array.isArray(analysis?.evidence)
     ? analysis.evidence.filter((ref) => ref && typeof ref.source_id === "string")
     : [];
+  const featureImpacts = Array.isArray(analysis?.feature_impacts)
+    ? analysis.feature_impacts.filter((impact) => impact && typeof impact === "object") : [];
   const failed = status === "error" || status === "unavailable";
   const failureReason = failed && typeof analysis?.reason === "string" && analysis.reason.trim();
   const relevanceReason = analysis?.relevance_reason || (!failed ? analysis?.reason : "");
@@ -293,6 +354,9 @@ export default function NewsImpactCard({ item, symbol }) {
     ...followUpText, confidenceReason, ...factFields.flatMap(([, values]) => strings(values)),
   ])[0];
   const collapses = [];
+  if (featureImpacts.length) {
+    collapses.push({ key: "stock-features", label: `基于本公司特征的影响路径（${featureImpacts.length}）`, children: <StockFeatureImpacts impacts={featureImpacts} version={analysis.stock_feature_version} sources={sources} context={analysis.analysis_context?.stock_features?.[symbol]} /> });
+  }
   if (eventSummary && (channels.length || expectationGap)) {
     collapses.push({
       key: "impact",
@@ -309,7 +373,7 @@ export default function NewsImpactCard({ item, symbol }) {
   if (matchEvidence.length || relevanceReason || analysis?.relevance_score != null || types[analysis?.relevance_type]) {
     collapses.push({
       key: "relevance",
-      label: "关联依据",
+      label: reviewNotice ? "旧版关联依据" : "关联依据",
       children: (
         <div>
           <Space wrap>
@@ -432,8 +496,18 @@ export default function NewsImpactCard({ item, symbol }) {
           item.title
         )}
       </h3>
+      {reviewNotice ? (
+        <Alert
+          className="task-status analysis-recheck"
+          type="warning"
+          showIcon
+          message={reviewNotice.message}
+          description={reviewNotice.description}
+        />
+      ) : null}
       {analyzed ? (
         <Space className="analysis-tags" wrap>
+          {reviewNotice ? <Tag color="orange">旧版解读 · 待复核</Tag> : null}
           {eventTypes[analysis.event_type] ? <Tag>{eventTypes[analysis.event_type]}</Tag> : null}
           <Tag color={sameDirection ? sentimentColors[analysis.sentiment] : undefined}>
             {directionLabels[analysis.impact_direction] || "方向待评估"}
@@ -458,21 +532,13 @@ export default function NewsImpactCard({ item, symbol }) {
           ) : null}
         </div>
       ) : null}
-      {analyzed && (item.content_changed || analysis.content_changed) ? (
-        <Alert
-          className="task-status"
-          type="warning"
-          showIcon
-          message="新闻已更新，分析基于旧版内容。"
-        />
-      ) : null}
       {analyzed && (hasInterpretation || mainReasoning) ? (
         <div className={`impact-reason${hasInterpretation ? " analysis-interpretation" : ""}`}>
           {hasInterpretation ? (
             <>
               {eventSummary ? (
                 <Paragraph className="analysis-event-summary">
-                  <Text strong>解读：</Text>{eventSummary}
+                  <Text strong>{reviewNotice ? "旧版解读：" : "解读："}</Text>{eventSummary}
                 </Paragraph>
               ) : null}
               {!eventSummary && channels.length ? (
@@ -491,12 +557,12 @@ export default function NewsImpactCard({ item, symbol }) {
             </>
           ) : (
             <Paragraph>
-              <Text strong>解读：</Text>
+              <Text strong>{reviewNotice ? "旧版解读：" : "解读："}</Text>
               {mainReasoning}
             </Paragraph>
           )}
         </div>
-      ) : !analyzed ? (
+      ) : !analyzed && (!reviewNotice || failed) ? (
         <Alert
           type={status === "error" ? "error" : status === "unavailable" ? "warning" : "info"}
           showIcon
@@ -514,6 +580,7 @@ export default function NewsImpactCard({ item, symbol }) {
           items={collapses}
         />
       ) : null}
+      <AnalysisKnowledgeVersions analysis={analysis} />
       <CombinedSources articles={sourceArticles} />
       {symbol && item.id != null ? <div className="tracking-news-action"><Button type="link" onClick={() => setComposerOpen(true)}>保存为关注判断</Button></div> : null}
       {composerOpen ? <ThesisComposer symbol={symbol} initial={{ reason: analysis?.reasoning || analysis?.event_summary || item.title || "", watch_conditions: strings(analysis?.watch_points || analysis?.confirmation_conditions).join("\n"), invalidation_conditions: strings(analysis?.invalidation_conditions).join("\n") }} evidenceRefs={[newsEvidence(item)]} onClose={() => setComposerOpen(false)} /> : null}

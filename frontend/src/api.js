@@ -240,6 +240,21 @@ export async function getEarningsReports(symbol, { signal } = {}) {
   return data;
 }
 
+export async function getStockFeatures(symbol, { signal } = {}) {
+  const { data } = await client.get(`/stocks/${encodeURIComponent(symbol)}/features`, { signal, timeout: 20_000 });
+  return data;
+}
+
+export async function refreshStockFeatures(symbol) {
+  const { data } = await client.post(`/stocks/${encodeURIComponent(symbol)}/features/refresh`, {}, { timeout: 60_000 });
+  return data;
+}
+
+export async function getStockFeaturesHistory(symbol, { signal, limit = 12 } = {}) {
+  const { data } = await client.get(`/stocks/${encodeURIComponent(symbol)}/features/history`, { signal, params: { limit }, timeout: 20_000 });
+  return data;
+}
+
 export async function refreshEarningsReports(symbol) {
   const { data } = await client.post("/news/earnings/refresh", { symbol }, { timeout: 20_000 });
   return data;
@@ -759,3 +774,58 @@ export async function updateMerrillPreferences(autoAnalysis) {
 }
 
 export async function getCollectionStatus({ signal } = {}) { const { data } = await client.get("/data-center/collection/status", { signal, timeout: 15_000 }); return data; }
+
+export async function getKnowledgeOverview({ signal } = {}) {
+  const { data } = await client.get("/data-center/knowledge/overview", { signal, timeout: 30_000 });
+  return data;
+}
+
+export async function getKnowledgeDocuments(params = {}, { signal } = {}) {
+  const { data } = await client.get("/data-center/knowledge/documents", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function getKnowledgeDocument(params, { signal } = {}) {
+  const { data } = await client.get("/data-center/knowledge/document", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function getKnowledgeHistory(params, { signal } = {}) {
+  const { data } = await client.get("/data-center/knowledge/history", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function getKnowledgeEvents(params = {}, { signal } = {}) {
+  const { data } = await client.get("/data-center/knowledge/events", { params, signal, timeout: 30_000 });
+  return data;
+}
+
+export async function rebuildKnowledge(payload = { scope: "all" }) {
+  const { data } = await client.post("/data-center/knowledge/rebuild", payload, { timeout: 30_000 });
+  return data;
+}
+
+export async function getKnowledgeStatus({ signal } = {}) {
+  const { data } = await client.get("/data-center/knowledge/status", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function getKnowledgePrompts({ signal } = {}) {
+  const { data } = await client.get("/data-center/knowledge/prompts", { signal, timeout: 15_000 });
+  return data;
+}
+
+export async function updateKnowledgePrompt(name, payload) {
+  const { data } = await client.put(`/data-center/knowledge/prompts/${encodeURIComponent(name)}`, payload, { timeout: 30_000 });
+  return data;
+}
+
+export async function resetKnowledgePrompt(name, payload) {
+  const { data } = await client.post(`/data-center/knowledge/prompts/${encodeURIComponent(name)}/reset`, payload, { timeout: 30_000 });
+  return data;
+}
+
+export async function activateKnowledgePrompt(name, payload) {
+  const { data } = await client.post(`/data-center/knowledge/prompts/${encodeURIComponent(name)}/activate`, payload, { timeout: 30_000 });
+  return data;
+}

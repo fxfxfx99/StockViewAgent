@@ -44,6 +44,7 @@ def test_history_requires_stock_link_and_prior_publication_within_seven_days(arc
 
 
 def test_historical_analysis_only_selects_source_news_never_reuses_generated_claims(archive):
+    from app.services.news_relevance_knowledge import current_analysis_signature
     current = article()
     hints = article("来源标签匹配", matched_symbols=[], symbol_hint=SYMBOL, published_ts=NOW - 7200)
     accepted = article("历史模型识别", matched_symbols=[], published_ts=NOW - 7300)
@@ -52,7 +53,8 @@ def test_historical_analysis_only_selects_source_news_never_reuses_generated_cla
     news_store.upsert_many([current, hints, accepted, weak, failed])
     for row, status, score in [(accepted, "analyzed", 60), (weak, "analyzed", 59), (failed, "error", 99)]:
         news_store.save_analysis(row["id"], {"stock_code": SYMBOL, "status": status,
-                                           "relevance_score": score, "reasoning": "不应当作为原始证据的模型意见"})
+                                           "relevance_score": score, "reasoning": "不应当作为原始证据的模型意见",
+                                           "analysis_logic_signature": current_analysis_signature(SYMBOL)})
     context = analysis_context.build_analysis_context(current, [STOCK])
     assert {source["title"] for source in context["news_background"]} == {"历史模型识别"}
     assert all(source["text"] == accepted["summary"] for source in context["news_background"])

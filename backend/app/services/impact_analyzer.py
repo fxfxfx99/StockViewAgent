@@ -61,13 +61,44 @@ def _validate_evidence(rows: list[dict[str, Any]], payload: dict[str, Any]) -> N
             source = sources.get(source_id)
             if source is None:
                 raise _OutputIssue("evidence.source_id:unknown_source")
-            if source_id.startswith("P") and source.get("stock_code") != row["stock_code"]:
-                raise _OutputIssue("evidence.source_id:wrong_stock_profile")
+            if source_id.startswith(("P", "F")) and source.get("stock_code") != row["stock_code"]:
+                raise _OutputIssue("evidence.source_id:wrong_stock_feature" if source_id.startswith("F")
+                                   else "evidence.source_id:wrong_stock_profile")
             quote = " ".join(reference.get("quote", "").split())
             if source_id == "N0" and not quote:
                 raise _OutputIssue("evidence.quote:current_news_quote_required")
             if quote and not any(quote in " ".join(str(source.get(field) or "").split()) for field in ("text", "title")):
                 raise _OutputIssue("evidence.quote:not_in_source")
+
+
+def _validate_feature_impacts(rows: list[dict[str, Any]], payload: dict[str, Any]) -> None:
+    """A cited factor must be a real match through evidenced facts of this stock."""
+    profiles = payload.get("context", {}).get("stock_features", {})
+    for row in rows:
+        profile = profiles.get(row["stock_code"], {})
+        factors = {factor["factor_id"]: factor for factor in profile.get("matched_factors", [])}
+        features = {feature["feature_id"]: feature for feature in profile.get("features", [])}
+        impacts = row.get("feature_impacts") or []
+        if factors and not impacts:
+            raise _OutputIssue("feature_impacts:matched_factor_required")
+        seen = set()
+        cited = {reference["source_id"] for reference in row["evidence"]}
+        for impact in impacts:
+            identifier = impact["factor_id"]
+            if identifier not in factors or identifier in seen:
+                raise _OutputIssue("feature_impacts.factor_id:unknown_or_duplicate_factor")
+            seen.add(identifier)
+            factor = factors[identifier]
+            if impact["feature_version"] != profile.get("version_id"):
+                raise _OutputIssue("feature_impacts.feature_version:wrong_version")
+            identifiers = set(impact["feature_ids"])
+            if not identifiers <= set(factor["feature_ids"]):
+                raise _OutputIssue("feature_impacts.feature_ids:wrong_stock_feature")
+            references = set(impact["evidence_source_ids"])
+            if not references <= set(factor["evidence_source_ids"]) or not references <= cited:
+                raise _OutputIssue("feature_impacts.evidence_source_ids:unsupported_source")
+            if any(not references.intersection(features[key]["evidence_source_ids"]) for key in identifiers):
+                raise _OutputIssue("feature_impacts.evidence_source_ids:feature_evidence_required")
 
 
 def _failure_reason(stage: str, error: str | None) -> str:
@@ -143,8 +174,12 @@ def _not_analyzed(symbol: str, name: str, status: str, message: str) -> dict[str
 
 
 def _validated_call(prompt: str, payload: dict[str, Any], model: type, symbols: list[str],
-                    cancel_event: Event | None = None) -> tuple[list[dict[str, Any]] | None, str | None]:
-    system = prompt_loader.load_prompt("system_prompt") + "\n\n" + prompt_loader.load_prompt(prompt)
+                    cancel_event: Event | None = None, *, prompt_snapshot: dict | None = None) -> tuple[list[dict[str, Any]] | None, str | None]:
+    prompts = prompt_snapshot["prompts"] if prompt_snapshot is not None else prompt_loader.snapshot_prompts()["prompts"]
+    system = prompts["system_prompt"] + "\n\n" + prompts[prompt]
+    system += ("\n本地知识规则：context.news_relevance_knowledge 按股票隔离。别名用于主体识别，用户关键词仅是候选线索；"
+               "business_scopes 为有条件候选，必须核对 context.stock_features 中同版本、同标的的实际来源。"
+               "行业名称相同不能自动建立关联，当前知识不能替代历史时点证据，候选字段不能写成已核实的事实。")
     item_schema = model.model_json_schema()
     definitions = item_schema.pop("$defs", {})
     if model is ImpactResult:
@@ -162,9 +197,14 @@ def _validated_call(prompt: str, payload: dict[str, Any], model: type, symbols: 
     if model is ImpactResult:
         system += ("\n证据规则：evidence 只能引用 context.evidence_sources 中实际存在的 source_id，必须包含当前新闻 N0；"
                    "N0 的 quote 必须非空，并逐字摘录本条新闻的 text 或 title；仅有标题时摘录标题。"
-                   "P 开头的公司资料只可用于其 stock_code 对应股票。其他来源 quote 可为空；非空时必须逐字摘录该来源的 text 或 title，"
+                   "P 开头的公司资料和 F 开头的个股特征来源只可用于其 stock_code 对应股票。其他来源 quote 可为空；非空时必须逐字摘录该来源的 text 或 title，"
                    "不得拼接或编造引用、数字、日期。历史材料只作背景，不能冒充本次事件的最新进展。"
-                   "填写明确的事件、传导环节、兑现条件、反证、后续观察与置信度理由；未知信息直接标注未知。")
+                   "填写明确的事件、传导环节、兑现条件、反证、后续观察与置信度理由；未知信息直接标注未知。"
+                   "context.stock_features 按股票隔离。该股 matched_factors 非空时，feature_impacts 必须至少解释一个匹配因素："
+                   "factor_id、feature_ids、feature_version 必须来自该股该版本；evidence_source_ids 必须引用对应因素的来源并同时列入 evidence。"
+                   "exposure 说明已存特征如何构成本公司暴露，operating_impact 指定收入/成本/利润/现金流指标，valuation_impact 说明预期或估值传导；"
+                   "conditions、offsets、watch_points 分别写兑现条件、抵消因素和观察指标。关联为有条件推断，不是收益回归或已验证因果。"
+                   "若 matched_factors 为空，feature_impacts 必须为空，明确尚无经特征库支持的公司传导，不能虚构匹配或引用其他股票。")
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
     retries = max(0, min(_option("analysis_integrity_retries", 1), 3))
@@ -193,6 +233,7 @@ def _validated_call(prompt: str, payload: dict[str, Any], model: type, symbols: 
                     if any(directions[row["sentiment"]] != row["impact_direction"] for row in rows):
                         raise _OutputIssue("impact_direction:inconsistent_sentiment")
                     _validate_evidence(rows, payload)
+                    _validate_feature_impacts(rows, payload)
                 return rows, None
             except ValidationError as validation:
                 issue = _validation_issue(validation, model)
@@ -214,6 +255,17 @@ def _apply_quality_limit(result: dict[str, Any], stock: dict[str, str], context:
     if result.get("relevance_type") != "direct" and not stock.get("industry") and not stock.get("main_business"):
         cap = min(cap, 60)
         notes.append("未提供该公司的行业和主营业务资料，间接关联的传导链仍需核实。")
+    feature_profile = context.get("stock_features", {}).get(stock["stock_code"])
+    if feature_profile is not None:
+        notes.extend(feature_profile.get("limitations") or [])
+        if not feature_profile.get("matched_factors"):
+            cap = min(cap, 60 if result.get("relevance_type") == "direct" else 50)
+        elif feature_profile.get("age_days", 0) > 8:
+            cap = min(cap, 70)
+        linked_ids = {key for factor in feature_profile.get("matched_factors", []) for key in factor.get("feature_ids", [])}
+        if any(feature.get("status") == "candidate" and feature.get("feature_id") in linked_ids
+               for feature in feature_profile.get("features", [])):
+            cap = min(cap, 70)
     result["confidence"] = min(result["confidence"], cap)
     if cap < 100:
         notes.append(f"根据当前材料质量，置信度上限为 {cap} 分。")
@@ -239,26 +291,38 @@ def _analyze_article(item: dict[str, Any], stocks: list[dict[str, str]],
                "published_at": snapshot["published_at"], "source": snapshot["source"],
                "source_hint": item.get("symbol_hint")}
     try:
-        matches = news_watchlist_matcher.article_match_evidence(item, symbols)
+        from app.services import news_relevance_knowledge
+        prompt_snapshot = prompt_loader.snapshot_prompts()
+        knowledge_snapshot = news_relevance_knowledge.snapshot_knowledge(symbols)
+        matches = news_watchlist_matcher.article_match_evidence(item, symbols, knowledge_snapshot=knowledge_snapshot)
         context = analysis_context.build_analysis_context(item, stocks)
         context["matching_evidence"] = matches
+        context["news_relevance_knowledge"] = news_relevance_knowledge.context_from_snapshot(
+            knowledge_snapshot, context.get("stock_features", {}))
+        threshold = max(0, min(_option("news_relevance_threshold", 60), 100))
+        logic = {symbol: {"analysis_logic_signature": news_relevance_knowledge.analysis_signature(
+                             prompt_snapshot["versions"], knowledge_snapshot[symbol], threshold=threshold),
+                         "prompt_versions": prompt_snapshot["versions"],
+                         "news_relevance_version": knowledge_snapshot[symbol]["metadata"]["revision_id"],
+                         "news_relevance_hash": knowledge_snapshot[symbol]["metadata"]["content_hash"]}
+                 for symbol in symbols}
         _check_cancelled(cancel_event)
         saved_context = {"analysis_input": snapshot, "input_content_hash": analysis_content_hash(snapshot),
                          "analysis_context": context, "analysis_version": 2}
         relevance, relevance_error = _validated_call("news_relevance", {"news": article, "stocks": stocks, "context": context},
-                                                     RelevanceResult, symbols, cancel_event)
+                                                     RelevanceResult, symbols, cancel_event, prompt_snapshot=prompt_snapshot)
         if relevance is None:
             return {"status": "error", "related_stocks": [
-                {**_not_analyzed(s, names[s], "error", _failure_reason("相关性分析", relevance_error)), **saved_context}
+                {**_not_analyzed(s, names[s], "error", _failure_reason("相关性分析", relevance_error)), **saved_context, **logic[s]}
                 for s in symbols]}
-        threshold = max(0, min(_option("news_relevance_threshold", 60), 100))
         qualified = [row for row in relevance if row["information_value"] and row["relevance_type"] != "weak"
                      and row["relevance_score"] > 0
                      and (row["relevance_score"] >= threshold or matches.get(row["stock_code"]))]
         context_by_symbol = {stock["stock_code"]: stock for stock in stocks}
         qualified_context = [{**row, **context_by_symbol[row["stock_code"]]} for row in qualified]
         impact, impact_error = _validated_call("stock_impact_analysis", {"news": article, "stocks": qualified_context, "context": context},
-                                              ImpactResult, [row["stock_code"] for row in qualified], cancel_event) if qualified else ([], None)
+                                              ImpactResult, [row["stock_code"] for row in qualified], cancel_event,
+                                              prompt_snapshot=prompt_snapshot) if qualified else ([], None)
         impacts = {row["stock_code"]: row for row in (impact or [])}
         output = []
         for row in relevance:
@@ -276,6 +340,10 @@ def _analyze_article(item: dict[str, Any], stocks: list[dict[str, str]],
             result["relevance_threshold"] = threshold
             result["analyzed_at"] = time.time()
             result.update(saved_context)
+            result.update(logic[symbol])
+            feature_profile = context.get("stock_features", {}).get(symbol, {})
+            result["stock_feature_version"] = feature_profile.get("version_id")
+            result["stock_feature_signature"] = feature_profile.get("signature")
             output.append(result)
         return {"status": "error" if any(row["status"] == "error" for row in output) else "analyzed",
                 "related_stocks": output}
