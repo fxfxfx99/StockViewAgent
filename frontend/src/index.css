@@ -16,12 +16,12 @@
   --sva-font-base: 14px;
   --sva-font-lg: 16px;
   --sva-font-xl: 20px;
-  --sva-title-size: clamp(24px, 2vw, 28px);
+  --sva-title-size: 24px;
   --sva-line-height: 1.65;
   --sva-line-height-compact: 1.4;
   --sva-line-height-reading: 1.75;
-  --sva-page-padding: clamp(16px, 2.4vw, 32px);
-  --sva-content-max: 1440px;
+  --sva-page-padding: clamp(16px, 1.7vw, 24px);
+  --sva-content-max: 1680px;
 }
 
 .sva-auth-page {
@@ -122,7 +122,7 @@
   --sva-stale: #e7b96b;
   --sva-radius: 10px;
   --sva-radius-sm: 8px;
-  --sva-header-height: 60px;
+  --sva-header-height: 56px;
   --sva-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
   --sva-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Segoe UI", sans-serif;
 }
@@ -212,13 +212,13 @@ a:hover {
 }
 
 .ex-section-card > .ant-card-head {
-  min-height: 52px;
-  padding: 0 var(--sva-space-5);
+  min-height: 48px;
+  padding: 0 var(--sva-space-4);
   border-bottom: 1px solid var(--sva-separator);
 }
 
 .ex-section-card > .ant-card-body {
-  padding: var(--sva-space-5);
+  padding: var(--sva-space-4);
 }
 
 .ex-app-content .ant-typography {
@@ -373,7 +373,7 @@ a:hover {
 }
 
 .ex-transaction-agent-view {
-  min-height: 240px;
+  min-height: 196px;
   padding: var(--sva-space-4);
   border: 1px solid var(--sva-separator);
   border-radius: var(--sva-radius-sm);
@@ -415,6 +415,26 @@ a:hover {
 .ex-transaction-agent-view .ant-progress {
   line-height: 1;
 }
+
+.ex-transaction-agent-card-heading,
+.ex-transaction-agent-meta,
+.ex-transaction-agent-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.ex-transaction-agent-card-heading { margin-bottom: 6px; }
+.ex-transaction-agent-card-heading .ant-tag { margin: 0; }
+.ex-transaction-agent-meta { color: var(--sva-text-secondary); font-size: var(--sva-font-xs); }
+.ex-transaction-agent-viewpoint { margin: 10px 0 12px; }
+.ex-transaction-agent-card-footer { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--sva-separator); font-size: var(--sva-font-sm); }
+.ex-transaction-agent-card-footer .ex-transaction-agent-detail-btn { margin: 0; }
+.ex-transaction-agent-retrieval { margin-top: 14px; padding: 12px; border-radius: 8px; background: var(--sva-fill); font-size: var(--sva-font-sm); }
+.ex-transaction-agent-retrieval summary { cursor: pointer; }
+.ex-transaction-agent-retrieval > div { margin-top: 6px; }
+.ex-transaction-agent-retrieval code { overflow-wrap: anywhere; }
 
 .ex-transaction-agent-list {
   display: flex;
@@ -762,8 +782,8 @@ a:hover {
 
 .sva-panel > .ant-card-head,
 .ex-transaction-agent-card > .ant-card-head {
-  min-height: 52px;
-  padding: 0 var(--sva-space-5);
+  min-height: 48px;
+  padding: 0 var(--sva-space-4);
   border-bottom: 1px solid var(--sva-separator);
 }
 
@@ -779,7 +799,7 @@ a:hover {
 
 .sva-panel > .ant-card-body,
 .ex-transaction-agent-card > .ant-card-body {
-  padding: var(--sva-space-5);
+  padding: var(--sva-space-4);
 }
 
 .sva-meta {

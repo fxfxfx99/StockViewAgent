@@ -15,6 +15,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import secrets
 import signal
 import socket
 import subprocess
@@ -60,6 +61,10 @@ class Config:
     startup_health_interval: float = .25
     state_interval: float = 3
     startup_state_interval: float = .5
+    stop_when_clients_close: bool = True
+    client_close_grace: float = 8
+    client_start_timeout: float = 120
+    client_poll_interval: float = 1
 
     def __post_init__(self):
         self.root = self.root.expanduser().resolve()
@@ -88,6 +93,52 @@ class Service:
     next_health_check: float = field(default=0, init=False)
     ever_healthy: bool = field(default=False, init=False)
     last_exit: int | None = field(default=None, init=False)
+
+
+class ClientLifetime:
+    """Require a continuous, confirmed empty interval before ending a session."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.instance = None
+        self.clients = None
+        self.started = None
+        self.empty_since = None
+        self.previous_check = None
+
+    def pause(self):
+        # A failed probe, service recovery, or sleeping computer is not proof
+        # that the user closed their pages. Give reconnects a fresh interval.
+        self.clients = None
+        self.started = None
+        self.empty_since = None
+        self.previous_check = None
+
+    def observe(self, state: dict, now: float) -> str | None:
+        count = state.get("clients")
+        instance = state.get("instance_id")
+        seen = state.get("connected_once")
+        if type(count) is not int or count < 0 or not isinstance(instance, str) or not instance or type(seen) is not bool:
+            raise ValueError("invalid local session status")
+        if self.instance != instance or (self.previous_check is not None and now - self.previous_check > max(3, self.config.client_poll_interval * 3)):
+            self.pause()
+        self.instance = instance
+        self.clients = count
+        self.previous_check = now
+        if self.started is None:
+            self.started = now
+        if count:
+            self.empty_since = None
+            return None
+        if not seen:
+            if now - self.started >= self.config.client_start_timeout:
+                return "启动后一直没有客户端页面连接，已自动结束本次运行；再次双击启动入口即可重试。"
+            return None
+        if self.empty_since is None:
+            self.empty_since = now
+        if now - self.empty_since >= self.config.client_close_grace:
+            return "所有客户端页面已关闭，正在停止后端、前端和研究 worker。"
+        return None
 
 
 def default_services(config: Config) -> list[Service]:
@@ -187,6 +238,11 @@ class Supervisor:
         self._http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self._loggers: dict[str, logging.Logger] = {}
         self._next_snapshot = 0.0
+        self.session_token = secrets.token_urlsafe(32) if config.stop_when_clients_close else ""
+        self.client_lifetime = ClientLifetime(config)
+        self._next_client_check = 0.0
+        self._client_check_failed_since = None
+        self.stop_reason = None
 
     def log(self, message: str):
         print(f"[StockViewAgent] {message}", flush=True)
@@ -199,6 +255,8 @@ class Supervisor:
                    "status": self.status, "url": self.config.browser_url, "error": self.error,
                    "backend_port": self.config.backend_port, "frontend_port": self.config.frontend_port,
                    "reload": self.config.reload,
+                   "stop_when_clients_close": self.config.stop_when_clients_close,
+                   "clients": self.client_lifetime.clients, "stop_reason": self.stop_reason,
                    "data_dir": str(self.config.data_dir),
                    "services": {s.name: {"pid": s.process.pid if s.process and s.process.poll() is None else None,
                        "healthy": s.healthy, "restarts": s.restarts, "consecutive_failures": s.failures,
@@ -235,7 +293,10 @@ class Supervisor:
         logger = self._loggers[service.name]
         try:
             for line in iter(process.stdout.readline, b""):
-                logger.info(line.decode("utf-8", errors="replace").rstrip())
+                message = line.decode("utf-8", errors="replace").rstrip()
+                if self.session_token:
+                    message = message.replace(self.session_token, "[local-session]")
+                logger.info(message)
         finally:
             process.stdout.close()
 
@@ -243,6 +304,7 @@ class Supervisor:
         env = dict(os.environ)
         env.update(VITE_DEV_BACKEND_URL=f"http://127.0.0.1:{self.config.backend_port}",
                    VITE_DEV_PORT=str(self.config.frontend_port), PYTHONUNBUFFERED="1",
+                   STOCKVIEW_LOCAL_SESSION_TOKEN=self.session_token,
                    STOCKVIEW_DATA_DIR=str(self.config.data_dir))
         if service.name not in self._loggers:
             logger = logging.getLogger(f"stockview.local.{os.getpid()}.{service.name}")
@@ -338,7 +400,7 @@ class Supervisor:
         interval = self.config.health_interval if service.ever_healthy else self.config.startup_health_interval
         service.next_health_check = now + interval
 
-    def open_browser(self, url=None):
+    def open_browser(self, url=None, *, wait=False):
         if not self.config.open_browser or self.opened:
             return
         self.opened = True
@@ -348,7 +410,45 @@ class Supervisor:
                     self.log(f"浏览器未自动打开，请访问 {url or self.config.browser_url}")
             except Exception:
                 self.log(f"浏览器未自动打开，请访问 {url or self.config.browser_url}")
-        threading.Thread(target=open_once, daemon=True).start()
+        if wait:
+            # Duplicate launchers exit immediately: a daemon thread could die
+            # before the operating system receives the browser-open request.
+            open_once()
+        else:
+            threading.Thread(target=open_once, daemon=True).start()
+
+    def check_clients(self, *, ready: bool):
+        if not self.config.stop_when_clients_close:
+            return
+        if not ready:
+            self.client_lifetime.pause()
+            self._client_check_failed_since = None
+            return
+        now = time.monotonic()
+        if now < self._next_client_check:
+            return
+        self._next_client_check = now + self.config.client_poll_interval
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.config.backend_port}/api/local-session/status",
+            headers={"Authorization": f"Bearer {self.session_token}"},
+        )
+        try:
+            with self._http.open(request, timeout=.5) as response:
+                state = json.load(response)
+            reason = self.client_lifetime.observe(state, now)
+        except (OSError, ValueError, AttributeError):
+            self.client_lifetime.pause()
+            if self._client_check_failed_since is None:
+                self._client_check_failed_since = now
+            elif now - self._client_check_failed_since >= self.config.client_start_timeout:
+                raise StartupError("无法确认客户端连接状态；请查看后端日志后重新启动。")
+            return
+        self._client_check_failed_since = None
+        if reason:
+            self.stop_reason = reason
+            self.log(reason)
+            self.status = "stopping"
+            self.stopping = True
 
     def monitor(self):
         while not self.stopping:
@@ -384,9 +484,14 @@ class Supervisor:
                 self.status = "ready"
                 self.log(f"前后端与研究 worker 已就绪：{self.config.browser_url}")
                 self.log("首次使用只需在配置台填写大模型 API；免费行情源已默认启用。停止：Ctrl+C")
+                if self.config.stop_when_clients_close:
+                    self.log(f"关闭全部客户端页面后约 {self.config.client_close_grace:g} 秒自动停止；首次连接等待 {self.config.client_start_timeout:g} 秒。")
+                else:
+                    self.log("后台常驻模式：关闭页面后仍继续运行，按 Ctrl+C 停止。")
                 self.open_browser()
             elif not ready and self.status == "ready":
                 self.status = "recovering"
+            self.check_clients(ready=ready)
             self.snapshot(force=self.status != prior_status)
             time.sleep(self.config.poll_interval)
 
@@ -422,12 +527,12 @@ class Supervisor:
                 existing = read_state(self.state_path)
                 self.log(f"此项目已在运行（{existing.get('status', '正在启动')}，监督器 PID {existing.get('pid', '未知')}）：{existing.get('url', '请稍候')}；本次未重复启动。")
                 if not status_only and existing.get("status") == "ready":
-                    self.open_browser(existing.get("url"))
+                    self.open_browser(existing.get("url"), wait=True)
                 return 0
             if status_only:
                 self.log("此项目当前未运行；执行 ./start.sh 启动。")
                 return 1
-            old_handlers = {sig: signal.signal(sig, self.request_stop) for sig in (signal.SIGINT, signal.SIGTERM)}
+            old_handlers = {sig: signal.signal(sig, self.request_stop) for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
             self.log_dir.mkdir(parents=True, exist_ok=True)
             result = 0
             try:
@@ -482,12 +587,14 @@ def main():
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--reload", action="store_true", help="开启后端开发自动重载，默认关闭")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    parser.add_argument("--keep-alive", action="store_true", help="后台常驻：关闭全部页面后仍保持运行，按 Ctrl+C 停止")
     parser.add_argument("--status", action="store_true", help="只查看当前项目的运行状态")
     args = parser.parse_args()
     try:
         config = Config(root=args.root.resolve(), backend_port=int(os.environ.get("BACKEND_PORT", "8001")),
             frontend_port=int(os.environ.get("FRONTEND_PORT", "5175")), frontend_host=os.environ.get("FRONTEND_HOST", "127.0.0.1"),
             reload=args.reload or env_bool("SVA_DEV_RELOAD", False),
+            stop_when_clients_close=not args.keep_alive,
             open_browser=not args.no_browser and env_bool("SVA_OPEN_BROWSER", True))
         return Supervisor(config).run(status_only=args.status)
     except (StartupError, ValueError) as exc:

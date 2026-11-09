@@ -10,8 +10,12 @@ import AuthGate from "./AuthGate.jsx";
 import { queryClient } from "./queryClient.js";
 import { ThemeModeProvider } from "./ThemeModeProvider.jsx";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
+import { startLocalSession } from "./localSession.js";
 import "./index.css";
 import "./macos.css";
+
+const disposeLocalSession = startLocalSession({ token: __STOCKVIEW_LOCAL_SESSION_TOKEN__ });
+if (import.meta.hot) import.meta.hot.dispose(disposeLocalSession);
 
 const ResearchWorkspace = lazy(() => import("./ResearchWorkspace.jsx"));
 const ResearchLab = lazy(() => import("./ResearchLab.jsx"));
@@ -24,6 +28,7 @@ const MonitoringWorkspace = lazy(() => import("./MonitoringWorkspace.jsx"));
 const KlineReplay = lazy(() => import("./KlineReplay.jsx"));
 const MerrillClock = lazy(() => import("./MerrillClock.jsx"));
 const LearningCenter = lazy(() => import("./LearningCenter.jsx"));
+const StrategyWorkspace = lazy(() => import("./StrategyWorkspace.jsx"));
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -34,6 +39,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <ErrorBoundary>
               <AuthGate>
                 <Routes>
+                  <Route path="/strategies/:strategyId?" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载策略知识库" /></div>}><StrategyWorkspace /></Suspense>} />
                   <Route path="/learn" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载学习入门" /></div>}><LearningCenter /></Suspense>} />
                   <Route path="/today" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载今日变化" /></div>}><TodayPage /></Suspense>} />
                   <Route path="/research" element={<Suspense fallback={<div className="sva-boot"><Spin size="large" aria-label="加载研究工作区" /></div>}><ResearchWorkspace /></Suspense>} />

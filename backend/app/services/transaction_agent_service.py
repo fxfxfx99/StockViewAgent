@@ -1,6 +1,6 @@
 """TransactionAgent 融合层：用本系统数据接口生成多策略交易观点。
 
-采用可解释的规则化评分，无需 LLM 或 RAG 索引。
+采用可解释的规则化评分，并按账户与策略检索版本化知识，补充分析依据。
 """
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.config import settings
-from app.services import event_calendar_context, public_data_context, kline_pipeline, market_extra_http, strategy_knowledge_service
+from app.security.user_context import current_user_id
+from app.services import event_calendar_context, public_data_context, kline_pipeline, market_extra_http, strategy_workspace_service
 from app.storage import company_fundamentals_store, kline_bundle_cache, market_history_cache
 
 STRATEGIES: list[dict[str, str]] = [
@@ -301,7 +302,7 @@ async def collect_signal_bundle(symbol: str, as_of: str | None = None) -> dict[s
         "public_data": public_data_context.retrieve(f"{industry or ''} 经济 通胀 汇率 货币政策", as_of=as_of_day, symbols=[sym]),
         "data_limitations": ([
             "历史节点仅使用该日及之前的 K 线和有日期的资金数据；最新估值、财务与经营讨论快照因缺少公告日期不参与评分。",
-            "历史 K 线可能使用当前前复权因子，策略知识库采用当前规则；此结果不等同于严格的时点回测。",
+            "历史 K 线可能使用当前前复权因子；知识资料按当时已保存的版本检索，规则评分仍采用当前程序，此结果不等同于严格的时点回测。",
         ] if as_of_day else []),
         "fundamentals": {
             "basic_info": basic,
@@ -399,6 +400,10 @@ def _build_detailed_analysis(view: dict[str, Any], knowledge: list[dict[str, Any
                 "publisher": item.get("publisher"),
                 "url": item.get("url"),
                 "quality_score": item.get("quality_score"),
+                "document_id": item.get("id"),
+                "version": item.get("version"),
+                "origin": item.get("origin"),
+                "updated_at": item.get("updated_at"),
             }
         )
     risk_controls = list(dict.fromkeys((view.get("risks") or []) + knowledge_risks))[:6]
@@ -412,22 +417,35 @@ def _build_detailed_analysis(view: dict[str, Any], knowledge: list[dict[str, Any
         "action_plan": view.get("action_suggestion"),
         "do_not_do": view.get("do_not_do") or [],
         "data_limitations": [
-            "策略观点由本系统 K 线、资金流、财务/MD&A 与策略知识库综合生成；外部数据源不可用时会使用缓存或降低置信度。",
+            "方向与评分由 K 线、资金流及财务规则计算；RAG 按该策略配置检索资料，补充依据与风险，不直接修改评分或代表预测准确率。",
             "公开策略资料仅保存短摘录和结构化摘要，不保存版权书籍或研报全文。",
         ],
         "sources": sources[:8],
     }
 
 
-def _apply_knowledge_context(view: dict[str, Any]) -> dict[str, Any]:
-    knowledge = strategy_knowledge_service.query_strategy_knowledge(view["strategy"], limit=6)
-    if not knowledge:
-        out = dict(view)
-        out["detailed_analysis"] = _build_detailed_analysis(out, [])
-        return out
+def _apply_knowledge_context(view: dict[str, Any], *, query: str = "", as_of: str | None = None) -> dict[str, Any]:
+    retrieved = strategy_workspace_service.retrieve_strategy_knowledge(
+        current_user_id.get(), view["strategy_id"], query=query, as_of=as_of,
+    )
+    knowledge = []
+    for document in retrieved.get("documents") or []:
+        content = str(document.get("content") or "")
+        points = document.get("key_points") or [line.strip(" -•\t") for line in content.splitlines() if line.strip()]
+        knowledge.append({
+            **document,
+            "summary": str(document.get("summary") or content)[:600],
+            "key_points": [str(point)[:350] for point in points[:6]],
+            "risks": [str(risk)[:350] for risk in (document.get("risks") or [])[:5]],
+            "url": document.get("source_url") or document.get("url"),
+        })
     out = dict(view)
     out["knowledge_context"] = [
         {
+            "id": k.get("id"),
+            "version": k.get("version"),
+            "origin": k.get("origin"),
+            "updated_at": k.get("updated_at"),
             "title": k.get("title"),
             "source_title": k.get("source_title"),
             "publisher": k.get("publisher"),
@@ -438,6 +456,11 @@ def _apply_knowledge_context(view: dict[str, Any]) -> dict[str, Any]:
         for k in knowledge
     ]
     meta = dict(out.get("metadata") or {})
+    retrieval = dict(retrieved.get("metadata") or {})
+    meta["knowledge_retrieval"] = retrieval
+    meta["knowledge_version"] = retrieval.get("knowledge_version")
+    meta["rag_config_version"] = (retrieved.get("config") or {}).get("version")
+    meta["rag_enabled"] = (retrieved.get("config") or {}).get("enabled", True)
     meta["knowledge_sources"] = len(knowledge)
     meta["rag_context"] = [k.get("summary") for k in knowledge if k.get("summary")]
     out["metadata"] = meta
@@ -451,6 +474,7 @@ def _apply_knowledge_context(view: dict[str, Any]) -> dict[str, Any]:
             reasons.append(f"策略知识库提示：{first_points[0]}")
             out["reasons"] = reasons[:4]
     out["detailed_analysis"] = _build_detailed_analysis(out, knowledge)
+    out["detailed_analysis"]["data_limitations"].extend(retrieval.get("limitations") or [])
     return out
 
 
@@ -646,10 +670,20 @@ def _score_views(bundle: dict[str, Any]) -> list[dict[str, Any]]:
     ], ["当前是市场级北向代理，尚非个股沪深港通持股变动。", "外资配置会受汇率、全球风险偏好和指数权重影响。"], "接入个股北向持股后再提高置信度；当前只用于中期配置偏好的弱确认。", ["不要把北向市场净流入等同个股被外资买入。", "不要忽略汇率和海外风险偏好变化。"], {"technical": t, "flow": flow, "fundamentals": f, "market_institution": market_inst}))
 
     calendar = bundle.get("economic_calendar") or {}
-    return [_apply_calendar_context(_apply_knowledge_context(v), calendar) for v in views]
+    query = f"{bundle.get('symbol', '')} {bundle.get('stock_name', '')} {f.get('industry') or ''}"
+    return [_apply_calendar_context(_apply_knowledge_context(
+        v, query=" ".join([query, v["strategy"], *strategy_workspace_service.get_profile(v["strategy_id"])["evidence_focus"]]),
+        as_of=bundle.get("as_of"),
+    ), calendar) for v in views]
 
 
 async def generate_strategy_views(symbol: str, strategy: str | None = None, as_of: str | None = None) -> dict[str, Any]:
+    want = None
+    if strategy:
+        key = strategy.strip()
+        want = _STRATEGY_BY_ID.get(key) or _STRATEGY_BY_NAME.get(key)
+        if not want:
+            raise ValueError(f"未知策略：{strategy}")
     bundle = await collect_signal_bundle(symbol, as_of=as_of)
     views = _score_views(bundle)
     for view in views:
@@ -661,11 +695,7 @@ async def generate_strategy_views(symbol: str, strategy: str | None = None, as_o
             detail.setdefault("sources", []).append({"source_id": item["source_id"], "title": item["title"],
                 "url": item["source_url"], "publisher": item["source"], "citation": item["citation"], "revision_id": item["revision_id"]})
             detail.setdefault("signal_checks", []).append(f"[{item['source_id']}] {item['title']}；统计期 {item['period']}；值 {item['value']} {item['unit'] or ''}（背景资料，不改变规则评分）")
-    if strategy:
-        key = strategy.strip()
-        want = _STRATEGY_BY_ID.get(key) or _STRATEGY_BY_NAME.get(key)
-        if not want:
-            raise ValueError(f"未知策略：{strategy}")
+    if want:
         views = [v for v in views if v["strategy_id"] == want["id"]]
     bullish = sum(1 for v in views if v["direction"] == "bullish")
     bearish = sum(1 for v in views if v["direction"] == "bearish")
@@ -691,6 +721,9 @@ async def generate_strategy_views(symbol: str, strategy: str | None = None, as_o
             "average_score": avg_score,
             "dominant_direction": _direction(_clamp_score(avg_score)),
             "strategy_count": len(views),
-            "knowledge_item_count": strategy_knowledge_service.status().get("item_count", 0),
+            "knowledge_item_count": len({
+                (item.get("origin"), item.get("id"), str(item.get("version")))
+                for view in views for item in view.get("knowledge_context") or []
+            }),
         },
     }

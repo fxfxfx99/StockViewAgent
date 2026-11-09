@@ -3,6 +3,7 @@
 set -euo pipefail
 # shellcheck source=scripts/_common.sh
 source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+sva_prepare_path
 
 ROOT="$(sva_root)"
 cd "$ROOT"

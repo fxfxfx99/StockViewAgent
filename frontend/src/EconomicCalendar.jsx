@@ -235,7 +235,6 @@ export default function EconomicCalendar() {
         </Card>
       </div>
       <Card className="calendar-card calendar-sources" title="来源与采集状态" extra={<Text className="calendar-caption">最近更新：{calendarTime(calendar.data?.updated_at, { includeDate: true })}</Text>}>
-        <Paragraph className="calendar-caption">“—”表示数值未提供。</Paragraph>
         {sources.length ? <div className="calendar-source-grid">{sources.map((source) => { const info = sourceStatusInfo(source); return <div className="calendar-source" key={source.id}>
           <div className="calendar-source-heading"><SourceLink url={source.url}>{source.name || source.id}</SourceLink><Badge status={info.status} text={info.label} /></div>
           <div className="calendar-caption">{source.event_count ?? 0} 项事件 · 最近成功 {calendarTime(source.last_success_at, { includeDate: true })}</div>

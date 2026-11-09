@@ -1,17 +1,17 @@
 .merrill-page { background: var(--sva-bg); color: var(--sva-text); }
-.merrill-page .merrill-content { width: 100%; max-width: 1600px; margin: 0 auto; padding: 28px var(--sva-page-padding, 24px) 48px; }
-.merrill-page .merrill-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 25px; }
+.merrill-page .merrill-content { width: 100%; max-width: var(--sva-content-max); margin: 0 auto; padding: var(--sva-page-padding) var(--sva-page-padding) 48px; }
+.merrill-page .merrill-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .merrill-page .merrill-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: .16em; color: var(--sva-text-tertiary); }
-.merrill-page h1 { margin: 7px 0 8px; font-size: 29px; font-weight: 650; letter-spacing: -.04em; color: var(--sva-text); }
+.merrill-page h1 { margin: 0; font-size: var(--sva-title-size); line-height: 1.3; font-weight: 650; letter-spacing: -.04em; color: var(--sva-text); }
 .merrill-page h1 > span { margin-left: 18px; font-size: 15px; font-weight: 400; color: var(--sva-text-secondary); letter-spacing: 0; }
 .merrill-page .merrill-page-heading p { margin: 0; color: var(--sva-text-secondary); font-size: 13px; line-height: 1.7; }
 .merrill-page .merrill-heading-status { display: flex; align-items: center; flex-shrink: 0; gap: 7px; font-size: 12px; color: var(--sva-text-secondary); }
 .merrill-page .merrill-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #779a8f; }
 .merrill-page .merrill-status-dot.is-busy { background: #c59750; }
 .merrill-page .merrill-content > .ant-alert { margin-bottom: 18px; }
-.merrill-page .merrill-main-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(345px, 1fr); align-items: stretch; gap: 18px; }
-.merrill-page .merrill-card { min-width: 0; background: var(--sva-panel-bg); border: 1px solid var(--sva-separator); border-radius: 12px; padding: 23px; }
-.merrill-page .merrill-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 21px; }
+.merrill-page .merrill-main-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(330px, 1fr); align-items: stretch; gap: 16px; }
+.merrill-page .merrill-card { min-width: 0; background: var(--sva-panel-bg); border: 1px solid var(--sva-separator); border-radius: 12px; padding: 18px; }
+.merrill-page .merrill-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
 .merrill-page .merrill-kicker { margin-bottom: 5px; color: var(--sva-text-tertiary); font-size: 11px; letter-spacing: .08em; }
 .merrill-page h2 { margin: 0; color: var(--sva-text); font-size: 18px; font-weight: 600; letter-spacing: -.025em; line-height: 1.5; }
 .merrill-page .merrill-card-heading .ant-tag { margin: 0; font-size: 11px; color: var(--sva-text-secondary); background: var(--sva-fill); border-color: var(--sva-separator); }
@@ -70,7 +70,7 @@
 .merrill-page .merrill-macro-source { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--sva-separator); overflow-wrap: anywhere; }
 .merrill-page .merrill-macro-source strong { color: var(--sva-text-secondary); font-weight: 500; }
 .merrill-page .merrill-macro-source a { color: var(--sva-text-secondary); }
-.merrill-page .merrill-explanation-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-top: 18px; }
+.merrill-page .merrill-explanation-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; }
 .merrill-page .merrill-small-label { color: var(--sva-text-tertiary); font-size: 11px; }
 .merrill-page .merrill-body-copy { font-size: 12px; line-height: 1.85; color: var(--sva-text-secondary); margin: 0 0 15px; }
 .merrill-page .merrill-theory-row { display: flex; align-items: flex-start; gap: 12px; padding: 15px 0; border-top: 1px solid var(--sva-separator); }
@@ -86,12 +86,12 @@
 .merrill-page .merrill-rule-summary > span { color: var(--sva-text-tertiary); font-size: 11px; margin-right: 12px; }
 .merrill-page .merrill-rule-summary strong { font-size: 13px; font-weight: 550; color: var(--sva-text); }
 .merrill-page .merrill-rule-summary p { margin: 7px 0 0; color: var(--sva-text-secondary); font-size: 12px; line-height: 1.85; }
-.merrill-page .merrill-analysis-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 22px 0 10px; font-size: 11px; color: var(--sva-text-tertiary); }
+.merrill-page .merrill-analysis-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 0 0 10px; font-size: 11px; color: var(--sva-text-tertiary); }
 .merrill-page .merrill-ai-badge { border: 1px solid var(--sva-separator); border-radius: 4px; color: var(--sva-text-secondary); padding: 1px 6px; font-size: 10px; }
 .merrill-page .merrill-analysis-date { font-size: 10px; color: var(--sva-text-tertiary); margin: 0 0 12px; }
 .merrill-page .merrill-analysis-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.95; color: var(--sva-text-secondary); max-height: 450px; overflow: auto; padding-right: 5px; }
 .merrill-page .merrill-analysis .ant-alert { margin-bottom: 12px; }
-.merrill-page .merrill-analysis-empty { min-height: 158px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
+.merrill-page .merrill-analysis-empty { min-height: 120px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
 .merrill-page .merrill-analysis-empty > span { font-size: 13px; color: var(--sva-text-secondary); }
 .merrill-page .merrill-analysis-empty > p { font-size: 12px; line-height: 1.85; color: var(--sva-text-tertiary); max-width: 440px; }
 .merrill-page .merrill-automation { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin: 18px 0; }
@@ -124,6 +124,6 @@
 .merrill-page .merrill-source-error { max-width: 210px; color: var(--sva-text-secondary); }
 @media (min-width: 1450px) { .merrill-page .merrill-chart { min-height: 430px; } .merrill-page .merrill-dial-wrap { max-width: 385px; } }
 @media (max-width: 1120px) { .merrill-page .merrill-main-grid { grid-template-columns: minmax(0, 1.35fr) minmax(310px, 1fr); gap: 14px; } .merrill-page .merrill-card { padding: 18px; } .merrill-page .merrill-coverage { padding: 0; } .merrill-page .merrill-heading-status { align-self: flex-start; margin-top: 10px; } .merrill-page h1 > span { display: none; } .merrill-page .merrill-clock-card h2 { font-size: 16px; } }
-@media (max-width: 900px) { .merrill-page .merrill-page-heading { align-items: flex-start; flex-direction: column; gap: 7px; } .merrill-page .merrill-heading-status { margin-top: 0; } .merrill-page .merrill-main-grid { grid-template-columns: minmax(0, 1fr); } .merrill-page .merrill-dial-wrap { max-width: 360px; } .merrill-page .merrill-explanation-grid { grid-template-columns: minmax(0, 1fr); } .merrill-page .merrill-chart { flex: none; height: 390px; } .merrill-page .merrill-evidence p { font-size: 11px; } .merrill-page .merrill-automation { align-items: flex-start; flex-direction: column; gap: 18px; } .merrill-page .merrill-automation-actions { width: 100%; justify-content: space-between; } }
-@media (max-width: 520px) { .merrill-page .merrill-content { padding: 20px 12px 30px; } .merrill-page h1 { font-size: 26px; } .merrill-page .merrill-page-heading p { font-size: 12px; } .merrill-page .merrill-card { padding: 16px; border-radius: 10px; } .merrill-page .merrill-coverage { padding: 0; } .merrill-page .merrill-card-heading { margin-bottom: 17px; } .merrill-page .merrill-chart-controls { gap: 10px; } .merrill-page .merrill-chart-controls > label { flex: 1; } .merrill-page .merrill-chart-controls .ant-select { min-width: 120px; } .merrill-page .merrill-chart-controls .ant-picker { width: 100%; } .merrill-page .merrill-class-select { flex-basis: 98px; } .merrill-page .merrill-chart { height: 340px; } .merrill-page .merrill-card-heading h2 { font-size: 16px; } .merrill-page .merrill-analysis .merrill-card-heading { flex-wrap: wrap; } .merrill-page .merrill-theory-row { gap: 9px; } .merrill-page .merrill-asset-pill { padding: 2px 6px; } .merrill-page .merrill-coverage > summary { padding: 16px; } .merrill-page .merrill-coverage > summary > .merrill-muted { display: block; padding: 5px 0 0 16px; } .merrill-page .merrill-coverage > .merrill-note { padding: 0 16px; } }
+@media (max-width: 900px) { .merrill-page .merrill-page-heading { align-items: flex-start; flex-direction: column; gap: 7px; } .merrill-page .merrill-heading-status { margin-top: 0; } .merrill-page .merrill-main-grid { grid-template-columns: minmax(0, 1fr); } .merrill-page .merrill-dial-wrap { max-width: 360px; } .merrill-page .merrill-explanation-grid { grid-template-columns: minmax(0, 1fr); } .merrill-page .merrill-chart { flex: none; height: 390px; } .merrill-page .merrill-evidence p { font-size: 11px; } .merrill-page .merrill-automation { align-items: flex-start; flex-direction: column; gap: 16px; } .merrill-page .merrill-automation-actions { width: 100%; justify-content: space-between; } }
+@media (max-width: 520px) { .merrill-page .merrill-content { padding: var(--sva-page-padding) var(--sva-page-padding) 30px; } .merrill-page h1 { font-size: var(--sva-title-size); } .merrill-page .merrill-page-heading p { font-size: 12px; } .merrill-page .merrill-card { padding: 16px; border-radius: 10px; } .merrill-page .merrill-coverage { padding: 0; } .merrill-page .merrill-card-heading { margin-bottom: 17px; } .merrill-page .merrill-chart-controls { gap: 10px; } .merrill-page .merrill-chart-controls > label { flex: 1; } .merrill-page .merrill-chart-controls .ant-select { min-width: 120px; } .merrill-page .merrill-chart-controls .ant-picker { width: 100%; } .merrill-page .merrill-class-select { flex-basis: 98px; } .merrill-page .merrill-chart { height: 340px; } .merrill-page .merrill-card-heading h2 { font-size: 16px; } .merrill-page .merrill-analysis .merrill-card-heading { flex-wrap: wrap; } .merrill-page .merrill-theory-row { gap: 9px; } .merrill-page .merrill-asset-pill { padding: 2px 6px; } .merrill-page .merrill-coverage > summary { padding: 16px; } .merrill-page .merrill-coverage > summary > .merrill-muted { display: block; padding: 5px 0 0 16px; } .merrill-page .merrill-coverage > .merrill-note { padding: 0 16px; } }
 @media (prefers-reduced-motion: reduce) { .merrill-page .merrill-sector path { transition: none; } }

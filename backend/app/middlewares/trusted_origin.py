@@ -61,17 +61,21 @@ class TrustedOriginMiddleware(CORSMiddleware):
         return key is not None and (key[1] in _LOCAL_HOSTS or key in self.trusted_origins)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
+        if scope["type"] in {"http", "websocket"}:
             headers = Headers(scope=scope)
             hosts = headers.getlist("host")
             host = _origin_key(f"http://{hosts[0]}") if len(hosts) == 1 else None
+            denial = None
             if host is None or host[1] not in self.trusted_hosts:
-                response = JSONResponse(status_code=403, content={"detail": "不允许的请求主机"})
-                await response(scope, receive, send)
-                return
+                denial = "不允许的请求主机"
             origins = headers.getlist("origin")
             if origins and (len(origins) != 1 or not self.is_allowed_origin(origins[0])):
-                response = JSONResponse(status_code=403, content={"detail": "不允许的浏览器来源"})
-                await response(scope, receive, send)
+                denial = denial or "不允许的浏览器来源"
+            if denial:
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                else:
+                    response = JSONResponse(status_code=403, content={"detail": denial})
+                    await response(scope, receive, send)
                 return
         await super().__call__(scope, receive, send)

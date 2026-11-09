@@ -455,7 +455,7 @@ export default function App() {
               closable onClose={() => setError("")} className="market-alert" /> : null}
 
             <div className="market-workspace">
-              <div className="market-security-toolbar">
+              {focusSymbol ? <div className="market-security-toolbar">
                 <div className="market-security-heading">
                   <h1 title={focusName}>{focusName}</h1>
                   <p>{focusSymbol ? <><span>{focusSymbol}</span><span aria-hidden="true"> · </span>{focusMarket}</> : "添加自选股以查看行情"}</p>
@@ -473,7 +473,7 @@ export default function App() {
                   <Button type="text" icon={<DownloadOutlined />} disabled={!focusSymbol}
                     onClick={() => klineRef.current?.download?.()} aria-label="导出 K 线 CSV">导出</Button>
                 </div>
-              </div>
+              </div> : null}
 
               {focusSymbol ? <>
                 <section className="market-chart-section" aria-label={`${focusSecurityLabel}行情`}>
@@ -489,7 +489,7 @@ export default function App() {
                   destroyOnHidden={false} items={panels} aria-label="个股研究内容" />
               </> : <div className="market-empty-workspace">
                 <MenuUnfoldOutlined aria-hidden="true" />
-                <h2>添加自选股</h2>
+                <h1>添加自选股</h1>
                 <p>搜索名称或代码，加入自选。</p>
                 {isCompact ? <Button type="primary" onClick={() => setMobileWatchlistOpen(true)}>添加自选股</Button> : null}
               </div>}

@@ -98,6 +98,20 @@ test("automation stop, worker loss, source failure and pending coverage remain d
   assert.equal(trackingStatusNotices(undefined).length, 0);
 });
 
+test("saved strategy opinions retain knowledge versions and bounded source excerpts", () => {
+  const view = { strategy_id: "value_investing", strategy: "价值投资", metadata: {
+    knowledge_version: "kb-2", rag_config_version: 3,
+  }, knowledge_context: [{ id: "private-1", version: 2, origin: "personal", title: "估值修订",
+    updated_at: "2026-11-08T01:00:00Z", key_points: ["现金流".repeat(500)], content: "x".repeat(50000) }] };
+  const snapshot = strategyEvidence(view, { symbol: "600519.SS" }).snapshot;
+  assert.equal(snapshot.knowledge_version, "kb-2");
+  assert.equal(snapshot.rag_config_version, 3);
+  assert.equal(snapshot.knowledge_references[0].version, 2);
+  assert.equal(snapshot.knowledge_references[0].content, undefined);
+  assert.equal(snapshot.knowledge_references[0].key_points[0].length, 180);
+  assert.equal(view.knowledge_context[0].key_points[0].length, 1500);
+});
+
 test("concurrency and validation errors retain actionable recovery text", () => {
   assert.match(trackingError({ response: { status: 409 } }), /输入已保留/);
   assert.match(trackingError(new Error("offline")), /输入已保留/);

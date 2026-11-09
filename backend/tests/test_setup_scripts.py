@@ -29,6 +29,7 @@ def fixture_project(tmp_path):
         shutil.copy2(ROOT / relative, root / relative)
     quoted_root, python = shlex.quote(str(root)), shlex.quote(sys.executable)
     (root / "scripts/_common.sh").write_text(f'''set -euo pipefail
+sva_prepare_path() {{ return 0; }}
 sva_root() {{ printf '%s\\n' {quoted_root}; }}
 sva_resolve_python() {{ printf '%s\\n' {python}; }}
 sva_python_ok() {{ return 0; }}

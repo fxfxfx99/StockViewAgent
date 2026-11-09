@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import importlib.util
 import fcntl
+import io
 import json
+import logging
 import os
 from pathlib import Path
 import signal
@@ -11,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -44,6 +47,14 @@ if spawn_child == '1':
 if port:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path == '/api/local-session/status':
+                self.send_response(200)
+                self.end_headers()
+                state_file = root / 'clients.json'
+                state = json.loads(state_file.read_text()) if state_file.exists() else {'clients': 0, 'connected_once': False}
+                state['instance_id'] = str(os.getpid())
+                self.wfile.write(json.dumps(state).encode())
+                return
             with (root / (name + '.health')).open('a') as stream: stream.write(str(time.monotonic()) + '\n')
             self.send_response(503 if unhealthy == '1' else 200)
             self.end_headers()
@@ -61,7 +72,7 @@ while True: time.sleep(.1)
 '''
 
 DRIVER_CODE = r'''
-import importlib.util, json, sys
+import importlib.util, json, sys, time
 from pathlib import Path
 module_path, root_path = sys.argv[1:]
 spec = importlib.util.spec_from_file_location('local_supervisor_test_driver', module_path)
@@ -75,7 +86,9 @@ config = module.Config(root=root, backend_port=plan['backend_port'], frontend_po
     restart_base_delay=.1, restart_max_delay=.2, stable_seconds=5,
     ready_timeout=plan.get('ready_timeout', 2), stop_timeout=.3, poll_interval=.05,
     health_interval=plan.get('health_interval', .15), startup_health_interval=.03,
-    state_interval=plan.get('state_interval', .1), startup_state_interval=.05)
+    state_interval=plan.get('state_interval', .1), startup_state_interval=.05,
+    stop_when_clients_close=plan.get('stop_when_clients_close', False),
+    client_close_grace=.3, client_start_timeout=plan.get('client_start_timeout', 3), client_poll_interval=.05)
 services = []
 for name, port in [('backend', config.backend_port), ('frontend', config.frontend_port), ('research', 0)]:
     args = plan.get(name, {})
@@ -85,6 +98,7 @@ for name, port in [('backend', config.backend_port), ('frontend', config.fronten
                str(int(args.get('broken_deps', False)))]
     services.append(module.Service(name, command, root, f'http://127.0.0.1:{port}/' if port else None))
 def browser(url):
+    time.sleep(plan.get('browser_delay', 0))
     with (root / 'browser.events').open('a') as stream: stream.write(url + '\n')
 runner = module.Supervisor(config, services=services,
     setup_command=[sys.executable, str(root / 'setup_fixture.py'), str(root)],
@@ -231,6 +245,43 @@ def test_duplicate_launch_reuses_held_instance_lock_without_setup(runtime):
     assert read_json(root / "backend/data/runtime/pids/local-runtime.json")["pid"] == prior["pid"]
     assert len((root / "setup.events").read_text().splitlines()) == 1
     assert "未重复启动" in (root / "supervisor-1.log").read_text()
+
+
+def test_duplicate_launch_finishes_opening_existing_client_before_exiting(runtime):
+    first, root = runtime({"open_browser": True, "browser_delay": .3})
+    wait_for(lambda: (root / "browser.events").exists())
+    expected_url = read_json(root / "backend/data/runtime/pids/local-runtime.json")["url"]
+    duplicate, _ = runtime(reuse=True)
+    assert duplicate.wait(timeout=5) == 0
+    assert (root / "browser.events").read_text().splitlines() == [expected_url, expected_url]
+    assert first.poll() is None
+    assert len((root / "setup.events").read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize("service_name", ["backend", "frontend"])
+def test_child_logs_redact_session_token_without_losing_diagnostics(tmp_path, caplog, service_name):
+    runner = supervisor.Supervisor(supervisor.Config(tmp_path), services=[])
+    service = supervisor.Service(service_name, [], tmp_path)
+    logger = logging.getLogger(f"test.local-session-log.{service_name}")
+    runner._loggers[service_name] = logger
+    caplog.set_level(logging.INFO, logger=logger.name)
+    token = runner.session_token
+    output = (
+        f'WebSocket /api/local-session/ws?token={token} [accepted]\n'
+        f'WebSocket /api/local-session/ws?token={token} 403\n'
+        f'ws proxy error /api/local-session/ws?token={token}: ECONNRESET\n'
+        'ordinary diagnostic\n'
+    )
+    process = SimpleNamespace(stdout=io.BytesIO(output.encode()))
+    runner.pump_log(service, process)
+    assert token not in caplog.text
+    assert caplog.messages == [
+        'WebSocket /api/local-session/ws?token=[local-session] [accepted]',
+        'WebSocket /api/local-session/ws?token=[local-session] 403',
+        'ws proxy error /api/local-session/ws?token=[local-session]: ECONNRESET',
+        'ordinary diagnostic',
+    ]
+    assert process.stdout.closed
 
 
 def test_lost_dependencies_run_setup_before_restart(runtime):
@@ -420,3 +471,70 @@ def test_steady_http_checks_slow_down_while_crash_detection_stays_fast(runtime):
     assert time.monotonic() - crashed_at < 1
     wait_for(lambda: read_json(state_path)["status"] == "ready" and read_json(state_path)["services"]["research"]["pid"] != old_pid)
     assert process.poll() is None
+
+
+def test_last_client_close_stops_all_owned_processes(runtime):
+    process, root = runtime({"stop_when_clients_close": True, "research": {"spawn_child": True}})
+    state_path = root / "backend/data/runtime/pids/local-runtime.json"
+    wait_for(lambda: read_json(state_path).get("status") == "ready")
+    clients_file = root / "clients.json"
+    def clients(count):
+        staged = clients_file.with_suffix(".tmp")
+        staged.write_text(json.dumps({"clients": count, "connected_once": True}))
+        staged.replace(clients_file)
+        wait_for(lambda: read_json(state_path).get("clients") == count)
+    clients(2)
+    clients(1)
+    time.sleep(.4)
+    assert process.poll() is None  # Closing one of two pages preserves the app.
+    clients(0)
+    clients(1)  # A refresh/reopen within the grace period cancels shutdown.
+    time.sleep(.4)
+    assert process.poll() is None
+    child = int((root / "research.child").read_text())
+    clients(0)
+    assert process.wait(timeout=5) == 0
+    assert not process_running(child)
+    state = read_json(state_path)
+    assert state["status"] == "stopped" and "所有客户端页面已关闭" in state["stop_reason"]
+    assert all(row["pid"] is None for row in state["services"].values())
+
+
+def test_no_initial_client_times_out_cleanly(runtime):
+    process, root = runtime({"stop_when_clients_close": True, "client_start_timeout": .3})
+    assert process.wait(timeout=6) == 0
+    state = read_json(root / "backend/data/runtime/pids/local-runtime.json")
+    assert state["status"] == "stopped" and "没有客户端页面连接" in state["stop_reason"]
+
+
+def test_terminal_close_cleans_up_services(runtime):
+    process, root = runtime()
+    state_path = root / "backend/data/runtime/pids/local-runtime.json"
+    wait_for(lambda: read_json(state_path).get("status") == "ready")
+    process.send_signal(signal.SIGHUP)
+    assert process.wait(timeout=5) == 128 + signal.SIGHUP
+    assert all(row["pid"] is None for row in read_json(state_path)["services"].values())
+
+
+def test_client_lifetime_recovery_sleep_and_invalid_samples(tmp_path):
+    lifetime = supervisor.ClientLifetime(supervisor.Config(tmp_path, client_close_grace=2, client_start_timeout=10))
+    state = {"clients": 0, "connected_once": True, "instance_id": "first"}
+    assert lifetime.observe(state, 0) is None
+    assert lifetime.observe(state, 1) is None
+    assert lifetime.observe(state, 20) is None  # Sleep or a stalled poll isn't a close.
+    assert lifetime.observe(state, 21) is None
+    lifetime.pause()  # Backend restart/failing probe gets a new reconnect interval.
+    assert lifetime.observe(state, 22) is None
+    assert lifetime.observe(state, 23) is None
+    assert lifetime.observe(state, 24) is not None
+    state["instance_id"] = "restarted"
+    assert lifetime.observe(state, 25) is None
+    with pytest.raises(ValueError):
+        lifetime.observe({"clients": -1}, 26)
+
+
+def test_keep_alive_does_not_probe_clients_or_export_session_token(tmp_path, monkeypatch):
+    runner = supervisor.Supervisor(supervisor.Config(tmp_path, stop_when_clients_close=False), services=[])
+    monkeypatch.setattr(runner._http, "open", lambda *args, **kwargs: pytest.fail("must not probe in keep-alive mode"))
+    runner.check_clients(ready=True)
+    assert runner.session_token == "" and not runner.stopping

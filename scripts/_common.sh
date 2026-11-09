@@ -13,6 +13,53 @@ sva_die() {
   exit 1
 }
 
+# Finder / 桌面应用启动时 PATH 可能不包含用户安装的解释器。
+# 保留调用者已选的完整 Node；仅在缺失时查找已安装版本，不执行 shell 初始化文件。
+sva_prepare_path() {
+  local root dir major
+  root="$(sva_root)"
+  for dir in /opt/homebrew/bin /usr/local/bin /opt/local/bin \
+    /opt/homebrew/opt/python@3.13/bin /opt/homebrew/opt/python@3.12/bin /opt/homebrew/opt/python@3.11/bin \
+    /usr/local/opt/python@3.13/bin /usr/local/opt/python@3.12/bin /usr/local/opt/python@3.11/bin; do
+    [[ -d "$dir" ]] || continue
+    case ":${PATH:-}:" in
+      *":$dir:"*) ;;
+      *) PATH="${PATH:+$PATH:}$dir" ;;
+    esac
+  done
+  export PATH
+
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    major="$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || true)"
+    if [[ "$major" =~ ^[0-9]+$ ]] && [[ "$major" -ge 20 ]]; then return; fi
+  fi
+
+  local candidates=(
+    "$root/.local-runtime/node/bin"
+    "${VOLTA_HOME:-$HOME/.volta}/bin"
+    "${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
+    "${ASDF_DATA_DIR:-$HOME/.asdf}/shims"
+    "${NVM_DIR:-$HOME/.nvm}/current/bin"
+    "${FNM_DIR:-$HOME/.local/share/fnm}/aliases/default/bin"
+    "$HOME/Library/Application Support/fnm/aliases/default/bin"
+    "$HOME/.fnm/aliases/default/bin"
+    "${NVM_DIR:-$HOME/.nvm}"/versions/node/*/bin
+    "${FNM_DIR:-$HOME/.local/share/fnm}"/node-versions/*/installation/bin
+    "$HOME/Library/Application Support/fnm"/node-versions/*/installation/bin
+    "$HOME/.fnm"/node-versions/*/installation/bin
+    "${MISE_DATA_DIR:-$HOME/.local/share/mise}"/installs/node/*/bin
+    "${ASDF_DATA_DIR:-$HOME/.asdf}"/installs/nodejs/*/bin
+  )
+  for dir in "${candidates[@]}"; do
+    [[ -x "$dir/node" && -x "$dir/npm" ]] || continue
+    major="$("$dir/node" -p "process.versions.node.split('.')[0]" 2>/dev/null || true)"
+    if [[ "$major" =~ ^[0-9]+$ ]] && [[ "$major" -ge 20 ]]; then
+      export PATH="$dir:$PATH"
+      return
+    fi
+  done
+}
+
 sva_python_ok() {
   local bin="$1"
   "$bin" -c 'import sys; v=sys.version_info[:2]; raise SystemExit(0 if (3,11)<=v<=(3,13) else 1)' 2>/dev/null

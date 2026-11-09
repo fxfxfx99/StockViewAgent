@@ -38,6 +38,7 @@ export default function AppToolbar({ active = "market", settingsAction, user, au
         <Dropdown trigger={["click"]} menu={{ items: [
           { key: "today", icon: <RadarChartOutlined />, label: <Link to="/today">今日变化</Link> },
           { key: "lab", icon: <ExperimentOutlined />, label: <Link to="/lab">量化实验室</Link> },
+          { key: "strategies", icon: <BookOutlined />, label: <Link to="/strategies">策略与知识库</Link> },
           { key: "macro", icon: <FundOutlined />, label: <Link to="/macro">市场研判</Link> },
           { key: "calendar", icon: <CalendarOutlined />, label: <Link to="/calendar">经济日历</Link> },
           { key: "news", icon: <GlobalOutlined />, label: <Link to="/news">海外快讯</Link> },

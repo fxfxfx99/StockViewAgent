@@ -28,6 +28,7 @@ from app.routers import (
     kline_learning,
     kline_replay,
     knowledge_cache,
+    local_session,
     macro,
     merrill_clock,
     market,
@@ -226,6 +227,7 @@ app.include_router(stock_picker_agents.router)
 app.include_router(quant.router)
 app.include_router(research.router)
 app.include_router(runtime.router)
+app.include_router(local_session.router)
 app.include_router(autopilot.router)
 app.include_router(xueqiu.router)
 

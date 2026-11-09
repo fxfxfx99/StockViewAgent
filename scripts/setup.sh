@@ -3,6 +3,7 @@
 set -euo pipefail
 # shellcheck source=scripts/_common.sh
 source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
+sva_prepare_path
 
 ROOT="$(sva_root)"
 cd "$ROOT"
@@ -67,10 +68,11 @@ if [[ ! -f "$ROOT/backend/.venv/.requirements-hash" ]] || \
   if ! "$ROOT/backend/.venv/bin/python" -m pip --version >/dev/null 2>&1; then
     "$ROOT/backend/.venv/bin/python" -m ensurepip
   fi
-  PIP_REPAIR=()
+  # 保持数组非空，兼容 macOS Bash 3.2 的 set -u 行为。
+  PIP_ARGS=(install)
   # 已有包的元数据可能尚在但模块/本地轮子损坏，普通 install 会误判已满足。
-  if [[ "$BACKEND_HEALTHY" -ne 1 ]]; then PIP_REPAIR=(--force-reinstall); fi
-  "$ROOT/backend/.venv/bin/python" -m pip install "${PIP_REPAIR[@]}" -r "$ROOT/backend/requirements.txt"
+  if [[ "$BACKEND_HEALTHY" -ne 1 ]]; then PIP_ARGS+=(--force-reinstall); fi
+  "$ROOT/backend/.venv/bin/python" -m pip "${PIP_ARGS[@]}" -r "$ROOT/backend/requirements.txt"
   "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/check_dependencies.py" "$ROOT/backend/requirements.txt"
   printf '%s\n' "$REQ_HASH" > "$ROOT/backend/.venv/.requirements-hash"
 else

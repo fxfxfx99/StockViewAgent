@@ -117,7 +117,7 @@ function CollectedRecords({ userId, sources }) {
   const params = useMemo(() => ({ offset: (page - 1) * 20, limit: 20, ...(source ? { source_id: source } : {}), ...(search ? { q: search } : {}) }), [source, search, page]);
   const records = useQuery({ queryKey: dataCenterQueryKey(userId, "records", params), queryFn: ({ signal }) => api.getCollectedDataRecords(params, { signal }), refetchOnWindowFocus: false });
   return <>
-    <div className="data-section-intro"><div><Title level={4}>已采集资料</Title><Paragraph className="data-caption">保留资料的历史版本。</Paragraph></div></div>
+    <Paragraph className="data-caption">资料按采集时间归档，保留历史版本。</Paragraph>
     <div className="data-record-filters"><label><span>采集来源</span><Select aria-label="资料来源筛选" allowClear placeholder="全部来源" options={sourceOptions(sources)} value={source} onChange={(value) => { setSource(value); setPage(1); }} /></label><label><span>搜索资料</span><Input.Search aria-label="搜索已采集资料" placeholder="资料标题或内容关键词" maxLength={500} allowClear onSearch={(value) => { setSearch(value.trim()); setPage(1); }} enterButton /></label></div>
     <QueryError query={records} title="已采集资料读取失败" />
     <Table size="small" rowKey={(item) => item.revision_id || item.citation} dataSource={records.data?.items || EMPTY} loading={records.isLoading} scroll={{ x: 850 }} pagination={{ current: page, pageSize: 20, total: records.data?.total || 0, showSizeChanger: false, showTotal: (total) => `共 ${total} 条资料`, onChange: setPage }} columns={[
@@ -135,8 +135,7 @@ function CollectionMonitor({ sources, jobs, onCollect, collecting, config, worke
   const activeJobs = (jobs.data?.items || EMPTY).filter((job) => ["running", "queued"].includes(job.status));
   const serviceNotice = collectionServiceNotice(worker);
   return <>
-    <div className="data-section-intro"><Title level={4}>采集来源</Title></div>
-    {runtime.description ? <Paragraph className="data-caption">{runtime.description}</Paragraph> : null}
+    <div className="data-section-intro"><Title level={4}>采集来源</Title>{runtime.description ? <Text className="data-caption">{runtime.description}</Text> : null}</div>
     {serviceNotice ? <Alert className="data-banner" type="info" showIcon message={serviceNotice} /> : null}
     {worker?.active_jobs?.length ? <Paragraph className="data-caption">采集中 {worker.active_jobs.length} / {worker.max_concurrent_jobs || worker.active_jobs.length}：{worker.active_jobs.map((job) => sources.find((source) => source.id === job.source_id)?.name || job.source_id).join("、")}</Paragraph> : null}
     <div className="data-resource-strip"><span>每类并发上限 {worker?.max_concurrent_jobs ?? config?.max_concurrent_jobs ?? "—"}</span><span>单任务超时 {config?.job_timeout_seconds ?? "—"} 秒</span><span>磁盘下限 {config?.min_free_disk_mb ?? "—"} MiB</span><span>{worker?.resources?.supported === false ? "进程内存读取不可用" : `API 内存 / 软阈值 ${worker?.resources?.rss_mb == null ? "—" : Number(worker.resources.rss_mb).toFixed(0)} / ${worker?.resources?.limit_mb ?? config?.max_memory_mb ?? "—"} MiB`}</span></div>
@@ -146,7 +145,7 @@ function CollectionMonitor({ sources, jobs, onCollect, collecting, config, worke
       <dl className="data-source-metadata"><div><dt>自动采集</dt><dd>{sourceScheduleLabel(source, config, worker)}</dd></div><div><dt>最近成功</dt><dd>{dataTime(source.last_success_at)}</dd></div><div><dt>本次接收 / 新增</dt><dd>{numberText(source.records_received)} / {numberText(source.records_added)}</dd></div><div><dt>下次计划</dt><dd>{source.enabled && config?.enabled !== false && worker?.enabled !== false && worker?.automatic_enabled !== false ? dataTime(source.next_run_at) : "—"}</dd></div>{source.total_symbols != null ? <div><dt>股票完成 / 总数</dt><dd>{source.completed_symbols ?? 0} / {source.total_symbols} · 待处理 {source.pending_symbols ?? 0}</dd></div> : null}{source.retry_at ? <div><dt>失败重试</dt><dd>{dataTime(source.retry_at)}</dd></div> : null}{source.last_scheduled_for ? <div><dt>最近计划日</dt><dd>{dataTime(source.last_scheduled_for)}</dd></div> : null}</dl>
       <div className="data-source-card-footer"><span className="data-source-error">{source.error_code || ""}</span><Button size="small" icon={<CloudDownloadOutlined aria-hidden="true" />} disabled={collecting || activeJobs.some((job) => job.source_id === source.id)} onClick={() => onCollect([source.id])}>采集一次</Button></div>
     </article>)}</div>
-    <div className="data-section-intro data-jobs-heading"><div><Title level={4}>最近采集任务</Title><Paragraph className="data-caption">时间为北京时间。</Paragraph></div></div>
+    <div className="data-section-intro data-jobs-heading"><Title level={4}>最近采集任务</Title><Text className="data-caption">北京时间</Text></div>
     <Table size="small" rowKey="id" loading={jobs.isLoading} dataSource={jobs.data?.items || EMPTY} scroll={{ x: 760 }} pagination={{ pageSize: 8, hideOnSinglePage: true }} columns={[
       { title: "来源", key: "source", render: (_, job) => sources.find((source) => source.id === job.source_id)?.name || job.source_id },
       { title: "状态", key: "status", render: (_, job) => <Status item={job} /> },

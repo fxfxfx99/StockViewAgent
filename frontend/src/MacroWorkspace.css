@@ -2,9 +2,9 @@
 .macro-content { width: 100%; max-width: var(--sva-content-max); min-width: 0; margin: 0 auto; padding: var(--sva-page-padding) var(--sva-page-padding) 48px; }
 .macro-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 16px; }
 .macro-eyebrow { color: var(--sva-text-tertiary); font-size: var(--sva-font-xs); letter-spacing: 1px; }
-.macro-heading h1 { margin: 8px 0; font-size: var(--sva-title-size); font-weight: 650; letter-spacing: -.6px; line-height: 1.3; }
+.macro-heading h1 { margin: 0; font-size: var(--sva-title-size); font-weight: 650; letter-spacing: -.6px; line-height: 1.3; }
 .macro-heading p { color: var(--sva-text-secondary); margin: 0; }
-.macro-heading-links { display: flex; gap: 20px; white-space: nowrap; font-size: var(--sva-font-sm); }
+.macro-heading-links { display: flex; flex-wrap: wrap; gap: 8px 16px; white-space: nowrap; font-size: var(--sva-font-sm); }
 .macro-tabs > .ant-tabs-nav { margin-bottom: 20px; }
 .macro-controls { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
 .macro-control { width: 130px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -12,7 +12,7 @@
 .macro-control .ant-select, .macro-control .ant-input-number { width: 100%; }
 .macro-index-control { width: 230px; }
 .macro-group-control { width: 210px; }
-.macro-card { border: 1px solid var(--sva-separator); border-radius: var(--sva-radius); padding: var(--sva-space-6); background: var(--sva-surface); min-width: 0; }
+.macro-card { border: 1px solid var(--sva-separator); border-radius: var(--sva-radius); padding: var(--sva-space-5); background: var(--sva-surface); min-width: 0; }
 .macro-card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
 .macro-card-heading h2, .macro-section-heading h2 { font-size: var(--sva-font-lg); font-weight: 600; margin: 0; }
 .macro-card-heading p { color: var(--sva-text-secondary); font-size: var(--sva-font-sm); margin: 6px 0 0; }
@@ -103,15 +103,15 @@
 
 /* Keep selection, quote context and chart controls in a single visual rhythm. */
 .macro-tabs > .ant-tabs-nav { margin-bottom: 16px; }
-.macro-controls { gap: 16px; padding: 14px 18px; margin-bottom: 16px; border: 1px solid var(--sva-separator); border-radius: 12px; background: var(--sva-surface); }
+.macro-controls { gap: 12px; padding: 12px 16px; margin-bottom: 16px; border: 1px solid var(--sva-separator); border-radius: 12px; background: var(--sva-surface); }
 .macro-group-control { width: auto; margin-right: auto; }
 .macro-period-control { width: auto; }
 .macro-control .ant-segmented { white-space: nowrap; }
-.macro-chart-card { border-radius: 12px; padding: 22px 24px 16px; }
-.macro-card-heading { margin-bottom: 18px; align-items: center; }
+.macro-chart-card { border-radius: 12px; padding: 18px 20px 14px; }
+.macro-card-heading { margin-bottom: 14px; align-items: center; }
 .macro-card-heading p { font-size: 12px; }
 .macro-chart-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.macro-quotes { align-items: center; gap: 24px; padding-bottom: 18px; margin-bottom: 0; }
+.macro-quotes { align-items: center; gap: 20px; padding-bottom: 14px; margin-bottom: 0; }
 .macro-quotes strong { font-size: 22px; letter-spacing: -.4px; }
 .macro-quotes .macro-primary-quote strong { font-size: 32px; line-height: 1.25; }
 .macro-quotes .macro-date-stat { font-size: 17px; }
@@ -129,7 +129,7 @@
 .macro-chart-details .macro-chart-meta { margin: 8px 0 0; }
 .macro-chart-details .macro-footnote { margin-top: 8px; }
 .macro-panel-stack { gap: 16px; }
-.macro-collection-disclosure { border: 1px solid var(--sva-separator); border-radius: 12px; background: var(--sva-surface); padding: 16px 22px; }
+.macro-collection-disclosure { border: 1px solid var(--sva-separator); border-radius: 12px; background: var(--sva-surface); padding: 12px 18px; }
 .macro-collection-disclosure > summary { color: var(--sva-text); font-size: 13px; }
 .macro-collection-disclosure > summary > span { color: var(--sva-text-tertiary); margin-left: 16px; font-size: 12px; }
 .macro-collection-disclosure .macro-collection { border: 0; padding: 20px 0 0; background: transparent; }

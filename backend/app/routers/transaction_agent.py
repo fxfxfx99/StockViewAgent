@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.deps.auth import get_current_user
 from app.deps.auth import require_admin
-from app.services import strategy_knowledge_service, transaction_agent_service
+from app.services import strategy_knowledge_service, strategy_workspace_service, transaction_agent_service
+from app.services.strategy_workspace_service import KnowledgeDocumentInput, RAGConfigInput, RetrievalInput
 from app.storage.users_store import UserRecord
 
 router = APIRouter(prefix="/api/transaction-agent", tags=["transaction-agent"])
@@ -16,6 +17,83 @@ router = APIRouter(prefix="/api/transaction-agent", tags=["transaction-agent"])
 def transaction_agent_strategies(_: Annotated[UserRecord, Depends(get_current_user)]):
     """TransactionAgent 策略清单与本地资源状态。"""
     return transaction_agent_service.resources_status()
+
+
+@router.get("/strategies/{strategy_id}")
+def strategy_workspace(strategy_id: str, user: Annotated[UserRecord, Depends(get_current_user)]):
+    """独立策略介绍、当前用户知识库与检索配置；读取不触发外部采集。"""
+    try:
+        return strategy_workspace_service.get_workspace(user.id, strategy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+
+
+@router.put("/strategies/{strategy_id}/rag")
+def update_strategy_rag(
+    strategy_id: str, payload: RAGConfigInput, user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    try:
+        return strategy_workspace_service.save_config(user.id, strategy_id, payload.model_dump())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+
+
+@router.post("/strategies/{strategy_id}/knowledge", status_code=201)
+def create_strategy_document(
+    strategy_id: str, payload: KnowledgeDocumentInput, user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    try:
+        return strategy_workspace_service.save_document(user.id, strategy_id, payload.model_dump())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+
+
+@router.put("/strategies/{strategy_id}/knowledge/{document_id}")
+def update_strategy_document(
+    strategy_id: str, document_id: str, payload: KnowledgeDocumentInput,
+    user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    try:
+        return strategy_workspace_service.save_document(user.id, strategy_id, payload.model_dump(), document_id=document_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+
+
+@router.delete("/strategies/{strategy_id}/knowledge/{document_id}")
+def remove_strategy_document(
+    strategy_id: str, document_id: str, user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    try:
+        return strategy_workspace_service.delete_document(user.id, strategy_id, document_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+
+
+@router.post("/strategies/{strategy_id}/retrieve")
+def preview_strategy_retrieval(
+    strategy_id: str, payload: RetrievalInput, user: Annotated[UserRecord, Depends(get_current_user)],
+):
+    try:
+        return strategy_workspace_service.retrieve_strategy_knowledge(user.id, strategy_id, **payload.model_dump())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+
+
+@router.post("/strategies/{strategy_id}/refresh-public")
+async def refresh_strategy_public_knowledge(
+    strategy_id: str, user: Annotated[UserRecord, Depends(require_admin)],
+    limit: int = Query(default=8, ge=1, le=30),
+):
+    """显式更新选定策略的共享公开资料，下一次分析读取新版本。"""
+    try:
+        profile = strategy_workspace_service.get_profile(strategy_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0]) from exc
+    try:
+        result = await strategy_knowledge_service.refresh_public_sources(limit=limit, strategy=profile["name"])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"更新策略公开资料失败：{exc!s}") from exc
+    return {**strategy_workspace_service.get_workspace(user.id, strategy_id), "refresh_result": result}
 
 
 @router.get("/knowledge/status")

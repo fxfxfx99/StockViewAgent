@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Divider, Modal, Progress, Row, Space, Spin, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
@@ -8,6 +9,7 @@ import { safeUrl } from "./components/format.js";
 import { useAuth } from "./AuthContext.jsx";
 import { ThesisComposer } from "./TrackingComponents.jsx";
 import { strategyEvidence } from "./trackingViewModel.js";
+import { strategyDate, strategyRetrievalSummary, strategyWorkspacePath } from "./strategyWorkspaceViewModel.js";
 
 const { Text, Paragraph } = Typography;
 
@@ -42,6 +44,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
     return displayName && symbol ? raw.replaceAll(symbol, displayName) : raw;
   };
   const selectedDetail = selectedView?.detailed_analysis || {};
+  const selectedRetrieval = strategyRetrievalSummary(selectedView?.metadata?.knowledge_retrieval);
 
   return (
     <Card
@@ -54,6 +57,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
       extra={
         <Space size={12} wrap>
           {headerControls}
+          <Link to="/strategies">策略与知识库</Link>
           <Button size="small" type="text" icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => query.refetch()}>
             刷新
           </Button>
@@ -65,13 +69,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
           <Alert type="error" showIcon message={api.getApiErrorMessage(query.error)} />
         ) : null}
 
-        {strategies.length ? (
-          <div className="sva-summary-row">
-            <span>评分表示规则信号强度。</span>
-          </div>
-        ) : null}
-
-        <Row gutter={[16, 16]}>
+        <Row gutter={[12, 12]}>
           {strategies.map((view) => {
             const meta = directionMeta(view.direction);
             return (
@@ -79,50 +77,46 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
                 <div
                   className="ex-transaction-agent-view"
                   role="button"
+                  aria-label={`${view.strategy}：查看分析`}
                   tabIndex={0}
                   onClick={() => setSelectedView(view)}
                   onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       setSelectedView(view);
                     }
                   }}
                 >
-                  <Space wrap align="center" style={{ width: "100%", justifyContent: "space-between" }}>
-                    <Space size={6}>
-                      <Text strong>{view.strategy}</Text>
-                      <Tag color={meta.color}>{meta.label}</Tag>
-                    </Space>
-                    <Text type="secondary">{view.timeframe}</Text>
-                  </Space>
+                  <div className="ex-transaction-agent-card-heading">
+                    <Text strong>{view.strategy}</Text>
+                    <Tag color={meta.color}>{meta.label}</Tag>
+                  </div>
+                  <div className="ex-transaction-agent-meta"><span>{view.timeframe}</span><span>信号强度 {Number(view.score || 0)} / 100</span></div>
                   <Progress
                     percent={Number(view.score || 0)}
                     size="small"
+                    showInfo={false}
                     status={scoreStatus(Number(view.score || 0))}
-                    style={{ marginTop: 8, marginBottom: 8 }}
+                    style={{ marginTop: 5, marginBottom: 10 }}
                   />
-                  <Paragraph style={{ marginBottom: 12 }}>
+                  <Paragraph className="ex-transaction-agent-viewpoint">
                     {fmtText(view.viewpoint)}
                   </Paragraph>
-                  <div className="ex-transaction-agent-list">
-                    {(view.reasons || []).slice(0, 2).map((x, i) => (
-                      <Text key={`r-${i}`} type="secondary">
-                        {fmtText(x)}
-                      </Text>
-                    ))}
+                  <div className="ex-transaction-agent-card-footer">
+                    <Button
+                      type="link"
+                      size="small"
+                      className="ex-transaction-agent-detail-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedView(view);
+                      }}
+                    >
+                      查看分析
+                    </Button>
+                    {view.strategy_id ? <Link to={strategyWorkspacePath(view.strategy_id)} onClick={(event) => event.stopPropagation()}>介绍与知识库</Link> : null}
                   </div>
-                  <Text className="ex-transaction-agent-action">{fmtText(view.action_suggestion)}</Text>
-                  <Button
-                    type="link"
-                    size="small"
-                    className="ex-transaction-agent-detail-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedView(view);
-                    }}
-                  >
-                    查看分析
-                  </Button>
                 </div>
               </Col>
             );
@@ -148,7 +142,7 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
             </Space>
           ) : null
         }
-        footer={<Button type="primary" onClick={() => { pendingSaveView.current = { view: selectedView, evidence: strategyEvidence(selectedView, data) }; setSelectedView(null); }}>保存为关注判断</Button>}
+        footer={<Space wrap>{selectedView?.strategy_id ? <Link to={strategyWorkspacePath(selectedView.strategy_id)}>介绍与知识库</Link> : null}<Button type="primary" onClick={() => { pendingSaveView.current = { view: selectedView, evidence: strategyEvidence(selectedView, data) }; setSelectedView(null); }}>保存为关注判断</Button></Space>}
         width={880}
         onCancel={() => { pendingSaveView.current = null; setSelectedView(null); }}
         afterClose={() => { const view = pendingSaveView.current; pendingSaveView.current = null; if (view) setSavingView(view); }}
@@ -158,6 +152,8 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
           <div className="ex-transaction-agent-detail">
             <Paragraph>{fmtText(selectedDetail.headline || selectedView.viewpoint)}</Paragraph>
             <Text type="secondary">{selectedDetail.score_interpretation}</Text>
+
+            {selectedRetrieval ? <details className="ex-transaction-agent-retrieval"><summary>{selectedView.metadata?.knowledge_retrieval?.enabled === false ? "本次未启用知识检索" : `本次引用 ${selectedRetrieval.retrieved} 份策略资料`} · 截止 {strategyDate(selectedRetrieval.asOf)}（北京）</summary><div>知识版本 <Text code>{selectedRetrieval.version}</Text>{selectedView.metadata?.rag_config_version !== undefined ? ` · 配置版本 ${selectedView.metadata.rag_config_version}` : ""}</div>{selectedRetrieval.stale || selectedRetrieval.afterCutoff ? <div>超出时效 {selectedRetrieval.stale} 份 · 截止日期后不可用 {selectedRetrieval.afterCutoff} 份</div> : null}<div>新资料与配置在下一次刷新分析时生效；历史分析保留当时的资料与配置。</div></details> : null}
 
             {(selectedDetail.signal_checks || selectedView.reasons || []).length ? <><Divider orientation="left">信号核查</Divider>
             <ul>
@@ -196,6 +192,8 @@ export default function TransactionAgentPanel({ symbol, displayName = "", asOf =
                       <Text>{src.title || "本地规则"}</Text>
                     )}
                     {src.publisher ? <Text type="secondary"> · {src.publisher}</Text> : null}
+                    {src.version ? <Text type="secondary"> · 版本 {src.version}</Text> : null}
+                    {src.updated_at ? <Text type="secondary"> · 更新 {strategyDate(src.updated_at)}（北京）</Text> : null}
                   </div>
                 ))}
             </div></> : null}

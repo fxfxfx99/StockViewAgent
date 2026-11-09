@@ -625,10 +625,14 @@ BOOK_NOTES: list[dict[str, Any]] = [
 ]
 
 
-def seed_sources() -> dict[str, Any]:
+def seed_sources(*, strategy: str | None = None) -> dict[str, Any]:
     for source in PUBLIC_SOURCES:
+        if strategy is not None and strategy not in (source.get("strategy_tags") or []):
+            continue
         store.upsert_source(source)
     for note in BOOK_NOTES:
+        if strategy is not None and note["strategy"] != strategy:
+            continue
         source = next((s for s in PUBLIC_SOURCES if s["id"] == note["source_id"]), {})
         store.upsert_item(
             {
@@ -825,7 +829,7 @@ def _strategy_sources() -> list[dict[str, str]]:
 
 
 def synthesize_strategy(strategy: str) -> dict[str, Any]:
-    seed_sources()
+    seed_sources(strategy=strategy)
     items = [item for item in store.query_strategy(strategy, limit=12) if item.get("source_id") != "strategy_knowledge_synthesis"]
     source_id = "strategy_knowledge_synthesis"
     store.upsert_source(
@@ -835,7 +839,7 @@ def synthesize_strategy(strategy: str) -> dict[str, Any]:
             "source_type": "synthesis",
             "publisher": "StockViewAgent",
             "language": "zh",
-            "strategy_tags": [strategy],
+            "strategy_tags": [s["name"] for s in _strategy_sources()],
             "priority": 90,
             "copyright_note": "Derived notes from registered metadata, local notes and short public excerpts.",
         }
@@ -888,14 +892,20 @@ def strengthen_all_strategies() -> dict[str, Any]:
     return {"items": out, **store.status()}
 
 
-async def refresh_public_sources(*, limit: int = 8, retry_forbidden: bool = False) -> dict[str, Any]:
-    seed_sources()
+async def refresh_public_sources(
+    *, limit: int = 8, retry_forbidden: bool = False, strategy: str | None = None
+) -> dict[str, Any]:
+    if strategy is not None and strategy not in {s["name"] for s in _strategy_sources()}:
+        raise ValueError(f"未知策略: {strategy}")
+    seed_sources(strategy=strategy)
     run_id = store.start_refresh_run()
     checked = 0
     upserted = 0
     errors: list[dict[str, Any]] = []
     sources = []
     for source in store.list_sources():
+        if strategy is not None and strategy not in (source.get("strategy_tags") or []):
+            continue
         if not source.get("url") or source.get("access_policy") == "metadata_only":
             continue
         if not str(source.get("url") or "").startswith(("http://", "https://")):
@@ -907,6 +917,13 @@ async def refresh_public_sources(*, limit: int = 8, retry_forbidden: bool = Fals
         ):
             continue
         sources.append(source)
+    # Rotate through every eligible source; priority only breaks ties between
+    # sources checked at the same time (including never-checked sources).
+    sources.sort(key=lambda source: (
+        source.get("last_checked_at") or "",
+        -int(source.get("priority") or 50),
+        source["id"],
+    ))
     sources = sources[: max(1, int(limit))]
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, headers={"User-Agent": _UA}, follow_redirects=True) as client:
         for source in sources:
@@ -915,13 +932,15 @@ async def refresh_public_sources(*, limit: int = 8, retry_forbidden: bool = Fals
                 resp = await client.get(source["url"])
                 resp.raise_for_status()
                 excerpt = _strip_html(resp.text)[:_MAX_EXCERPT_CHARS]
-                tags = source.get("strategy_tags") or []
-                for strategy in tags:
-                    note = _summarize_excerpt(excerpt, strategy, source["title"])
+                if not excerpt:
+                    raise ValueError("公开来源未返回可用文本，保留已有知识")
+                tags = [strategy] if strategy is not None else source.get("strategy_tags") or []
+                for target_strategy in tags:
+                    note = _summarize_excerpt(excerpt, target_strategy, source["title"])
                     store.upsert_item(
                         {
                             "source_id": source["id"],
-                            "strategy": strategy,
+                            "strategy": target_strategy,
                             "title": source["title"],
                             "summary": note["summary"],
                             "key_points": note["key_points"],
@@ -944,13 +963,14 @@ async def refresh_public_sources(*, limit: int = 8, retry_forbidden: bool = Fals
         items_upserted=upserted,
         errors=errors,
     )
-    synth = strengthen_all_strategies()
+    synth = {"items": [synthesize_strategy(strategy)]} if strategy is not None else strengthen_all_strategies()
     return {
         "run_id": run_id,
         "sources_checked": checked,
         "items_upserted": upserted,
         "synthesized_strategies": len(synth.get("items") or []),
         "errors": errors,
+        **({"strategy": strategy} if strategy is not None else {}),
         **store.status(),
     }
 

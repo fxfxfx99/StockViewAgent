@@ -108,7 +108,7 @@ function OverseasNewsContent() {
     <AppToolbar active="news" user={user} authRequired={authRequired} onLogout={logout} settingsAction={<ConfigConsoleButton isAdmin={user?.role === "admin"} />} />
     <Layout.Content className="overseas-content">
       <div className="overseas-heading">
-        <div><h1>海外快讯</h1><p>Reuters、Bloomberg、Benzinga、WSJ、FT 等财经消息。</p></div>
+        <div><h1>海外快讯</h1><p>公开财经资讯，可能延迟，不含付费终端完整实时流。</p></div>
         {user?.role === "admin" ? <Link to="/data">后台采集设置 ↗</Link> : null}
       </div>
 
@@ -119,7 +119,6 @@ function OverseasNewsContent() {
         <span>最近采集 {overseasTime(status.data?.last_cycle_at)}</span>
         <span>北京时间 UTC+8</span>
       </div>
-      <p className="overseas-disclosure">后台按独立计划采集；公开资讯不含付费终端的完整实时流。</p>
       {status.isError ? <Alert className="overseas-alert" type="warning" showIcon message={`来源状态读取失败：${api.getApiErrorMessage(status.error)}`} /> : null}
       {resourceReason && COLLECTION_REASONS[resourceReason] ? <Alert className="overseas-alert" type="warning" showIcon message={COLLECTION_REASONS[resourceReason]} /> : null}
       <SourceHealth sources={sources} />

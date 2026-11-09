@@ -83,7 +83,13 @@ export function strategyEvidence(view, data) {
       strategy_id: view.strategy_id, strategy: view.strategy, timeframe: view.timeframe, direction: view.direction,
       score: view.score, confidence: view.confidence, viewpoint: view.viewpoint,
       reasons: view.reasons || [], risks: view.risks || [], do_not_do: view.do_not_do || [],
-      model_version: view.metadata?.model_version, signal_inputs: compactSignalInputs(view.metadata?.signal_inputs) },
+      model_version: view.metadata?.model_version, signal_inputs: compactSignalInputs(view.metadata?.signal_inputs),
+      knowledge_version: view.metadata?.knowledge_version, rag_config_version: view.metadata?.rag_config_version,
+      knowledge_references: (view.knowledge_context || []).slice(0, 20).map((item, index) => ({
+        id: item.id, version: item.version, origin: item.origin, title: String(item.title || "").slice(0, 100),
+        updated_at: item.updated_at,
+        key_points: index < 6 ? (item.key_points || []).slice(0, 1).map((point) => String(point).slice(0, 180)) : [],
+      })) },
   };
 }
 

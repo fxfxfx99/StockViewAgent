@@ -1,16 +1,17 @@
 .tracking-layout { min-height: 100vh; height: auto; background: var(--sva-bg); font-family: var(--sva-font); }
 .tracking-content { width: 100%; max-width: var(--sva-content-max); min-width: 0; margin: 0 auto; padding: var(--sva-page-padding) var(--sva-page-padding) 48px; }
-.tracking-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sva-space-6); margin-bottom: var(--sva-space-6); }
+.tracking-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sva-space-4); margin-bottom: var(--sva-space-4); }
+.tracking-heading-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
 .tracking-date { color: var(--sva-text-tertiary); font-size: var(--sva-font-xs); letter-spacing: .6px; font-variant-numeric: tabular-nums; }
-.tracking-heading h1.ant-typography { margin: var(--sva-space-2) 0; font-family: var(--sva-font-display); font-size: var(--sva-title-size); font-weight: 650; letter-spacing: -.7px; line-height: 1.3; }
+.tracking-heading h1.ant-typography { margin: 0; font-family: var(--sva-font-display); font-size: var(--sva-title-size); font-weight: 650; letter-spacing: -.7px; line-height: 1.3; }
 .tracking-heading p.ant-typography { margin-bottom: 0; font-size: var(--sva-font-base); }
 .tracking-heading-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-bottom: 2px; }
 .tracking-heading-actions .ant-btn { font-size: var(--sva-font-sm); }
-.tracking-summary-band { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: var(--sva-space-5) 0; margin-bottom: var(--sva-space-6); border: 1px solid var(--sva-separator); border-radius: 10px; background: var(--sva-surface); }
-.tracking-summary-band > div { display: flex; flex-direction: column; gap: var(--sva-space-2); padding: 0 24px; }
+.tracking-summary-band { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: var(--sva-space-3) 0; margin-bottom: var(--sva-space-4); border: 1px solid var(--sva-separator); border-radius: 10px; background: var(--sva-surface); }
+.tracking-summary-band > div { display: flex; align-items: center; justify-content: space-between; gap: var(--sva-space-3); padding: 0 20px; }
 .tracking-summary-band > div + div { border-left: 1px solid var(--sva-separator); }
 .tracking-summary-band span { color: var(--sva-text-secondary); font-size: var(--sva-font-sm); }
-.tracking-summary-band strong { color: var(--sva-text); font-size: 28px; line-height: 1.3; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tracking-summary-band strong { color: var(--sva-text); font-size: 24px; line-height: 1.3; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tracking-summary-band small { color: var(--sva-text-tertiary); font-size: var(--sva-font-xs); }
 .tracking-banner { margin-bottom: 16px; }
 .tracking-status-banner { margin-bottom: var(--sva-space-2); padding: var(--sva-space-3) var(--sva-space-4); }
@@ -18,12 +19,12 @@
 .tracking-status-lines { display: flex; gap: var(--sva-space-2) var(--sva-space-6); flex-wrap: wrap; margin: 0; padding-left: 15px; font-size: var(--sva-font-sm); line-height: var(--sva-line-height); color: var(--sva-text-secondary); }
 .tracking-status-explanations { padding-left: 18px; margin: 2px 0 12px; font-size: var(--sva-font-sm); line-height: 1.8; }
 .tracking-caption { color: var(--sva-text-secondary); font-size: var(--sva-font-sm); line-height: 1.7; }
-.tracking-main-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--sva-space-6); align-items: start; margin-top: var(--sva-space-6); }
+.tracking-main-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 28%); gap: var(--sva-space-4); align-items: start; margin-top: var(--sva-space-4); }
 .tracking-feed, .tracking-judgments { min-width: 0; }
 .tracking-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: var(--sva-space-4); }
 .tracking-section-heading h2.ant-typography { margin: 0; font-size: var(--sva-font-lg); font-weight: 600; }
 .tracking-section-heading .ant-segmented { font-size: var(--sva-font-sm); }
-.tracking-change { border: 1px solid var(--sva-separator); border-radius: 10px; background: var(--sva-surface); padding: var(--sva-space-5); margin-bottom: var(--sva-space-4); min-width: 0; }
+.tracking-change { border: 1px solid var(--sva-separator); border-radius: 10px; background: var(--sva-surface); padding: var(--sva-space-4); margin-bottom: var(--sva-space-3); min-width: 0; }
 .tracking-change.is-read h3 { color: var(--sva-text-secondary); }
 .tracking-change-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; color: var(--sva-text-tertiary); font-size: var(--sva-font-xs); margin-bottom: var(--sva-space-3); }
 .tracking-change-meta .ant-tag { margin: 0; font-size: var(--sva-font-xs); }
@@ -48,7 +49,7 @@
 .tracking-more > summary { padding: 13px 15px; border: 1px solid var(--sva-separator); border-radius: 8px; color: var(--sva-text-secondary); background: var(--sva-fill); font-size: var(--sva-font-sm); cursor: pointer; }
 .tracking-more > summary span { margin-left: 12px; color: var(--sva-text-tertiary); font-size: var(--sva-font-xs); }
 .tracking-more[open] > summary { margin-bottom: 12px; }
-.tracking-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 24px; border: 1px solid var(--sva-separator); border-radius: 10px; background: var(--sva-surface); min-height: 280px; }
+.tracking-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 32px 24px; border: 1px solid var(--sva-separator); border-radius: 10px; background: var(--sva-surface); min-height: 240px; }
 .tracking-empty-icon { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--sva-accent-soft); color: var(--sva-accent); margin-bottom: 15px; }
 .tracking-empty h3 { color: var(--sva-text); font-size: var(--sva-font-lg); margin: 0 0 var(--sva-space-2); font-weight: 600; }
 .tracking-empty p { color: var(--sva-text-secondary); font-size: var(--sva-font-base); line-height: var(--sva-line-height); max-width: 390px; margin-bottom: 18px; margin: 0 0 var(--sva-space-5); }
@@ -59,7 +60,7 @@
 .tracking-source-status > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
 .tracking-source-status .ant-typography { margin: 0; font-size: var(--sva-font-sm); }
 .tracking-card.ant-card { background: var(--sva-surface); border: 1px solid var(--sva-separator); box-shadow: none; border-radius: 10px; }
-.tracking-card > .ant-card-head { padding: 0 var(--sva-space-5); min-height: 56px; border-color: var(--sva-separator); }
+.tracking-card > .ant-card-head { padding: 0 var(--sva-space-5); min-height: 50px; border-color: var(--sva-separator); }
 .tracking-card .ant-card-head-title { font-size: var(--sva-font-lg); font-weight: 600; }
 .tracking-card .ant-card-extra .ant-btn { font-size: var(--sva-font-xs); padding-inline: 0; }
 .tracking-card > .ant-card-body { padding: 0; }
@@ -127,15 +128,15 @@
   .tracking-thesis-row:nth-child(2n) { border-left: 1px solid var(--sva-separator); }
 }
 @media (max-width: 600px) {
-  .tracking-content { padding: 24px 16px 40px; }
-  .tracking-heading { margin-bottom: 20px; }
+  .tracking-content { padding: var(--sva-page-padding) var(--sva-page-padding) 40px; }
+  .tracking-heading { margin-bottom: 16px; }
   .tracking-heading h1.ant-typography { font-size: var(--sva-title-size); line-height: 1.3; }
   .tracking-heading p.ant-typography { font-size: var(--sva-font-base); line-height: 1.8; }
   .tracking-heading-actions { width: 100%; }
   .tracking-heading-actions .ant-btn { flex: 1; padding-inline: 8px; min-height: 40px; }
-  .tracking-summary-band { padding: 16px 0; }
-  .tracking-summary-band > div { padding: 0 12px; }
-  .tracking-summary-band strong { font-size: 28px; }
+  .tracking-summary-band { padding: 12px 0; }
+  .tracking-summary-band > div { flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 12px; }
+  .tracking-summary-band strong { font-size: 24px; }
   .tracking-summary-band small { display: none; }
   .tracking-summary-band span { font-size: var(--sva-font-xs); }
   .tracking-scan-details > summary > span { display: block; margin: 5px 0 0 16px; }

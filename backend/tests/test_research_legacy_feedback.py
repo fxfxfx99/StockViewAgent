@@ -7,9 +7,11 @@ from app.storage import decision_signal_store as store
 
 
 def test_knowledge_coverage_does_not_raise_confidence(monkeypatch):
-    monkeypatch.setattr(transaction_agent_service.strategy_knowledge_service, "query_strategy_knowledge", lambda *a, **k: [{"title": "Evidence", "key_points": [], "risks": []}] * 6)
-    monkeypatch.setattr(transaction_agent_service, "_build_detailed_analysis", lambda *args: {})
-    result = transaction_agent_service._apply_knowledge_context({"strategy": "trend", "confidence": 0.55})
+    monkeypatch.setattr(transaction_agent_service.strategy_workspace_service, "retrieve_strategy_knowledge", lambda *a, **k: {
+        "documents": [{"title": "Evidence", "key_points": [], "risks": []}] * 6,
+        "metadata": {}, "config": {"enabled": True},
+    })
+    result = transaction_agent_service._apply_knowledge_context({"strategy": "中期趋势（右侧）", "strategy_id": "trend_following_mid", "confidence": 0.55})
     assert result["confidence"] == 0.55
     assert result["metadata"]["knowledge_coverage"] == {"source_count": 6, "performance_validated": False}
 

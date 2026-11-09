@@ -197,6 +197,44 @@ export async function getTransactionAgentViews(symbol, strategy, asOf) {
   return data;
 }
 
+export async function getStrategyCatalog({ signal } = {}) {
+  const { data } = await client.get("/transaction-agent/strategies", { signal });
+  return data;
+}
+
+export async function getStrategyWorkspace(strategyId, { signal } = {}) {
+  const { data } = await client.get(`/transaction-agent/strategies/${encodeURIComponent(strategyId)}`, { signal });
+  return data;
+}
+
+export async function saveStrategyRag(strategyId, body) {
+  const { data } = await client.put(`/transaction-agent/strategies/${encodeURIComponent(strategyId)}/rag`, body);
+  return data;
+}
+
+export async function saveStrategyKnowledge(strategyId, body, documentId) {
+  const path = `/transaction-agent/strategies/${encodeURIComponent(strategyId)}/knowledge`;
+  const { data } = documentId
+    ? await client.put(`${path}/${encodeURIComponent(documentId)}`, body)
+    : await client.post(path, body);
+  return data;
+}
+
+export async function deleteStrategyKnowledge(strategyId, documentId) {
+  const { data } = await client.delete(`/transaction-agent/strategies/${encodeURIComponent(strategyId)}/knowledge/${encodeURIComponent(documentId)}`);
+  return data;
+}
+
+export async function retrieveStrategyKnowledge(strategyId, body) {
+  const { data } = await client.post(`/transaction-agent/strategies/${encodeURIComponent(strategyId)}/retrieve`, body);
+  return data;
+}
+
+export async function refreshStrategyPublicKnowledge(strategyId) {
+  const { data } = await client.post(`/transaction-agent/strategies/${encodeURIComponent(strategyId)}/refresh-public`, null, { params: { limit: 8 } });
+  return data;
+}
+
 export async function getStocksMeta() {
   const { data } = await client.get("/stocks/meta");
   return data;

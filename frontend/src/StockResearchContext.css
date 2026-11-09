@@ -1,15 +1,27 @@
-.stock-research-context, .stock-financial-panel { padding: 22px; min-width: 0; }
-.stock-context-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
-.stock-context-heading h2 { font-size: var(--sva-font-lg); margin: 0; }
-.stock-context-heading p, .stock-context-note { color: var(--sva-text-secondary); font-size: var(--sva-font-xs); line-height: 1.8; overflow-wrap: anywhere; }
-.stock-context-heading p { margin: 8px 0 0; }
-.stock-context-heading > a { font-size: var(--sva-font-xs); }
-.stock-context-alert { margin-bottom: 20px; }
-.stock-context-research-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; }
-.stock-context-research-list article { padding: 16px; border: 1px solid var(--sva-separator); border-radius: var(--sva-radius-sm); }
-.stock-context-research-list article p { line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
-.stock-context-monitors { display: flex; flex-direction: column; gap: 12px; }
+.stock-research-context, .stock-financial-panel { padding: 20px; min-width: 0; }
+.stock-context-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.stock-context-heading h2, .stock-context-empty h2 { font-size: var(--sva-font-lg); margin: 0; }
+.stock-context-heading p, .stock-context-note { color: var(--sva-text-secondary); font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.stock-context-heading p { margin: 6px 0 0; }
+.stock-context-heading > a { font-size: 13px; }
+.stock-context-alert { margin-bottom: 16px; }
+.stock-context-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, .45fr); gap: 24px; }
+.stock-context-grid > section { min-width: 0; }
+.stock-context-monitor { border-left: 1px solid var(--sva-separator); padding-left: 24px; }
+.stock-context-research-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 16px; }
+.stock-context-research-list article { padding-top: 12px; border-top: 1px solid var(--sva-separator); min-width: 0; }
+.stock-context-research-list article p { line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
+.stock-context-research-list article .stock-context-heading { margin-bottom: 6px; }
+.stock-context-research-list .stock-context-heading > a { font-size: var(--sva-font-base); font-weight: 600; overflow-wrap: anywhere; }
+.stock-context-monitors { display: flex; flex-direction: column; gap: 8px; }
+.stock-context-monitors > a { display: flex; align-items: center; gap: 8px; min-height: 40px; overflow-wrap: anywhere; }
+.stock-context-monitors .ant-tag { flex-shrink: 0; margin: 0; }
+.stock-context-empty { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.stock-context-empty p { color: var(--sva-text-secondary); font-size: 13px; line-height: 1.8; margin: 6px 0 0; }
+.stock-context-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
+.stock-context-actions a { display: inline-flex; align-items: center; min-height: 40px; font-size: 13px; }
 .stock-financial-select { width: 100%; max-width: 100%; }
 .stock-financial-chart { width: 100%; max-height: 340px; min-height: 190px; color: var(--sva-text-tertiary); }
 .stock-financial-chart text { fill: currentColor; font-size: 12px; }
-@media (max-width: 760px) { .stock-context-research-list { grid-template-columns: minmax(0, 1fr); } .stock-research-context, .stock-financial-panel { padding: 16px; } }
+@media (max-width: 900px) { .stock-context-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; } .stock-context-monitor { border-left: 0; border-top: 1px solid var(--sva-separator); padding: 18px 0 0; } }
+@media (max-width: 760px) { .stock-context-research-list { grid-template-columns: minmax(0, 1fr); } .stock-research-context, .stock-financial-panel { padding: 16px; } .stock-context-empty { flex-direction: column; align-items: flex-start; gap: 10px; } }

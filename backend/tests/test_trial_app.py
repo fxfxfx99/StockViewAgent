@@ -130,11 +130,17 @@ def test_allowlist_covers_frontend_api_contract(client):
     assert len(calls) >= 25
     for method, _quote, path in calls:
         path = path.replace("${encodeURIComponent(symbol)}", "000001.SZ")
+        # saveStrategyKnowledge composes updates from its local base path.
+        path = path.replace("${path}", "/transaction-agent/strategies/fixture/knowledge")
         response = client.request(method.upper(), "/api" + path)
         # The persistent research worker belongs to the local deployment. Adding
         # its authenticated UI must not silently expose it on the public trial.
         # Overseas collection can include a configured licensed Benzinga feed;
         # adding its local page does not expose it through the public trial.
+        # Strategy knowledge and stock feature collection remain local.
+        if path.startswith("/transaction-agent/strategies") or re.fullmatch(r"/stocks/[^/]+/features(?:/(?:refresh|history))?", path):
+            assert response.status_code == 404
+            continue
         if path.startswith(("/research/", "/investment-research/", "/tracking/", "/monitoring/", "/events/", "/data-center/", "/autopilot/", "/runtime/", "/admin/data-assets", "/settings/llm", "/news/overseas", "/news/earnings", "/macro/", "/merrill-clock", "/kline-learning/", "/kline-replay/")) or (path.startswith("/market/") and not path.startswith("/market/kline/")) or (path.startswith("/stocks/") and path.endswith("/fundamentals/history")):
             assert response.status_code == 404
             continue

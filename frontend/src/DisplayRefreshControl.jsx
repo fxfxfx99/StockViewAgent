@@ -15,5 +15,5 @@ export function useDisplayPolling(userId, page, fallback = "30") {
 }
 
 export default function DisplayRefreshControl({ polling, onRefresh, refreshing, children }) {
-  return <section className="sva-display-refresh" aria-label="页面显示设置"><div><strong>页面显示设置</strong><p>页面刷新只读取已保存数据；采集计划在后台单独设置。</p>{children}</div><div className="sva-display-refresh-actions"><Select aria-label="页面显示刷新频率" value={polling.choice} onChange={polling.setChoice} options={DISPLAY_POLL_OPTIONS} /><Button onClick={onRefresh} loading={refreshing}>更新显示</Button></div></section>;
+  return <section className="sva-display-refresh" aria-label="页面显示设置"><div><strong>显示刷新</strong><p>读取已保存数据；采集计划另行设置。</p>{children}</div><div className="sva-display-refresh-actions"><Select aria-label="页面显示刷新频率" value={polling.choice} onChange={polling.setChoice} options={DISPLAY_POLL_OPTIONS} /><Button onClick={onRefresh} loading={refreshing}>更新显示</Button></div></section>;
 }

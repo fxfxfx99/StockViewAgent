@@ -2,9 +2,9 @@
   height: var(--sva-header-height);
   flex-shrink: 0;
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) auto minmax(120px, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--sva-space-5);
+  gap: var(--sva-space-3);
   padding: 0 var(--sva-page-padding);
   background: var(--sva-header-bg);
   border-bottom: 1px solid var(--sva-separator);
@@ -35,7 +35,7 @@
   color: var(--sva-text);
   white-space: nowrap;
   font-family: var(--sva-font-display);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 650;
   letter-spacing: -0.45px;
 }
@@ -46,6 +46,8 @@
 
 .sva-app-nav {
   display: flex;
+  min-width: 0;
+  justify-self: center;
   align-items: center;
   padding: 3px;
   gap: 3px;
@@ -58,7 +60,7 @@
   justify-content: center;
   align-items: center;
   gap: var(--sva-space-2);
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 6px;
   color: var(--sva-text-secondary);
   font-size: var(--sva-font-base);
@@ -90,25 +92,26 @@
 .ant-descriptions-item-content { overflow-wrap: anywhere; }
 details > summary { line-height: var(--sva-line-height); }
 
-@media (max-width: 1240px) {
-  :root { --sva-header-height: 112px; }
+@media (max-width: 1100px) {
+  :root { --sva-header-height: 105px; }
   .sva-app-toolbar {
     height: auto;
-    min-height: 108px;
+    min-height: var(--sva-header-height);
     grid-template-columns: 1fr auto;
     gap: var(--sva-space-2) var(--sva-space-3);
-    padding: 12px var(--sva-page-padding);
+    padding: 8px var(--sva-page-padding);
   }
   .sva-app-toolbar__leading { grid-column: 1; grid-row: 1; }
   .sva-app-toolbar__actions { grid-column: 2; grid-row: 1; gap: 3px; }
   .sva-app-brand { font-size: 16px; gap: 7px; }
   .sva-app-brand__mark { width: 25px; height: 25px; }
   .sva-app-nav { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
-  .sva-app-nav a { flex: 1; padding: 8px; }
+  .sva-app-nav a { flex: 1; padding: 6px 8px; }
   .sva-toolbar-divider { margin: 0 2px; }
 }
 
 @media (max-width: 600px) {
+  :root { --sva-header-height: 111px; }
   .sva-app-nav { gap: 2px; padding: 2px; overflow-x: auto; scrollbar-width: none; }
   .sva-app-nav a { flex: 1 0 auto; min-width: 60px; min-height: 40px; gap: 4px; padding-inline: 8px; font-size: var(--sva-font-xs); }
   .sva-app-nav .anticon { display: none; }

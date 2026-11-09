@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Checkbox, Layout, Progress, Tag } from "antd";
 import ArrowRightOutlined from "@ant-design/icons/es/icons/ArrowRightOutlined";
-import BookOutlined from "@ant-design/icons/es/icons/BookOutlined";
 import ExportOutlined from "@ant-design/icons/es/icons/ExportOutlined";
 import CheckCircleFilled from "@ant-design/icons/es/icons/CheckCircleFilled";
 import AppToolbar from "./AppToolbar.jsx";
@@ -123,7 +122,7 @@ function LearningWorkspace() {
   return <Layout className="sva-layout learning-page">
     <AppToolbar active="learn" user={user} authRequired={authRequired} onLogout={logout} settingsAction={<ConfigConsoleButton isAdmin={user?.role === "admin"} />} />
     <main className="learning-main">
-      <header className="learning-heading"><div className="learning-eyebrow"><BookOutlined /> 学习入门</div><h1>从你的起点开始</h1><p>先理解，再观察，逐步形成自己的判断。选一条适合当前基础的学习路径。</p></header>
+      <header className="learning-heading"><h1>学习入门</h1><p>选择适合当前基础的路径，按步骤完成练习。</p></header>
       <div className="learning-levels" role="group" aria-label="选择学习基础">
         <button type="button" aria-pressed={level === "beginner"} className={level === "beginner" ? "is-selected" : ""} onClick={() => chooseLevel("beginner")}>
           <span className="learning-levels__title">我是零基础 {level === "beginner" ? <CheckCircleFilled /> : null}</span>
@@ -143,7 +142,7 @@ function LearningWorkspace() {
         <ol className="learning-steps">{path.steps.map((step, index) => <li key={step.id} className={preferences.completed.includes(step.id) ? "is-completed" : ""}>
           <span className="learning-step-number">{String(index + 1).padStart(2, "0")}</span>
           <div className="learning-step-content"><div className="learning-step-heading"><h3>{step.title}</h3><span>{step.duration}</span></div><p>{step.text}</p><p className="learning-task"><strong>试着做：</strong>{step.task}</p>
-            <div className="learning-step-actions">{step.to ? <Link to={step.to}>{step.action} <ArrowRightOutlined /></Link> : <a href={`#resource-${step.resource}`}>查看推荐资料 <ArrowRightOutlined /></a>}<Checkbox checked={preferences.completed.includes(step.id)} onChange={(event) => toggleStep(step.id, event.target.checked)}>已完成：{step.title}</Checkbox></div>
+            <div className="learning-step-actions">{step.to ? <Link to={step.to}>{step.action} <ArrowRightOutlined /></Link> : <a href={`#resource-${step.resource}`}>查看推荐资料 <ArrowRightOutlined /></a>}<Checkbox aria-label={`已完成：${step.title}`} checked={preferences.completed.includes(step.id)} onChange={(event) => toggleStep(step.id, event.target.checked)}>完成练习</Checkbox></div>
           </div>
         </li>)}</ol>
         <p className="learning-storage-note" role="status">{saveFailed ? "当前浏览器无法保存，选择与进度仅在本次页面停留期间有效。" : "选择与进度按账户保存在当前浏览器；勾选表示完成练习，可随时取消。"}</p>

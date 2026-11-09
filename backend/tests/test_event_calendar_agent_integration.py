@@ -67,7 +67,7 @@ def test_retrieval_failure_is_explicit_and_does_not_expose_exception(monkeypatch
 
 
 def test_strategy_calendar_changes_explanation_without_manufacturing_direction(monkeypatch):
-    monkeypatch.setattr(transaction.strategy_knowledge_service, "query_strategy_knowledge", lambda *args, **kwargs: [])
+    monkeypatch.setattr(transaction.strategy_workspace_service, "retrieve_strategy_knowledge", lambda *args, **kwargs: {"documents": [], "metadata": {}, "config": {}})
     bundle = {"symbol": SYMBOL, "stock_name": "测试", "technical": {}, "fundamentals": {}, "flow": {}}
     before = transaction._score_views(bundle)
     after = transaction._score_views({**bundle, "economic_calendar": evidence()})
@@ -343,7 +343,7 @@ def test_stock_picker_keeps_thirty_candidates_and_shared_event_references(monkey
 
 
 def test_strategy_details_reference_shared_calendar_without_copying_full_documents(monkeypatch):
-    monkeypatch.setattr(transaction.strategy_knowledge_service, "query_strategy_knowledge", lambda *args, **kwargs: [])
+    monkeypatch.setattr(transaction.strategy_workspace_service, "retrieve_strategy_knowledge", lambda *args, **kwargs: {"documents": [], "metadata": {}, "config": {}})
     calendar = evidence()
     calendar["evidence_sources"][0]["text"] = "资料正文" * 1000
     views = transaction._score_views({"symbol": SYMBOL, "technical": {}, "fundamentals": {}, "flow": {},

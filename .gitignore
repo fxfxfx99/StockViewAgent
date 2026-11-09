@@ -46,4 +46,5 @@ htmlcov/
 logs/
 pids/
 .public-trial/
+.local-runtime/
 *.csv

@@ -125,6 +125,17 @@ def upsert_source(source: dict[str, Any]) -> None:
               strategy_tags_json=excluded.strategy_tags_json,
               priority=excluded.priority,
               updated_at=excluded.updated_at
+            WHERE knowledge_sources.title IS NOT excluded.title
+               OR knowledge_sources.url IS NOT excluded.url
+               OR knowledge_sources.source_type IS NOT excluded.source_type
+               OR knowledge_sources.publisher IS NOT excluded.publisher
+               OR knowledge_sources.authors IS NOT excluded.authors
+               OR knowledge_sources.year IS NOT excluded.year
+               OR knowledge_sources.language IS NOT excluded.language
+               OR knowledge_sources.access_policy IS NOT excluded.access_policy
+               OR knowledge_sources.copyright_note IS NOT excluded.copyright_note
+               OR knowledge_sources.strategy_tags_json IS NOT excluded.strategy_tags_json
+               OR knowledge_sources.priority IS NOT excluded.priority
             """,
             (
                 source["id"],
@@ -166,6 +177,12 @@ def upsert_item(item: dict[str, Any]) -> None:
               url=excluded.url,
               quality_score=excluded.quality_score,
               updated_at=excluded.updated_at
+            WHERE knowledge_items.summary IS NOT excluded.summary
+               OR knowledge_items.key_points_json IS NOT excluded.key_points_json
+               OR knowledge_items.risks_json IS NOT excluded.risks_json
+               OR knowledge_items.content_excerpt IS NOT excluded.content_excerpt
+               OR knowledge_items.url IS NOT excluded.url
+               OR knowledge_items.quality_score IS NOT excluded.quality_score
             """,
             (
                 item["source_id"],
